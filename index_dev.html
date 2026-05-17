@@ -1535,7 +1535,7 @@ const syncCustStatus=async(custId,newStatus,extraFields={},matchName,matchNo)=>{
   }catch(e){console.error('syncCustStatus error:',e);}
 };
 
-function useShared(key, def, pollMs=6000) {
+function useShared(key, def, pollMs=60000) {
   const [val, setVal] = useState(def);
   const mounted      = useRef(true);
   const localRef     = useRef(def);
