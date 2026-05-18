@@ -1409,8 +1409,9 @@ const App=()=>{
             carName:car?.name||'',
             carNum:car?.num||'',
           };
-          if(!loanerRes[selCarId])loanerRes[selCarId]=[];
-          loanerRes[selCarId]=[...loanerRes[selCarId],newRes];
+          if(!loanerRes[selCarId])loanerRes[selCarId]={};
+          const _dKey=String(s.getDate());
+          loanerRes[selCarId]={...loanerRes[selCarId],[_dKey]:newRes};
 
           if(carStore==='honten'){
             setLoanerResH(loanerRes);
@@ -1422,7 +1423,7 @@ const App=()=>{
         }
       }
     }
-  },[inspData,loanerResH,loanerResS,loanerListH,loanerListS]);
+  },[loanerListH,loanerListS]);
 
   // 現在のファイルの顧客リスト
   const currentFile=files[activeIdx];
