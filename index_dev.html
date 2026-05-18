@@ -6608,19 +6608,23 @@ function AppInner() {
       const _finalBk=modalType==='insp'
         ?`insp-${_loanerTdk}-${modalIdx}`
         :`sched-${_loanerTdk}-${modalSlot||''}`;
-      setLoanerRes(prev=>{
-        const cleaned={};
-        for(const cid of Object.keys(prev)){
-          const days={...(prev[cid]||{})};
-          Object.keys(days).forEach(d=>{if(days[d]?.bookingKey===_pldBk||days[d]?.bookingKey===_finalBk)delete days[d];});
-          cleaned[cid]=days;
-        }
-        const _newDayKey=String(startDay);
-        return{...cleaned,[carId]:{...(cleaned[carId]||{}),
-          [_newDayKey]:{id:Date.now(),fy:startYear,fm:startMonth,fd:startDay,ty:startYear,tm:startMonth,td:endDay,
-          user:finalUser,color:color||RES_COLORS[0],bookingKey:_finalBk||_pldBk,carName,carNum}
-        }};
-      });
+      // setLoanerRes を setTimeout で遅延実行（確定処理との競合を防ぐ）
+      const _loanerUpdate = {carId,startDay,endDay,startYear,startMonth,finalUser,color,_pldBk,_finalBk,carName,carNum};
+      setTimeout(()=>{
+        setLoanerRes(prev=>{
+          const cleaned={};
+          for(const cid of Object.keys(prev)){
+            const days={...(prev[cid]||{})};
+            Object.keys(days).forEach(d=>{if(days[d]?.bookingKey===_loanerUpdate._pldBk||days[d]?.bookingKey===_loanerUpdate._finalBk)delete days[d];});
+            cleaned[cid]=days;
+          }
+          const _newDayKey=String(_loanerUpdate.startDay);
+          return{...cleaned,[_loanerUpdate.carId]:{...(cleaned[_loanerUpdate.carId]||{}),
+            [_newDayKey]:{id:Date.now(),fy:_loanerUpdate.startYear,fm:_loanerUpdate.startMonth,fd:_loanerUpdate.startDay,ty:_loanerUpdate.startYear,tm:_loanerUpdate.startMonth,td:_loanerUpdate.endDay,
+            user:_loanerUpdate.finalUser,color:_loanerUpdate.color||RES_COLORS[0],bookingKey:_loanerUpdate._finalBk||_loanerUpdate._pldBk,carName:_loanerUpdate.carName,carNum:_loanerUpdate.carNum}
+          }};
+        });
+      }, 0);
       cleanData.rentalLabel='';
       cleanData.rentalCarId=null;
       setPendingLoanerData(null);
