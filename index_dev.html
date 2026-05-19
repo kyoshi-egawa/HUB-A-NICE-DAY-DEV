@@ -6601,14 +6601,32 @@ function AppInner() {
     if(pendingLoanerData){
       const {carId,startDay,endDay,startYear,startMonth,user,color,bookingKey:_pldBk,carName,carNum}=pendingLoanerData;
       const finalUser=cleanData.name||user;
-      const _loanerTdk=formData._targetDk||localTargetDkRef.current||modalDkRef.current
+      const _loanerTdk=formData._targetDk||modalDkRef.current
         ||(selDateRef.current instanceof Date
             ?`${selDateRef.current.getFullYear()}-${selDateRef.current.getMonth()}-${selDateRef.current.getDate()}`
             :'');
       const _finalBk=modalType==='insp'
         ?`insp-${_loanerTdk}-${modalIdx}`
         :`sched-${_loanerTdk}-${modalSlot||''}`;
-      // [TEST] setLoanerRes をスキップして確定ボタンのフリーズを診断
+      // pendingLoanerDataのloanerRes保存（setTimeoutで非同期化してフリーズ防止）
+      const _lu = {carId,startDay,endDay,startYear,startMonth,finalUser,color:color||RES_COLORS[0],
+        bk:_finalBk||_pldBk, carName, carNum};
+      setTimeout(()=>setLoanerRes(prev=>{
+        const cleaned={};
+        for(const cid of Object.keys(prev)){
+          const days={...(prev[cid]||{})};
+          Object.keys(days).forEach(d=>{
+            if(days[d]?.bookingKey===_lu.bk||days[d]?.bookingKey===_pldBk)delete days[d];
+          });
+          cleaned[cid]=days;
+        }
+        return{...cleaned,[_lu.carId]:{...(cleaned[_lu.carId]||{}),
+          [String(_lu.startDay)]:{id:Date.now(),fy:_lu.startYear,fm:_lu.startMonth,
+          fd:_lu.startDay,ty:_lu.startYear,tm:_lu.startMonth,td:_lu.endDay,
+          user:_lu.finalUser,color:_lu.color,bookingKey:_lu.bk,
+          carName:_lu.carName,carNum:_lu.carNum}
+        }};
+      }), 0);
       cleanData.rentalLabel='';
       cleanData.rentalCarId=null;
       setPendingLoanerData(null);
