@@ -1413,12 +1413,35 @@ const App=()=>{
           const _dKey=String(s.getDate());
           loanerRes[selCarId]={...loanerRes[selCarId],[_dKey]:newRes};
 
+          // prev ベースでマージして保存（他の予約を消さない）
           if(carStore==='honten'){
-            setLoanerResH(loanerRes);
-            sSet(resKey,loanerRes);
+            setLoanerResH(prev=>{
+              const merged=JSON.parse(JSON.stringify(prev||{}));
+              // 同顧客の古いエントリをクリア
+              for(const k of Object.keys(merged)){
+                const days={...(merged[k]||{})};
+                Object.keys(days).forEach(d=>{if(days[d]?.custId===customer.custId)delete days[d];});
+                merged[k]=days;
+              }
+              // 新しいエントリを追加
+              if(!merged[selCarId])merged[selCarId]={};
+              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:newRes};
+              sSet(resKey,merged);
+              return merged;
+            });
           }else{
-            setLoanerResS(loanerRes);
-            sSet(resKey,loanerRes);
+            setLoanerResS(prev=>{
+              const merged=JSON.parse(JSON.stringify(prev||{}));
+              for(const k of Object.keys(merged)){
+                const days={...(merged[k]||{})};
+                Object.keys(days).forEach(d=>{if(days[d]?.custId===customer.custId)delete days[d];});
+                merged[k]=days;
+              }
+              if(!merged[selCarId])merged[selCarId]={};
+              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:newRes};
+              sSet(resKey,merged);
+              return merged;
+            });
           }
         }
       }
