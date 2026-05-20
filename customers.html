@@ -1450,7 +1450,8 @@ const App=()=>{
               }
               // 新しいエントリを追加
               if(!merged[selCarId])merged[selCarId]={};
-              const _ci=Object.keys(merged[selCarId]).length%RES_COLORS.length;
+              // custIdのハッシュで色を決定（loanerResHの件数に依存しない）
+              const _ci=customer.custId?[...String(customer.custId)].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length:0;
               merged[selCarId]={...merged[selCarId],[String(s.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
               sSet(resKey,merged);
               return merged;
@@ -1464,7 +1465,7 @@ const App=()=>{
                 merged[k]=days;
               }
               if(!merged[selCarId])merged[selCarId]={};
-              const _ci=Object.keys(merged[selCarId]).length%RES_COLORS.length;
+              const _ci=customer.custId?[...String(customer.custId)].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length:0;
               merged[selCarId]={...merged[selCarId],[String(s.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
               sSet(resKey,merged);
               return merged;
