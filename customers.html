@@ -1128,8 +1128,25 @@ const App=()=>{
           for(const fi of fileIndex){
             loadFileChunked(fi.name).then(f=>{
               if(f){
-                localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(f));
+                // GASキャッシュが古い場合でもローカルの予約状態を守る
                 setFiles(prev=>{
+                  const existing=prev.find(p=>p.name===f.name);
+                  if(existing){
+                    // ローカルのconfirm/tempをGASの古いデータで上書きしない
+                    const merged={...f,customers:f.customers.map(fc=>{
+                      const lc=existing.customers.find(c=>c.custId===fc.custId);
+                      if(!lc)return fc;
+                      // ローカルの方がステータスが進んでいれば保持
+                      const priority={confirm:3,temp:2,new_car:2,cancel:1,none:0};
+                      const lp=priority[lc.status||'none']||0;
+                      const fp=priority[fc.status||'none']||0;
+                      return lp>fp?lc:fc;
+                    })};
+                    localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(merged));
+                    return prev.map(p=>p.name===f.name?merged:p);
+                  }
+                  localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(f));
+                  return [...prev,f];
                   const i=prev.findIndex(x=>x.name===f.name);
                   if(i>=0){const n=[...prev];n[i]=f;return n;}
                   return[...prev,f];
