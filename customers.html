@@ -80,6 +80,7 @@ const deleteFileFromCache=(file)=>{
   const sn=safeName(file.name);
   try{localStorage.removeItem('hub-cf-'+sn);}catch(e){}
 };
+const RES_COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#e11d48','#14b8a6','#a855f7'];
 
 const COURSES=[
   {id:1,name:'マッハ車検',  short:'マ',color:'#b91c1c',bg:'#fca5a5'},
@@ -1429,7 +1430,7 @@ const App=()=>{
             custId:customer.custId,
             fy:s.getFullYear(),fm:s.getMonth(),fd:s.getDate(),
             ty:e.getFullYear(),tm:e.getMonth(),td:e.getDate(),
-            color:'#3b82f6',
+            color:RES_COLORS[Object.keys(loanerRes[selCarId]||{}).length%RES_COLORS.length],
             carName:car?.name||'',
             carNum:car?.num||'',
           };
