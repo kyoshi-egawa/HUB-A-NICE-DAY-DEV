@@ -1281,6 +1281,9 @@ const App=()=>{
         return {...f,customers:custs};
       });
       filesRef.current = next; // filesRefを同期
+      // GASに保存してスケジュール切替後も青網掛けを維持
+      const _updFile=next.find(f=>f.customers?.some(c=>c.custId===customer.custId));
+      if(_updFile) saveFileChunked(_updFile).catch(()=>{});
       return next;
     });
 
