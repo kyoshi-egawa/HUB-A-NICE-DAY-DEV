@@ -1430,7 +1430,7 @@ const App=()=>{
             custId:customer.custId,
             fy:s.getFullYear(),fm:s.getMonth(),fd:s.getDate(),
             ty:e.getFullYear(),tm:e.getMonth(),td:e.getDate(),
-            color:RES_COLORS[Object.keys(loanerRes[selCarId]||{}).length%RES_COLORS.length],
+            color:null, // setLoanerResH/S 内で計算
             carName:car?.name||'',
             carNum:car?.num||'',
           };
@@ -1450,7 +1450,8 @@ const App=()=>{
               }
               // 新しいエントリを追加
               if(!merged[selCarId])merged[selCarId]={};
-              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:newRes};
+              const _ci=Object.keys(merged[selCarId]).length%RES_COLORS.length;
+              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
               sSet(resKey,merged);
               return merged;
             });
@@ -1463,7 +1464,8 @@ const App=()=>{
                 merged[k]=days;
               }
               if(!merged[selCarId])merged[selCarId]={};
-              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:newRes};
+              const _ci=Object.keys(merged[selCarId]).length%RES_COLORS.length;
+              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
               sSet(resKey,merged);
               return merged;
             });
