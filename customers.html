@@ -1283,7 +1283,11 @@ const App=()=>{
       filesRef.current = next; // filesRefを同期
       // GASに保存してスケジュール切替後も青網掛けを維持
       const _updFile=next.find(f=>f.customers?.some(c=>c.custId===customer.custId));
-      if(_updFile) saveFileChunked(_updFile).catch(()=>{});
+      if(_updFile){
+        saveFileChunked(_updFile).catch(()=>{});
+        // localStorageキャッシュも即時更新（タブ切替後の上書きを防ぐ）
+        try{localStorage.setItem('hub-cf-'+SAFE(_updFile.name),JSON.stringify(_updFile));}catch(e){}
+      }
       return next;
     });
 
