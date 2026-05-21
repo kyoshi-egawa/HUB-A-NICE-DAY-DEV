@@ -731,8 +731,9 @@ const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerL
   const noteRef=useRef(null);
   // モーダルを開いたとき入庫時間にフォーカス
   useEffect(()=>{
-    const t=setTimeout(()=>{setFocusField('time');timeRef.current?.focus();},150);
-    return()=>clearTimeout(t);
+    // モーダルを開いたとき最上部にスクロール（日付入力が最初のため）
+    const el=document.getElementById('booking-modal-scroll');
+    if(el) el.scrollTop=0;
   },[customer.custId]);
 
   const dynListH=(loanerListH&&loanerListH.length>0)?loanerListH:LOANERS_H;
@@ -845,7 +846,7 @@ const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerL
           </div>
           <button onClick={onClose} style={{background:'rgba(255,255,255,.15)',border:'none',borderRadius:8,padding:'6px 12px',color:'white',fontSize:13,fontWeight:700}}>✕</button>
         </div>
-        <div style={{overflowY:'auto',flex:1,padding:18}}>
+        <div id='booking-modal-scroll' style={{overflowY:'auto',flex:1,padding:18}}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:14}}>
             <div>
               <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:5,flexWrap:'wrap'}}>
