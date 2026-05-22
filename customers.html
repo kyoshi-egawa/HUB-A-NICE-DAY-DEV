@@ -365,7 +365,7 @@ const parseExcelFile=async(file)=>{
           }
 
           // コース変換
-          const courseObj=COURSES.find(c=>courseRaw.includes(c.name)||courseRaw===c.short);
+          const courseObj=COURSES.find(c=>(c.name&&courseRaw.includes(c.name))||courseRaw===c.short);
 
           // 店舗変換
           let storeId='';
