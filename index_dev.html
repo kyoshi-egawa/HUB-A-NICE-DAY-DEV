@@ -5804,35 +5804,32 @@ function AppInner() {
     };
   }, [view]);
 
-  // カレンダー表示時：当日の週行が見える位置にスクロール
+  // カレンダー表示時スクロール：当月は当日行、他月は月初を表示
   React.useEffect(()=>{
     if(view!=='calendar')return;
     const t=setTimeout(()=>{
-      // overflowY:autoのカレンダーコンテナを取得
       const cont=Array.from(document.querySelectorAll('*')).find(el=>{
         const s=window.getComputedStyle(el);
         return (s.overflowY==='auto'||s.overflowY==='scroll')&&el.scrollHeight>el.clientHeight+50&&el.children.length>=4;
       });
       if(!cont)return;
-      const today=new Date();
-      const todayD=today.getDate();
-      // 当日を含む週行を探す
+      const now=new Date();
+      const isCurrentMonth=(viewYear===now.getFullYear()&&viewMonth===now.getMonth());
+      const targetDate=isCurrentMonth?now.getDate():1;
       const rows=Array.from(cont.children);
-      const targetRow=rows.find(row=>{
-        return Array.from(row.querySelectorAll('*')).some(el=>{
+      const targetRow=rows.find(row=>
+        Array.from(row.querySelectorAll('*')).some(el=>{
           const t=el.textContent.trim();
-          return /^\d{1,2}$/.test(t)&&Number(t)===todayD;
-        });
-      });
+          return /^\d{1,2}$/.test(t)&&Number(t)===targetDate;
+        })
+      );
       if(targetRow){
-        // 当日行が見えるようにスクロール（行の少し上を表示）
         const rowTop=targetRow.offsetTop-cont.offsetTop;
-        const scrollTo=Math.max(0, rowTop-20);
-        cont.scrollTop=scrollTo;
+        cont.scrollTop=isCurrentMonth?Math.max(0,rowTop-20):0;
       }
     },150);
     return()=>clearTimeout(t);
-  },[view]);
+  },[view,viewYear,viewMonth]);
   const [scale,setScale]=useState(100);
   const [schedCollapsed,setSchedCollapsed]=useState(false); // スケジュール畳む/開く（デフォルト：開く）
 
