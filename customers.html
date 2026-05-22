@@ -1192,7 +1192,13 @@ const App=()=>{
           });
           if(!changed)return prev;
           // チャンクも更新
-          next.forEach(f=>saveFileChunked(f));
+          next.forEach(f=>{
+            saveFileChunked(f).catch(()=>{});
+            try{localStorage.setItem('hub-cf-'+SAFE(f.name),JSON.stringify(f));}catch(e){}
+          });
+            saveFileChunked(f).catch(()=>{});
+            try{localStorage.setItem('hub-cf-'+SAFE(f.name),JSON.stringify(f));}catch(e){}
+          });
           filesRef.current = next; // filesRef同期
           return next;
         });
