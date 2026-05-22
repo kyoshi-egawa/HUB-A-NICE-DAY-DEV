@@ -5814,7 +5814,7 @@ function AppInner() {
       });
       if(!cont)return;
       const now=new Date();
-      const isCurrentMonth=(viewYear===now.getFullYear()&&viewMonth===now.getMonth());
+      const isCurrentMonth=(curMonth.getFullYear()===now.getFullYear()&&curMonth.getMonth()===now.getMonth());
       const targetDate=isCurrentMonth?now.getDate():1;
       const rows=Array.from(cont.children);
       const targetRow=rows.find(row=>
@@ -5829,7 +5829,7 @@ function AppInner() {
       }
     },150);
     return()=>clearTimeout(t);
-  },[view,viewYear,viewMonth]);
+  },[view,curMonth]);
   const [scale,setScale]=useState(100);
   const [schedCollapsed,setSchedCollapsed]=useState(false); // スケジュール畳む/開く（デフォルト：開く）
 
