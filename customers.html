@@ -1139,7 +1139,7 @@ const App=()=>{
                       const lc=existing.customers.find(c=>c.custId===fc.custId);
                       if(!lc)return fc;
                       // ローカルの方がステータスが進んでいれば保持
-                      const priority={confirm:3,temp:2,new_car:2,cancel:1,none:0};
+                      const priority={confirm:3,temp:2,new_car:2,cancel:4,none:0};
                       const lp=priority[lc.status||'none']||0;
                       const fp=priority[fc.status||'none']||0;
                       return lp>fp?lc:fc;
