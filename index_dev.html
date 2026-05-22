@@ -1566,7 +1566,28 @@ function useShared(key, def, pollMs=60000) {
         if (!mounted.current || v === null || writeCount.current > 0) return;
         const cur  = JSON.stringify(localRef.current);
         const next = JSON.stringify(v);
-        if (cur !== next) { localRef.current = v; setVal(v); }
+        if (cur !== next) {
+          // idベースマージ: ローカルの方が新しいエントリは保持
+          const local = localRef.current;
+          if (local && typeof local==='object' && !Array.isArray(local) &&
+              v   && typeof v   ==='object' && !Array.isArray(v)) {
+            const mg = {...v};
+            for (const cid of Object.keys(local)) {
+              const lCar = local[cid]||{};
+              const gCar = mg[cid]||{};
+              let merged = {...gCar};
+              for (const day of Object.keys(lCar)) {
+                if (!(day in gCar) || (lCar[day]?.id||0) > (gCar[day]?.id||0)) {
+                  merged[day] = lCar[day];
+                }
+              }
+              mg[cid] = merged;
+            }
+            localRef.current = mg; setVal(mg);
+          } else {
+            localRef.current = v; setVal(v);
+          }
+        }
       }).catch(() => {});
     }, pollMs);
     return () => { if (pollTimer.current) clearInterval(pollTimer.current); };
