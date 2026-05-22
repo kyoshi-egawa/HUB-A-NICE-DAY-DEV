@@ -3563,7 +3563,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
 
   if(!isOpen) return null;
   const isInsp=type==='insp';
-  const canDelete=!isNew;
+  const canDelete=!!onDelete;
 
   // ── キーボード操作 ──────────────────────────────────────────
   const INSP_ORDER=['name','staff','car','course','tokuten','time','note'];
