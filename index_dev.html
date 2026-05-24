@@ -6977,9 +6977,12 @@ function AppInner() {
     setLoanerRes(prev=>{
       const updated={...prev};
       if(updated[loanerId]){
-        updated[loanerId]=updated[loanerId].filter(r=>r.bookingKey!==bk);
+        const days={...updated[loanerId]};
+        Object.keys(days).forEach(d=>{if(days[d]?.bookingKey===bk)delete days[d];});
+        updated[loanerId]=days;
       }
       return updated;
+    });
     });
     setPendingLoanerId(null);
   },[modalType,modalDk,modalIdx,modalSlot,setLoanerRes,deleteRentalRes]);
