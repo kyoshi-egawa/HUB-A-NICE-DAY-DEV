@@ -6839,6 +6839,7 @@ function AppInner() {
 
   const handleDeleteModal=useCallback(()=>{
     // bookingKeyを特定してloanerRes・rentalResも連動削除
+    console.log('handleDeleteModal called', {modalType, modalDk, modalIdx, modalSlot});
     const bk=modalType==='insp'
       ?`insp-${modalDk}-${modalIdx}`
       :`sched-${modalDk}-${modalSlot}`;
@@ -6865,16 +6866,6 @@ function AppInner() {
       if(cancelCustId||cancelName){
         syncCustStatus(cancelCustId,'cancel',{entryDate:'',linkedInspDate:''},cancelName,cancelNo);
       }
-      // ★custbkからも即時削除（画面の見た目を即反映）
-      setCustBookings(prev=>{
-        const next={...prev};
-        Object.keys(next).forEach(k=>{
-          if(next[k]?.formData?.custId===cancelCustId||(cancelName&&next[k]?.formData?.name===cancelName)){
-            delete next[k];
-          }
-        });
-        return next;
-      });
       // ★custbkからも即時削除（画面の見た目を即反映）
       setCustBookings(prev=>{
         const next={...prev};
