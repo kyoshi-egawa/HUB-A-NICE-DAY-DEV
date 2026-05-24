@@ -6364,7 +6364,7 @@ function AppInner() {
   // 指定baseSlotの全サブキー取得
   const getSchedSubKeys=useCallback((dk,base)=>{
     const day=schedData[dk]||{};
-    const keys=[base,...Object.keys(day).filter(k=>k.startsWith(base+'__')).sort()];
+    const keys=[...(day[base]?[base]:[]),...Object.keys(day).filter(k=>k.startsWith(base+'__')).sort()];
     return keys;
   },[schedData]);
 
