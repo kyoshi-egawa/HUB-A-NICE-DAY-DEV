@@ -1600,10 +1600,10 @@ function useShared(key, def, pollMs=60000) {
     writeCount.current += 1;
     if (writeTimer.current) clearTimeout(writeTimer.current);
     sSet(key, next).then(() => {
-      writeTimer.current = setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 4000);
+      writeTimer.current = setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 70000);
     }).catch(() => {
       setTimeout(() => sSet(key, localRef.current).catch(() => {}), 1500);
-      writeTimer.current = setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 6000);
+      writeTimer.current = setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 72000);
     });
   }, [key]);
 
