@@ -1548,7 +1548,7 @@ function useShared(key, def, pollMs=60000) {
     mounted.current = true;
     sGet(key).then(v => {
       if (!mounted.current) return;
-      if (v !== null && writeCount.current === 0) { localRef.current = v; setVal(v); }
+      if (v !== null) { localRef.current = v; if(writeCount.current === 0) setVal(v); }
       initialized.current = true;
     }).catch(() => { initialized.current = true; });
     return () => {
