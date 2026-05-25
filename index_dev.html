@@ -1476,7 +1476,7 @@ const sSet = async(k, v, retries=3) => {
 // customers-filesステータス更新（差分キー方式 - GAS1回のみ）
 const syncCustStatus=async(custId,newStatus,extraFields={},matchName,matchNo)=>{
   try{
-    // ① cust-updatesキューに積む（customers.htmlがポーリングで読む）
+    // cust-updatesキューに積む（customers.htmlがポーリングで読んで反映する）
     const update={custId,name:matchName,no:matchNo,status:newStatus,...extraFields,ts:Date.now()};
     const existing=await sGet(STOR+'cust-updates')||[];
     const next=[...existing.filter(u=>
@@ -1484,54 +1484,6 @@ const syncCustStatus=async(custId,newStatus,extraFields={},matchName,matchNo)=>{
       !(matchName&&matchNo&&u.name===matchName&&String(u.no)===String(matchNo))
     ),update];
     await sSet(STOR+'cust-updates',next);
-
-    // ② チャンクデータも直接書き換え（customers.htmlを開いていなくても反映）
-    const SAFE=n=>n.replace(/[^a-zA-Z0-9　-鿿゠-ヿ぀-ゟ]/g,'_').slice(0,30);
-    const cfIdx=await sGet(STOR+'cf-index');
-    if(!Array.isArray(cfIdx))return;
-    for(const fi of cfIdx){
-      const sn=SAFE(fi.name);
-      const chunkMeta=await sGet(STOR+'cf-'+sn+'-index');
-      if(!chunkMeta)continue;
-      for(let ci2=0;ci2<chunkMeta.chunks;ci2++){
-        const chunk=await sGet(STOR+'cf-'+sn+'-chunk-'+ci2);
-        if(!Array.isArray(chunk))continue;
-        let changed=false;
-        const newChunk=chunk.map(c=>{
-          const match=(custId&&c.custId===custId)||(matchName&&((!matchNo&&c.name===matchName)||(matchNo&&c.name===matchName&&String(c.no)===String(matchNo))));
-          if(!match)return c;
-          changed=true;
-          return{...c,status:newStatus,...extraFields};
-        });
-        if(changed){
-          await sSet(STOR+'cf-'+sn+'-chunk-'+ci2,newChunk);
-          // localStorageも即時更新（preloadによる上書きを防ぐ）
-          try{
-            const lsKey='hub-cf-'+sn;
-            const lsData=localStorage.getItem(lsKey);
-            if(lsData){
-              const parsed=JSON.parse(lsData);
-              const updatedCustomers=(parsed.customers||[]).map(c=>{
-                const match=(custId&&c.custId===custId)||(matchName&&((!matchNo&&c.name===matchName)||(matchNo&&c.name===matchName&&String(c.no)===String(matchNo))));
-                if(!match)return c;
-                return{...c,status:newStatus,...extraFields};
-              });
-              localStorage.setItem(lsKey,JSON.stringify({...parsed,customers:updatedCustomers}));
-            }
-          }catch(e){}
-          // チャンク書き換え成功 → cust-updatesキューから削除（二重適用防止）
-          try{
-            const curQ=await sGet(STOR+'cust-updates')||[];
-            const filteredQ=curQ.filter(u=>
-              !(custId&&u.custId===custId)&&
-              !(matchName&&matchNo&&u.name===matchName&&String(u.no)===String(matchNo))
-            );
-            await sSet(STOR+'cust-updates',filteredQ);
-          }catch(e2){}
-          break; // 見つかったファイルで終了
-        }
-      }
-    }
   }catch(e){console.error('syncCustStatus error:',e);}
 };
 
