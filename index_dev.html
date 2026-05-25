@@ -7984,6 +7984,7 @@ function AppInner() {
                       {TIME_SLOTS.map(slot=>{
                         // baseSlotの全サブキーを取得（既存行 + 空の基本行）
                         const subKeys=getSchedSubKeys(dk,slot);
+                        const displayKeys=subKeys.length>0?subKeys:[slot];
                         // 最後の行が空（name未入力）でない場合は+ボタン行を追加
                         const lastKey=subKeys[subKeys.length-1];
                         const lastRow=schedData[dk]?.[lastKey];
@@ -8006,7 +8007,7 @@ function AppInner() {
                         })();
                         return(
                           <React.Fragment key={slot}>
-                            {subKeys.map((subKey,si)=>{
+                            {displayKeys.map((subKey,si)=>{
                               // 畳んでいる時：予約のない行はスキップ
                               const rowData=getSchedRow(dk,subKey);
                               if(schedCollapsed&&!rowData?.name) return null;
