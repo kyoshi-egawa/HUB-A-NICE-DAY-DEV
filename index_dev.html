@@ -1500,7 +1500,7 @@ function useShared(key, def, pollMs=60000) {
     mounted.current = true;
     sGet(key).then(v => {
       if (!mounted.current) return;
-      if (v !== null) { localRef.current = v; if(writeCount.current === 0) setVal(v); }
+      if (v !== null) { localRef.current = v; setVal(v); } // 初期ロードは常に反映
       initialized.current = true;
     }).catch(() => { initialized.current = true; });
     return () => {
