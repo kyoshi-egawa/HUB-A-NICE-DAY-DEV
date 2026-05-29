@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- fixed-holiday-1778028748861 force-deploy-1777958899002 -->
+<!-- fixed-holiday-1778028748861 force-deploy-1780013738438 -->
 <html lang="ja">
 <head>
   <meta charset="UTF-8" />
@@ -1513,7 +1513,7 @@ function useShared(key, def, pollMs=60000) {
   useEffect(() => {
     if (!GAS_READY) return;
     pollTimer.current = setInterval(() => {
-      if (!mounted.current || !initialized.current || writeCount.current > 0) return;
+      if (!mounted.current || !initialized.current) return; // writeCountチェック削除済み
       sGet(key).then(v => {
         if (!mounted.current || v === null || writeCount.current > 0) return;
         const cur  = JSON.stringify(localRef.current);
