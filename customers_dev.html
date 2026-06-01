@@ -338,7 +338,7 @@ const parseExcelFile=async(file)=>{
           const dm2Book=parseExcelDate(row[cBook2f>=0?cBook2f:null]);
           const entryDate=parseExcelDate(row[cEntry>=0?cEntry:null]);
           const tokRaw =String(row[cTok>=0?cTok:null]||'').trim();
-          const courseRaw=String(row[cCourse>=0?cCourse:null]||'').trim();
+          const courseRaw=(cCourse>=0?String(row[cCourse]||''):'').trim();
           const storeRaw=String(row[cStore>=0?cStore:null]||'').trim();
           const staff  =String(row[cStaff>=0?cStaff:null]||'').trim();
           const note   =String(row[cNote>=0?cNote:null]||'').trim();
