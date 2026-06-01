@@ -1044,7 +1044,7 @@ const CustomerRow=memo(({customer,onBook,onRevive})=>{
         )}
       </td>
       <td style={{padding:'7px 6px',verticalAlign:'middle',textAlign:'center'}}>
-        {customecustomer.status!=='none'&&courseObj&&<span style={{padding:'2px 7px',background:courseObj.bg,color:courseObj.color,borderRadius:10,fontSize:11,fontWeight:700}}>{courseObj.short}</span>}
+        {customer.status!=='none'&&courseObj&&<span style={{padding:'2px 7px',background:courseObj.bg,color:courseObj.color,borderRadius:10,fontSize:11,fontWeight:700}}>{courseObj.short}</span>}
       </td>
       <td style={{padding:'7px 8px',color:'#111827',verticalAlign:'middle',fontSize:11}}>
         {customer.store==='honten'?'本店':customer.store==='sanda'?'三田店':customer.store}
@@ -1084,6 +1084,7 @@ const App=()=>{
   const [overrideOpen,setOverrideOpen]=useState([]);
   const [inspLimits,setInspLimits]=useState({});
   const fileInputRef=useRef();
+  const isPollRunningRef=useRef(false); // 並行ポーリング防止フラグ
 
   // GASからデータ取得
   useEffect(()=>{
@@ -1151,6 +1152,9 @@ const App=()=>{
 
     // cust-updatesポーリング（スケジュール側からの即時連動）
     const pollUpdates=async()=>{
+      // 前回のポーリングがまだ実行中なら即リターン（並行実行防止）
+      if(isPollRunningRef.current)return;
+      isPollRunningRef.current=true;
       try{
         const updates=await sGet(STOR+'cust-updates');
         if(!Array.isArray(updates)||updates.length===0)return;
@@ -1189,7 +1193,9 @@ const App=()=>{
           filesRef.current = next; // filesRef同期
           return next;
         });
-      }catch{}
+      }catch{}finally{
+        isPollRunningRef.current=false;
+      }
     };
     pollUpdates(); // 開いた瞬間に即時適用
     // 画面切り替え時（index.htmlから戻った瞬間）に即時反映
