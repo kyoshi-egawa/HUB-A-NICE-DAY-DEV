@@ -453,7 +453,6 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
   // Hooksはreturnの前に全て宣言する必要がある
   const [startOffset,setStartOffset]=useState(0);
   const prevEntryRef=useRef(entryDate);
-  const dragHandlerRef=useRef(null);
 
   // entryDate変化時にoffsetをリセット（useEffectで行う）
   useEffect(()=>{
@@ -462,39 +461,6 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
       setStartOffset(0);
     }
   },[entryDate]);
-
-  // ドキュメントレベルのPointer Events（マウス・タッチ共通・確実なドラッグ検出）
-  useEffect(()=>{
-    const onMove=e=>{
-      if(!dragRef.current.dragging)return;
-      const h=dragHandlerRef.current;
-      if(!h)return;
-      const el=document.elementFromPoint(e.clientX,e.clientY);
-      if(!el)return;
-      const cell=el.dataset&&el.dataset.lk?el:el.closest('[data-lk]');
-      if(!cell)return;
-      const k=cell.dataset.lk;
-      const cid=Number(cell.dataset.lcid);
-      if(cid!==dragRef.current.carId)return;
-      const allKeys=h.dates.map(d=>d.key);
-      const si=allKeys.indexOf(dragRef.current.startKey);
-      const ei=allKeys.indexOf(k);
-      if(si<0||ei<0)return;
-      const range=allKeys.slice(Math.min(si,ei),Math.max(si,ei)+1);
-      if(range.some(k2=>h.isBooked(cid,k2)))return;
-      const prev=dragRef.current.days;
-      if(range.length===prev.length&&range[0]===prev[0]&&range[range.length-1]===prev[prev.length-1])return;
-      dragRef.current.days=range;
-      h.onSelect(cid,range);
-    };
-    const onUp=()=>{dragRef.current.dragging=false;};
-    document.addEventListener('pointermove',onMove);
-    document.addEventListener('pointerup',onUp);
-    return()=>{
-      document.removeEventListener('pointermove',onMove);
-      document.removeEventListener('pointerup',onUp);
-    };
-  },[]);
 
   if(!entryDate)return(
     <div style={{padding:'16px 0',color:'#94a3b8',fontSize:12,textAlign:'center'}}>
@@ -526,7 +492,6 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
       return dn>=s&&dn<=e;
     });
   };
-  dragHandlerRef.current={dates,isBooked,onSelect};
 
   const CELL=36;
   const NAME_W=88;
@@ -587,9 +552,32 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                     onPointerDown={e=>{
                       e.preventDefault();
                       if(booked)return;
+                      e.currentTarget.setPointerCapture(e.pointerId);
                       dragRef.current={dragging:true,carId:car.id,startKey:key,days:[key]};
                       onSelect(car.id,[key]);
                     }}
+                    onPointerMove={e=>{
+                      if(!dragRef.current.dragging||dragRef.current.carId!==car.id)return;
+                      const el=document.elementFromPoint(e.clientX,e.clientY);
+                      if(!el)return;
+                      const cell=el.dataset&&el.dataset.lk?el:el.closest('[data-lk]');
+                      if(!cell)return;
+                      const k=cell.dataset.lk;
+                      const cid=Number(cell.dataset.lcid);
+                      if(cid!==dragRef.current.carId)return;
+                      const allKeys=dates.map(d=>d.key);
+                      const si=allKeys.indexOf(dragRef.current.startKey);
+                      const ei=allKeys.indexOf(k);
+                      if(si<0||ei<0)return;
+                      const range=allKeys.slice(Math.min(si,ei),Math.max(si,ei)+1);
+                      if(range.some(k2=>isBooked(car.id,k2)))return;
+                      const prev=dragRef.current.days;
+                      if(range.length===prev.length&&range[0]===prev[0]&&range[range.length-1]===prev[prev.length-1])return;
+                      dragRef.current.days=range;
+                      onSelect(car.id,range);
+                    }}
+                    onPointerUp={()=>{dragRef.current.dragging=false;}}
+                    onPointerCancel={()=>{dragRef.current.dragging=false;}}
                   >
                     {booked&&<span style={{color:'#ef4444',fontWeight:700}}>×</span>}
                     {sel&&!booked&&<span style={{color:'#1d4ed8',fontWeight:700}}>✓</span>}
