@@ -552,9 +552,8 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                       if(booked)return;
                       e.currentTarget.setPointerCapture(e.pointerId);
                       const si=dates.findIndex(d=>d.key===key);
-                      const rawLeft=e.currentTarget.getBoundingClientRect().left;
-                      const cellLeft=Math.round(rawLeft);
-                      console.log('[DOWN]',{rawLeft,cellLeft,si,clientX:e.clientX,CELL,captureOK:true});
+                      // getBoundingClientRect()はサブピクセル値を返すためMath.roundで整数化
+                      const cellLeft=Math.round(e.currentTarget.getBoundingClientRect().left);
                       dragRef.current={dragging:true,carId:car.id,startKey:key,si,cellLeft,days:[key]};
                       onSelect(car.id,[key]);
                     }}
@@ -562,7 +561,6 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                       if(!dragRef.current.dragging||dragRef.current.carId!==car.id)return;
                       const delta=e.clientX-dragRef.current.cellLeft;
                       const cellDelta=Math.floor(delta/CELL);
-                      console.log('[MOVE]',{clientX:e.clientX.toFixed(1),delta:delta.toFixed(2),cellDelta,days:dragRef.current.days.length});
                       const si=dragRef.current.si;
                       const ei=Math.max(0,Math.min(dates.length-1,si+cellDelta));
                       const startI=Math.min(si,ei),endI=Math.max(si,ei);
