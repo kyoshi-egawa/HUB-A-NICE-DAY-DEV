@@ -1057,6 +1057,29 @@ const CustomerRow=memo(({customer,onBook,onRevive})=>{
 });
 
 // ═══════════════════════════════════════════
+// エラーバウンダリ
+// ═══════════════════════════════════════════
+class ErrorBoundary extends React.Component {
+  constructor(props){super(props);this.state={error:null};}
+  static getDerivedStateFromError(e){return{error:e};}
+  render(){
+    if(this.state.error)return(
+      <div style={{padding:32,background:'#fef2f2',minHeight:'100vh',fontFamily:'monospace'}}>
+        <h2 style={{color:'#dc2626',marginBottom:12}}>レンダリングエラー（DEV）</h2>
+        <pre style={{color:'#991b1b',fontSize:12,whiteSpace:'pre-wrap',background:'#fff1f2',padding:16,borderRadius:8,border:'1px solid #fca5a5'}}>
+          {this.state.error?.message}{'\n'}{this.state.error?.stack}
+        </pre>
+        <button onClick={()=>this.setState({error:null})}
+          style={{marginTop:16,padding:'8px 20px',background:'#dc2626',color:'white',border:'none',borderRadius:8,cursor:'pointer',fontWeight:700}}>
+          再試行
+        </button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+// ═══════════════════════════════════════════
 // メインアプリ
 // ═══════════════════════════════════════════
 const App=()=>{
@@ -1657,7 +1680,7 @@ const App=()=>{
   );
 };
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);
 </script>
 </body>
 </html>
