@@ -452,6 +452,7 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
   // Hooksはreturnの前に全て宣言する必要がある
   const [startOffset,setStartOffset]=useState(0);
   const prevEntryRef=useRef(entryDate);
+  const dragHandlerRef=useRef(null); // pointermoveハンドラに最新値を渡すためのref
 
   // entryDate変化時にoffsetをリセット（useEffectで行う）
   useEffect(()=>{
@@ -460,6 +461,39 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
       setStartOffset(0);
     }
   },[entryDate]);
+
+  // ドキュメントレベルのPointer Events（マウス・タッチ共通・確実なドラッグ検出）
+  useEffect(()=>{
+    const onMove=e=>{
+      if(!dragRef.current.dragging)return;
+      const h=dragHandlerRef.current;
+      if(!h)return;
+      const el=document.elementFromPoint(e.clientX,e.clientY);
+      if(!el)return;
+      const cell=el.dataset&&el.dataset.lk?el:el.closest('[data-lk]');
+      if(!cell)return;
+      const k=cell.dataset.lk;
+      const cid=Number(cell.dataset.lcid);
+      if(cid!==dragRef.current.carId)return;
+      const allKeys=h.dates.map(d=>d.key);
+      const si=allKeys.indexOf(dragRef.current.startKey);
+      const ei=allKeys.indexOf(k);
+      if(si<0||ei<0)return;
+      const range=allKeys.slice(Math.min(si,ei),Math.max(si,ei)+1);
+      if(range.some(k2=>h.isBooked(cid,k2)))return;
+      const prev=dragRef.current.days;
+      if(range.length===prev.length&&range[0]===prev[0]&&range[range.length-1]===prev[prev.length-1])return;
+      dragRef.current.days=range;
+      h.onSelect(cid,range);
+    };
+    const onUp=()=>{dragRef.current.dragging=false;};
+    document.addEventListener('pointermove',onMove);
+    document.addEventListener('pointerup',onUp);
+    return()=>{
+      document.removeEventListener('pointermove',onMove);
+      document.removeEventListener('pointerup',onUp);
+    };
+  },[]);
 
   if(!entryDate)return(
     <div style={{padding:'16px 0',color:'#94a3b8',fontSize:12,textAlign:'center'}}>
@@ -492,12 +526,14 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
       return dn>=s&&dn<=e;
     });
   };
+  // 毎レンダーで最新の dates/isBooked/onSelect を ref に反映
+  dragHandlerRef.current={dates,isBooked,onSelect};
 
   const CELL=36;
   const NAME_W=88;
 
   return(
-    <div style={{fontSize:11,userSelect:'none'}} onMouseUp={()=>{dragRef.current.dragging=false;}}>
+    <div style={{fontSize:11,userSelect:'none'}}>
       {/* ナビゲーター */}
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,paddingLeft:NAME_W}}>
         <button onClick={()=>setStartOffset(p=>p-30)}
@@ -541,29 +577,20 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                 const sel=selCarId===car.id&&(selDays||[]).includes(key);
                 return(
                   <div key={key}
+                    data-lk={key}
+                    data-lcid={String(car.id)}
                     style={{width:CELL,minWidth:CELL,height:32,borderRight:'1px solid #e0e7ff',flexShrink:0,
                       background:booked?'#fca5a5':sel?'#bfdbfe':'transparent',
                       cursor:booked?'not-allowed':'pointer',
                       display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,
-                      outline:sel?'2px solid #3b82f6':'none'}}
-                    onMouseDown={e=>{
-                      e.preventDefault(); // ネイティブドラッグを抑止（mouseenterが確実に発火するように）
+                      outline:sel?'2px solid #3b82f6':'none',
+                      touchAction:'none'}}
+                    onPointerDown={e=>{
+                      e.preventDefault();
                       if(booked)return;
                       dragRef.current={dragging:true,carId:car.id,startKey:key,days:[key]};
                       onSelect(car.id,[key]);
                     }}
-                    onMouseEnter={()=>{
-                      if(!dragRef.current.dragging||dragRef.current.carId!==car.id)return;
-                      const allKeys=dates.map(d=>d.key);
-                      const si=allKeys.indexOf(dragRef.current.startKey);
-                      const ei=allKeys.indexOf(key);
-                      if(si<0||ei<0)return;
-                      const range=allKeys.slice(Math.min(si,ei),Math.max(si,ei)+1);
-                      if(range.some(k=>isBooked(car.id,k)))return;
-                      dragRef.current.days=range;
-                      onSelect(car.id,range);
-                    }}
-                    onMouseUp={()=>{dragRef.current.dragging=false;}}
                   >
                     {booked&&<span style={{color:'#ef4444',fontWeight:700}}>×</span>}
                     {sel&&!booked&&<span style={{color:'#1d4ed8',fontWeight:700}}>✓</span>}
