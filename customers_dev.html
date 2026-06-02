@@ -1125,6 +1125,7 @@ const App=()=>{
           }).filter(Boolean);
           if(cached.length>0){
             setFiles(cached);
+            filesRef.current=cached; // filesRef同期（初回キャッシュ）
             setGasLoading(false); // キャッシュがあれば即表示
           }
         }catch{}
@@ -1162,8 +1163,8 @@ const App=()=>{
                 localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(f));
                 setFiles(prev=>{
                   const i=prev.findIndex(x=>x.name===f.name);
-                  if(i>=0){const n=[...prev];n[i]=f;return n;}
-                  return[...prev,f];
+                  if(i>=0){const n=[...prev];n[i]=f;filesRef.current=n;return n;}
+                  const next=[...prev,f];filesRef.current=next;return next;
                 });
               }
             });
