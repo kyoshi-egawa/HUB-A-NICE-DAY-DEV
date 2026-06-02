@@ -486,7 +486,8 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
   const isBooked=(carId,key)=>{
     const [ky,km,kd]=key.split('-').map(Number);
     const dn=toNum(ky,km-1,kd);
-    return(loanerRes[carId]||[]).some(r=>{
+    const _res=loanerRes[carId];
+    return(Array.isArray(_res)?_res:[]).some(r=>{
       const s=toNum(r.fy,r.fm,r.fd),e=toNum(r.ty,r.tm,r.td);
       return dn>=s&&dn<=e;
     });
