@@ -541,8 +541,6 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                 const sel=selCarId===car.id&&(selDays||[]).includes(key);
                 return(
                   <div key={key}
-                    data-lk={key}
-                    data-lcid={String(car.id)}
                     style={{width:CELL,minWidth:CELL,height:32,borderRight:'1px solid #e0e7ff',flexShrink:0,
                       background:booked?'#fca5a5':sel?'#bfdbfe':'transparent',
                       cursor:booked?'not-allowed':'pointer',
@@ -553,23 +551,20 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                       e.preventDefault();
                       if(booked)return;
                       e.currentTarget.setPointerCapture(e.pointerId);
-                      dragRef.current={dragging:true,carId:car.id,startKey:key,days:[key]};
+                      const si=dates.findIndex(d=>d.key===key);
+                      const cellLeft=e.currentTarget.getBoundingClientRect().left;
+                      dragRef.current={dragging:true,carId:car.id,startKey:key,si,cellLeft,days:[key]};
                       onSelect(car.id,[key]);
                     }}
                     onPointerMove={e=>{
                       if(!dragRef.current.dragging||dragRef.current.carId!==car.id)return;
-                      const el=document.elementFromPoint(e.clientX,e.clientY);
-                      if(!el)return;
-                      const cell=el.dataset&&el.dataset.lk?el:el.closest('[data-lk]');
-                      if(!cell)return;
-                      const k=cell.dataset.lk;
-                      const cid=Number(cell.dataset.lcid);
-                      if(cid!==dragRef.current.carId)return;
-                      const allKeys=dates.map(d=>d.key);
-                      const si=allKeys.indexOf(dragRef.current.startKey);
-                      const ei=allKeys.indexOf(k);
-                      if(si<0||ei<0)return;
-                      const range=allKeys.slice(Math.min(si,ei),Math.max(si,ei)+1);
+                      const delta=e.clientX-dragRef.current.cellLeft;
+                      const cellDelta=Math.floor(delta/CELL);
+                      const si=dragRef.current.si;
+                      const ei=Math.max(0,Math.min(dates.length-1,si+cellDelta));
+                      const startI=Math.min(si,ei),endI=Math.max(si,ei);
+                      const range=dates.slice(startI,endI+1).map(d=>d.key);
+                      if(!range.length)return;
                       if(range.some(k2=>isBooked(car.id,k2)))return;
                       const prev=dragRef.current.days;
                       if(range.length===prev.length&&range[0]===prev[0]&&range[range.length-1]===prev[prev.length-1])return;
