@@ -550,6 +550,7 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                     onPointerDown={e=>{
                       e.preventDefault();
                       if(booked)return;
+                      if(sel){onSelect(null,[]);return;}
                       e.currentTarget.setPointerCapture(e.pointerId);
                       const si=dates.findIndex(d=>d.key===key);
                       // getBoundingClientRect()はサブピクセル値を返すためMath.roundで整数化
@@ -990,7 +991,7 @@ const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerL
             <div style={{border:'2px solid #bfdbfe',borderRadius:10,padding:8,background:'#eff6ff'}}>
               <LoanerGrid storeId={form.store} entryDate={form.entryDate} loanerRes={loanerRes}
                 loanerList={form.store==='honten'?loanerListH:loanerListS}
-                onSelect={(cid,days)=>{if(cid===selCarId){setSelCarId(null);setSelDays({});}else{setSelCarId(cid);setSelDays(days);}}}
+                onSelect={(cid,days)=>{setSelCarId(cid);setSelDays(days||[]);}}
                 selCarId={selCarId} selDays={selDays}/>
             </div>
           </div>
