@@ -497,7 +497,7 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
   const NAME_W=88;
 
   return(
-    <div style={{fontSize:11,userSelect:'none'}}>
+    <div style={{fontSize:11,userSelect:'none'}} onMouseUp={()=>{dragRef.current.dragging=false;}}>
       {/* ナビゲーター */}
       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4,paddingLeft:NAME_W}}>
         <button onClick={()=>setStartOffset(p=>p-30)}
@@ -546,7 +546,8 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                       cursor:booked?'not-allowed':'pointer',
                       display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,
                       outline:sel?'2px solid #3b82f6':'none'}}
-                    onMouseDown={()=>{
+                    onMouseDown={e=>{
+                      e.preventDefault(); // ネイティブドラッグを抑止（mouseenterが確実に発火するように）
                       if(booked)return;
                       dragRef.current={dragging:true,carId:car.id,startKey:key,days:[key]};
                       onSelect(car.id,[key]);
