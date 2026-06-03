@@ -6343,7 +6343,8 @@ function AppInner() {
       if(delCustId||delName) syncCustStatus(delCustId,'cancel',{entryDate:'',linkedInspDate:''},delName,delNo);
       return;
     }
-    if(dk&&!isNew){
+    if(dk&&isNew){
+      // 新規追加（空欄クリック）のみ閉店日をブロック。既存予約の編集は閉店日でも開く
       const parts=dk.split('-').map(Number);
       if(isClosed(new Date(parts[0],parts[1]-1,parts[2])))return;
     }
