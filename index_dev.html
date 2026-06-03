@@ -6337,6 +6337,16 @@ function AppInner() {
       setInspData(prev=>{
         const rows=[...(prev[dk]||[])].map(r=>r||blankInsp());
         rows.splice(idx,1); // 行を完全削除
+        // ★ 台数が制限内に戻ったら pendingApproval を自動解除
+        const _lim=inspLimits[dk]??6;
+        let _conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
+        for(let i=0;i<rows.length;i++){
+          const r=rows[i];
+          if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')continue;
+          if(_conf>=_lim)break;
+          if(Number(r.course)===3){const _reg=rows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;if(_reg>=3)continue;}
+          rows[i]={...rows[i]};delete rows[i].pendingApproval;_conf++;
+        }
         return{...prev,[dk]:rows.length>0?rows:[]};
       });
       // entryDate・linkedInspDateもクリア、matchName/matchNoも渡してcustId不在時も対応
@@ -6366,7 +6376,7 @@ function AppInner() {
     setPendingRentalId(savedRentalId);
     setPendingRentalRec(savedRentalRec);
     setPickMode(false);setModalOpen(true);
-  },[currentUser,inspData,schedData,locks,isClosed,acquireLock]);
+  },[currentUser,inspData,schedData,locks,isClosed,acquireLock,inspLimits,syncCustStatus]);
 
   // 代車管理から予約編集を開く
   const handleOpenBooking=useCallback((type,dk,idx,slot,bookingData)=>{
@@ -6453,6 +6463,16 @@ function AppInner() {
           if(rows[meta.existingIdx]) rows[meta.existingIdx]=blankInsp();
           // 末尾の空行を整理
           while(rows.length>0&&!rows[rows.length-1]?.name) rows.pop();
+          // ★ 台数が制限内に戻ったら pendingApproval を自動解除
+          const _lim=inspLimits[dk]??6;
+          let _conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
+          for(let i=0;i<rows.length;i++){
+            const r=rows[i];
+            if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')continue;
+            if(_conf>=_lim)break;
+            if(Number(r.course)===3){const _reg=rows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;if(_reg>=3)continue;}
+            rows[i]={...rows[i]};delete rows[i].pendingApproval;_conf++;
+          }
           return{...prev,[dk]:rows.length>0?rows:[]};
         });
         // customers-filesのステータスをcancelに更新（チャンク方式）
@@ -6825,6 +6845,16 @@ function AppInner() {
         rows[modalIdx]=blankInsp(); // スケジュールから完全削除（cancelled表示を残さない）
         // 末尾の空行を整理
         while(rows.length>0&&!rows[rows.length-1]?.name) rows.pop();
+        // ★ 台数が制限内に戻ったら pendingApproval を自動解除
+        const _lim=inspLimits[modalDk]??6;
+        let _conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
+        for(let i=0;i<rows.length;i++){
+          const r=rows[i];
+          if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')continue;
+          if(_conf>=_lim)break;
+          if(Number(r.course)===3){const _reg=rows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;if(_reg>=3)continue;}
+          rows[i]={...rows[i]};delete rows[i].pendingApproval;_conf++;
+        }
         return{...prev,[modalDk]:rows.length>0?rows:[]};
       });
       // ★顧客リストのステータスをcancelに連動
@@ -6864,7 +6894,7 @@ function AppInner() {
     });
 
     releaseLock(curLockKey);setCurLockKey(null);setModalOpen(false);
-  },[modalType,modalDk,modalIdx,modalSlot,curLockKey,releaseLock,setInspData,setSchedData,setLoanerRes,setRentalResData,inspData,syncCustStatus]);
+  },[modalType,modalDk,modalIdx,modalSlot,curLockKey,releaseLock,setInspData,setSchedData,setLoanerRes,setRentalResData,inspData,syncCustStatus,inspLimits]);
 
   // 承認ハンドラー
   const handleApprove=useCallback((dk,idx)=>{
