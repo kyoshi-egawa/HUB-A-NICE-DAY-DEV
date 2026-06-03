@@ -1100,6 +1100,7 @@ const App=()=>{
   },[]);
   const [files,setFiles]=useState([]);
   const filesRef = useRef([]); // setFilesと同期して常に最新値を保持
+  const pollUpdatesRef = useRef(null);
   const [activeIdx,setActiveIdx]=useState(0);
   const [search,setSearch]=useState('');
   const [filterStatus,setFilterStatus]=useState('all');
@@ -1189,9 +1190,6 @@ const App=()=>{
                   }
                   localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(f));
                   return [...prev,f];
-                  const i=prev.findIndex(x=>x.name===f.name);
-                  if(i>=0){const n=[...prev];n[i]=f;return n;}
-                  return[...prev,f];
                 });
               }
             });
@@ -1208,13 +1206,12 @@ const App=()=>{
       try{
         const updates=await sGet(STOR+'cust-updates');
         if(!Array.isArray(updates)||updates.length===0)return;
-        // 処理済みのものはスキップ
         if(!window.__lastPollTs) window.__lastPollTs=0;
-        const fresh=updates.filter(u=>!u.ts||u.ts>window.__lastPollTs);
-        if(fresh.length===0){ await sSet(STOR+'cust-updates',[]); return; }
-        window.__lastPollTs=Math.max(...fresh.map(u=>u.ts||0));
-        // まずキューを先にクリア（再適用を防ぐ）
-        await sSet(STOR+'cust-updates',[]);
+        // tsありのものだけを対象（古い無タイムスタンプ項目は無視してクリーンアップ）
+        const fresh=updates.filter(u=>u.ts&&u.ts>window.__lastPollTs);
+        if(fresh.length===0)return;
+        const newTs=Math.max(...fresh.map(u=>u.ts));
+        // ★ 先にstate更新（適用してからクリア：ネットワーク失敗でも再試行可能）
         let changed=false;
         setFiles(prev=>{
           const next=prev.map(f=>{
@@ -1237,14 +1234,32 @@ const App=()=>{
             saveFileChunked(f).catch(()=>{});
             try{localStorage.setItem('hub-cf-'+SAFE(f.name),JSON.stringify(f));}catch(e){}
           });
-          filesRef.current = next; // filesRef同期
+          filesRef.current=next; // filesRef同期
           return next;
         });
+        window.__lastPollTs=newTs;
+        // 処理済み（ts≤newTs）のみキューから削除。新着は残す
+        const remaining=updates.filter(u=>u.ts&&u.ts>newTs);
+        await sSet(STOR+'cust-updates',remaining.length>0?remaining:[]);
       }catch{}
     };
+    pollUpdatesRef.current=pollUpdates;
     pollUpdates(); // 開いた瞬間に即時適用
     const pollTimer=setInterval(pollUpdates,3000);
     return()=>clearInterval(pollTimer);
+  },[]);
+
+  // 画面復帰時（タブ切替・スリープ復帰）に即時リフレッシュ
+  useEffect(()=>{
+    const onVisible=()=>{
+      if(document.visibilityState!=='visible')return;
+      if(pollUpdatesRef.current) pollUpdatesRef.current();
+      sGet(STOR+'insp').then(v=>{if(v&&typeof v==='object')setInspData(v);});
+      sGet(storKey('lres','honten')).then(v=>{if(v)setLoanerResH(v);});
+      sGet(storKey('lres','sanda')).then(v=>{if(v)setLoanerResS(v);});
+    };
+    document.addEventListener('visibilitychange',onVisible);
+    return()=>document.removeEventListener('visibilitychange',onVisible);
   },[]);
 
   // Excelインポート
@@ -1354,8 +1369,8 @@ const App=()=>{
       return next;
     });
 
-    // 2. inspDataに予約追加（本予約・仮予約どちらも）
-    if(entryDate||isTemp){
+    // 2. inspDataに予約追加（本予約のみ。仮予約はリスト表示のみでスケジュールには載せない）
+    if(entryDate&&!isTemp){
       const dk=entryDate;
       if(dk){
         // index.htmlのdateKey形式に変換（"2026-3-16" ← ゼロなし）
@@ -1519,6 +1534,15 @@ const App=()=>{
         }
       }
     }
+    // 再予約時はcust-updatesの古いキャンセル通知を削除（cancel優先度コリジョン防止）
+    sGet(STOR+'cust-updates').then(updates=>{
+      if(!Array.isArray(updates)||updates.length===0)return;
+      const filtered=updates.filter(u=>
+        !(u.custId&&u.custId===customer.custId)&&
+        !(u.name&&u.name===customer.name&&String(u.no||'')===String(customer.no||''))
+      );
+      if(filtered.length!==updates.length)sSet(STOR+'cust-updates',filtered);
+    }).catch(()=>{});
   },[loanerListH,loanerListS]);
 
   // 現在のファイルの顧客リスト

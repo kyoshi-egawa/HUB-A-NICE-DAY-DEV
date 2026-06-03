@@ -6325,15 +6325,18 @@ function AppInner() {
     if(!currentUser)return;
     // 削除モード
     if(isNew==='delete'){
+      // ★ setInspData前に行データを取得（setInspData後は参照できない）
+      const delRow=(inspData[dk]||[])[idx];
+      const delCustId=delRow?.custId;
+      const delName=delRow?.name;
+      const delNo=delRow?.no;
       setInspData(prev=>{
         const rows=[...(prev[dk]||[])].map(r=>r||blankInsp());
         rows.splice(idx,1); // 行を完全削除
         return{...prev,[dk]:rows.length>0?rows:[]};
       });
-      // customers-filesチャンク連動（削除）
-      const delRow=(inspData[dk]||[])[idx];
-      const custId=delRow?.custId;
-      if(custId) syncCustStatus(custId,'cancel');
+      // entryDate・linkedInspDateもクリア、matchName/matchNoも渡してcustId不在時も対応
+      if(delCustId||delName) syncCustStatus(delCustId,'cancel',{entryDate:'',linkedInspDate:''},delName,delNo);
       return;
     }
     if(dk&&!isNew){
@@ -6453,6 +6456,16 @@ function AppInner() {
         const matchNo=cancelledRow?.no;
         if(custId||matchName){
           syncCustStatus(custId,'cancel',{entryDate:'',linkedInspDate:''},matchName,matchNo);
+          // custBookingsからも削除（handleDeleteModalとの動作を統一）
+          setCustBookings(prev=>{
+            const n={...prev};
+            Object.keys(n).forEach(k=>{
+              if((custId&&n[k]?.formData?.custId===custId)||(matchName&&n[k]?.formData?.name===matchName)){
+                delete n[k];
+              }
+            });
+            return n;
+          });
         }
       }
       // custFilesのarrivalDateをクリア（cancelled後に他のユーザーが同スロットに入っても表示が崩れないよう）
@@ -6804,15 +6817,10 @@ function AppInner() {
       const cancelNo=cancelledRow?.no;
       setInspData(prev=>{
         const rows=(prev[modalDk]||[]).map(r=>r||blankInsp());
-        const existing=rows[modalIdx];
-        // 名前がある行はキャンセル済みとしてマーク（顧客リストとの同期のため）
-        // 名前がない空行は完全にblankに
-        if(existing&&existing.name){
-          rows[modalIdx]={...existing,bookingStatus:'cancelled'};
-        }else{
-          rows[modalIdx]=blankInsp();
-        }
-        return{...prev,[modalDk]:rows};
+        rows[modalIdx]=blankInsp(); // スケジュールから完全削除（cancelled表示を残さない）
+        // 末尾の空行を整理
+        while(rows.length>0&&!rows[rows.length-1]?.name) rows.pop();
+        return{...prev,[modalDk]:rows.length>0?rows:[]};
       });
       // ★顧客リストのステータスをcancelに連動
       if(cancelCustId||cancelName){
