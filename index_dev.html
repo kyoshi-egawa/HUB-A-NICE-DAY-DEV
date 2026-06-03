@@ -6902,7 +6902,11 @@ function AppInner() {
     const bk=modalType==='insp'
       ?`insp-${modalDk}-${modalIdx}`
       :`sched-${modalDk}-${modalSlot}`;
-    const ci=(Object.keys(loanerRes[carId]||{}).length)%RES_COLORS.length;
+    // custIdハッシュで一意な色を決定（customers.html側と同方式）。custIdがなければ登録数ベース
+    const _cid=savedModalData?.custId||user;
+    const ci=_cid
+      ?[...String(_cid)].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length
+      :(Object.keys(loanerRes[carId]||{}).length)%RES_COLORS.length;
     const pickedCar=(currentLoaners||[]).find(c=>String(c.id)===String(carId))||LOANERS.find(c=>c.id===Number(carId));
     setPendingLoanerData({
       carId, startDay, endDay, startYear, startMonth,
@@ -6943,7 +6947,13 @@ function AppInner() {
       const updated={...prev};
       if(updated[loanerId]){
         const days={...updated[loanerId]};
-        Object.keys(days).forEach(d=>{if(days[d]?.bookingKey===bk)delete days[d];});
+        // まずbookingKeyで完全一致を試みる
+        // 一致しない場合（customers.html経由などでidxがズレた場合）はuserNameで照合
+        const hasExact=Object.values(days).some(r=>r?.bookingKey===bk);
+        Object.keys(days).forEach(d=>{
+          if(hasExact?days[d]?.bookingKey===bk:userName&&days[d]?.user===userName)
+            delete days[d];
+        });
         updated[loanerId]=days;
       }
       return updated;
