@@ -6910,32 +6910,32 @@ function AppInner() {
     });
   },[setInspData]);
 
-  // ★ 起動時：GASデータ読み込み後、既存の不要な pendingApproval を一括解除
-  // inspDataが空でなくなった最初の1回だけ実行
-  const _autoReleaseRan=useRef(false);
+  // ★ inspData更新のたびに不要な pendingApproval を自動解除
+  // 変更がなければ setInspData を呼ばないため無限ループしない
   useEffect(()=>{
-    if(_autoReleaseRan.current)return;
-    if(!inspData||Object.keys(inspData).length===0)return;
-    _autoReleaseRan.current=true;
-    let changed=false;
-    const next={};
+    if(!inspData||!Object.keys(inspData).length)return;
+    let anyChanged=false;
+    const updated={...inspData};
     for(const dk of Object.keys(inspData)){
-      const rows=(inspData[dk]||[]).map(r=>r&&r.name?{...r}:{...blankInsp()});
+      const origRows=inspData[dk]||[];
+      // pendingApproval=trueの行がそもそもなければスキップ
+      if(!origRows.some(r=>r?.name&&r?.course&&r?.pendingApproval&&r?.bookingStatus!=='cancelled'))continue;
       const lim=inspLimits[dk]??6;
-      let conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
-      for(let i=0;i<rows.length;i++){
-        const r=rows[i];
-        if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')continue;
-        if(conf>=lim)break;
+      let conf=origRows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
+      if(conf>=lim)continue; // すでに上限に達しているなら解除不要
+      const newRows=origRows.map((r,i)=>{
+        if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')return r;
+        if(conf>=lim)return r;
         if(Number(r.course)===3){
-          const reg=rows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;
-          if(reg>=3)continue;
+          const reg=origRows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;
+          if(reg>=3)return r;
         }
-        delete rows[i].pendingApproval;conf++;changed=true;
-      }
-      next[dk]=rows;
+        conf++;anyChanged=true;
+        const{pendingApproval:_,...rest}=r;return rest;
+      });
+      updated[dk]=newRows;
     }
-    if(changed)setInspData({...inspData,...next});
+    if(anyChanged)setInspData(updated);
   },[inspData,inspLimits]);
 
   // 代車ピック
