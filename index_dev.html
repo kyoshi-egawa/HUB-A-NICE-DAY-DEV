@@ -1520,6 +1520,8 @@ function useShared(key, def, pollMs=60000) {
         const next = JSON.stringify(v);
         if (cur !== next) {
           // idベースマージ: ローカルの方が新しいエントリは保持
+          // ★ ただし値が配列のエントリ（inspDataの日付→行配列など）はマージしない
+          //    配列を{...arr}で展開するとオブジェクトになりfilter/mapが壊れるため
           const local = localRef.current;
           if (local && typeof local==='object' && !Array.isArray(local) &&
               v   && typeof v   ==='object' && !Array.isArray(v)) {
@@ -1527,6 +1529,8 @@ function useShared(key, def, pollMs=60000) {
             for (const cid of Object.keys(local)) {
               const lCar = local[cid]||{};
               const gCar = mg[cid]||{};
+              // 値が配列の場合はGAS版をそのまま使う（マージしない）
+              if(Array.isArray(lCar)||Array.isArray(gCar)){continue;}
               let merged = {...gCar};
               for (const day of Object.keys(lCar)) {
                 if (!(day in gCar) || (lCar[day]?.id||0) > (gCar[day]?.id||0)) {
