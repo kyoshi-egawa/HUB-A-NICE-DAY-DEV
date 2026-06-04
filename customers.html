@@ -370,8 +370,10 @@ const parseExcelFile=async(file)=>{
             else if(dm1Book||dm2Book)status='confirm';
           }
 
-          // コース変換
-          const courseObj=COURSES.find(c=>(c.name&&courseRaw.includes(c.name))||courseRaw===c.short);
+          // コース変換（省略形・数字・部分一致も対応）
+          const courseObj=COURSES.find(c=>(c.name&&courseRaw.includes(c.name))||courseRaw===c.short)
+            ||(/^[123]$/.test(courseRaw)?COURSES.find(c=>c.id===Number(courseRaw)):null)
+            ||(courseRaw.length>=2?COURSES.find(c=>courseRaw.includes(c.name.replace('車検',''))):null);
 
           // 店舗変換
           let storeId='';
@@ -1180,10 +1182,11 @@ const App=()=>{
                       const lc=existing.customers.find(c=>c.custId===fc.custId);
                       if(!lc)return fc;
                       // ローカルの方がステータスが進んでいれば保持
+                      // 同優先度の場合もローカルを優先（GASの古いデータでcourse等が上書きされない）
                       const priority={confirm:3,temp:2,new_car:2,cancel:4,none:0};
                       const lp=priority[lc.status||'none']||0;
                       const fp=priority[fc.status||'none']||0;
-                      return lp>fp?lc:fc;
+                      return lp>=fp?lc:fc;
                     })};
                     localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(merged));
                     return prev.map(p=>p.name===f.name?merged:p);

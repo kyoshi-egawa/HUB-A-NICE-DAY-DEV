@@ -6910,33 +6910,46 @@ function AppInner() {
     });
   },[setInspData]);
 
-  // ★ inspData更新のたびに不要な pendingApproval を自動解除
-  // 変更がなければ setInspData を呼ばないため無限ループしない
+  // ★ 起動時：GASから直接読み込み不要な pendingApproval を一括解除
+  // 重要: setInspData は prev（現在の最新state）とマージして書き戻すため
+  //        customers.html から直前に書き込まれた予約を消さない
   useEffect(()=>{
-    if(!inspData||!Object.keys(inspData).length)return;
-    let anyChanged=false;
-    const updated={...inspData};
-    for(const dk of Object.keys(inspData)){
-      const origRows=inspData[dk]||[];
-      // pendingApproval=trueの行がそもそもなければスキップ
-      if(!origRows.some(r=>r?.name&&r?.course&&r?.pendingApproval&&r?.bookingStatus!=='cancelled'))continue;
-      const lim=inspLimits[dk]??6;
-      let conf=origRows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
-      if(conf>=lim)continue; // すでに上限に達しているなら解除不要
-      const newRows=origRows.map((r,i)=>{
-        if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')return r;
-        if(conf>=lim)return r;
-        if(Number(r.course)===3){
-          const reg=origRows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;
-          if(reg>=3)return r;
+    const t=setTimeout(async()=>{
+      try{
+        const [latestInsp,latestLimits]=await Promise.all([
+          sGet(STOR+'insp'),
+          sGet(STOR+'inspLimits').catch(()=>{}),
+        ]);
+        const limitsMap=latestLimits&&typeof latestLimits==='object'?latestLimits:{};
+        if(!latestInsp||typeof latestInsp!=='object')return;
+        // 変更があった日付のみ fixed に格納（変更なし日付は含めない）
+        const fixed={};
+        for(const dk of Object.keys(latestInsp)){
+          const rows=latestInsp[dk]||[];
+          if(!rows.some(r=>r?.name&&r?.pendingApproval&&r?.bookingStatus!=='cancelled'))continue;
+          const lim=limitsMap[dk]??6;
+          let conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
+          if(conf>=lim)continue;
+          let changed=false;
+          const newRows=rows.map(r=>{
+            if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled'||conf>=lim)return r;
+            if(Number(r.course)===3){
+              const reg=rows.filter(rr=>rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;
+              if(reg>=3)return r;
+            }
+            conf++;changed=true;
+            const{pendingApproval:_,...rest}=r;return rest;
+          });
+          if(changed)fixed[dk]=newRows;
         }
-        conf++;anyChanged=true;
-        const{pendingApproval:_,...rest}=r;return rest;
-      });
-      updated[dk]=newRows;
-    }
-    if(anyChanged)setInspData(updated);
-  },[inspData,inspLimits]);
+        if(Object.keys(fixed).length===0)return;
+        // prev（現在のstate = localRef.current）とマージして書き戻す
+        // → fixed に含まれない日付（直前にcustomers.htmlが書いた予約等）は必ず保持される
+        setInspData(prev=>({...prev,...fixed}));
+      }catch{}
+    },2000);
+    return()=>clearTimeout(t);
+  },[]);
 
   // 代車ピック
   const handleOpenLoanerPicker=useCallback((formData)=>{
