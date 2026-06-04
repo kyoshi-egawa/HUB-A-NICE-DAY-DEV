@@ -1563,7 +1563,15 @@ function useShared(key, def, pollMs=60000) {
     });
   }, [key]);
 
-  return [val, update];
+  // GAS書き戻しなし・writeCount操作なしのローカル表示更新専用
+  // visibilitychangeなど「読み込んで表示だけ更新したい」場面で使用
+  const updateLocal = useCallback((v) => {
+    const next = typeof v === 'function' ? v(localRef.current) : v;
+    localRef.current = next;
+    setVal(next);
+  }, []);
+
+  return [val, update, updateLocal];
 }
 
 
@@ -5790,7 +5798,7 @@ function AppInner() {
   const [schedCollapsed,setSchedCollapsed]=useState(false); // スケジュール畳む/開く（デフォルト：開く）
 
   // 車検は両店舗共通
-  const [inspData,   setInspData]  =useShared(STOR+'insp',{},3000);
+  const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},3000);
   // 顧客リストからの仮予約（スケジュール未登録）専用ストレージ
   // キー: "名前::YYYY-M-D"  値: {status:'provisional', formData:{...}, custMonth, custRowIdx, savedAt}
   const [custBookings, setCustBookings]=useShared(STOR+'custbk',{},3000);
@@ -6001,7 +6009,9 @@ function AppInner() {
     const onVisible=()=>{
       if(document.visibilityState==='visible'){
         // inspDataを即再取得
-        sGet(STOR+'insp').then(v=>{if(v&&typeof v==='object')setInspData(v);});
+        // updateLocalInspData: GAS書き戻しなし・writeCount操作なし
+        // setInspData(v)を使うとGASへ書き戻してcustomers.htmlの最新予約を消す恐れがある
+        sGet(STOR+'insp').then(v=>{if(v&&typeof v==='object')updateLocalInspData(v);});
         // customers.htmlから戻ったとき店舗をログインユーザーに合わせて復元
         try{
           const saved=sessionStorage.getItem('hub_currentUser');
