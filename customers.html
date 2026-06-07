@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-<title>Hub a Nice Day - 顧客リスト [DEV]</title>
+<title>Hub a Nice Day - 顧客リスト</title>
 <meta name="theme-color" content="#1E3A5F"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
@@ -84,7 +84,7 @@ const saveFilesIndex=async(files)=>{
 };
 const deleteFileFromCache=(file)=>{
   const sn=safeName(file.name);
-  try{localStorage.removeItem('hub-cf-'+sn);}catch(e){}
+  try{localStorage.removeItem(STOR+'cf-'+sn);}catch(e){}
 };
 const RES_COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#e11d48','#14b8a6','#a855f7'];
 
@@ -345,7 +345,7 @@ const parseExcelFile=async(file)=>{
           const dm2Book=parseExcelDate(row[cBook2f>=0?cBook2f:null]);
           const entryDate=parseExcelDate(row[cEntry>=0?cEntry:null]);
           const tokRaw =String(row[cTok>=0?cTok:null]||'').trim();
-          const courseRaw=String(row[cCourse>=0?cCourse:null]||'').trim();
+          const courseRaw=(cCourse>=0?String(row[cCourse]||''):'').trim();
           const storeRaw=String(row[cStore>=0?cStore:null]||'').trim();
           const staff  =String(row[cStaff>=0?cStaff:null]||'').trim();
           const note   =String(row[cNote>=0?cNote:null]||'').trim();
@@ -371,7 +371,7 @@ const parseExcelFile=async(file)=>{
           }
 
           // コース変換（省略形・数字・部分一致も対応）
-          const courseObj=COURSES.find(c=>(c.name&&courseRaw.includes(c.name))||courseRaw===c.short)
+          const courseObj=COURSES.find(c=>courseRaw.includes(c.name)||courseRaw===c.short)
             ||(/^[123]$/.test(courseRaw)?COURSES.find(c=>c.id===Number(courseRaw)):null)
             ||(courseRaw.length>=2?COURSES.find(c=>courseRaw.includes(c.name.replace('車検',''))):null);
 
@@ -547,36 +547,25 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
                       background:booked?'#fca5a5':sel?'#bfdbfe':'transparent',
                       cursor:booked?'not-allowed':'pointer',
                       display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,
-                      outline:sel?'2px solid #3b82f6':'none',
-                      touchAction:'none'}}
-                    onPointerDown={e=>{
-                      e.preventDefault();
+                      outline:sel?'2px solid #3b82f6':'none'}}
+                    onMouseDown={()=>{
                       if(booked)return;
                       if(sel){onSelect(null,[]);return;}
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                      const si=dates.findIndex(d=>d.key===key);
-                      // getBoundingClientRect()はサブピクセル値を返すためMath.roundで整数化
-                      const cellLeft=Math.round(e.currentTarget.getBoundingClientRect().left);
-                      dragRef.current={dragging:true,carId:car.id,startKey:key,si,cellLeft,days:[key]};
+                      dragRef.current={dragging:true,carId:car.id,startKey:key,days:[key]};
                       onSelect(car.id,[key]);
                     }}
-                    onPointerMove={e=>{
+                    onMouseEnter={()=>{
                       if(!dragRef.current.dragging||dragRef.current.carId!==car.id)return;
-                      const delta=e.clientX-dragRef.current.cellLeft;
-                      const cellDelta=Math.floor(delta/CELL);
-                      const si=dragRef.current.si;
-                      const ei=Math.max(0,Math.min(dates.length-1,si+cellDelta));
-                      const startI=Math.min(si,ei),endI=Math.max(si,ei);
-                      const range=dates.slice(startI,endI+1).map(d=>d.key);
-                      if(!range.length)return;
-                      if(range.some(k2=>isBooked(car.id,k2)))return;
-                      const prev=dragRef.current.days;
-                      if(range.length===prev.length&&range[0]===prev[0]&&range[range.length-1]===prev[prev.length-1])return;
+                      const allKeys=dates.map(d=>d.key);
+                      const si=allKeys.indexOf(dragRef.current.startKey);
+                      const ei=allKeys.indexOf(key);
+                      if(si<0||ei<0)return;
+                      const range=allKeys.slice(Math.min(si,ei),Math.max(si,ei)+1);
+                      if(range.some(k=>isBooked(car.id,k)))return;
                       dragRef.current.days=range;
                       onSelect(car.id,range);
                     }}
-                    onPointerUp={()=>{dragRef.current.dragging=false;}}
-                    onPointerCancel={()=>{dragRef.current.dragging=false;}}
+                    onMouseUp={()=>{dragRef.current.dragging=false;}}
                   >
                     {booked&&<span style={{color:'#ef4444',fontWeight:700}}>×</span>}
                     {sel&&!booked&&<span style={{color:'#1d4ed8',fontWeight:700}}>✓</span>}
@@ -717,7 +706,7 @@ function InspCalendarPicker({value,onChange,inspData,closedDays,closedDates,insp
 }
 
 
-const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerListS,onSave,onClose,currentUser,closedDays,closedDates,overrideOpen,inspLimits})=>{
+const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerListS,onSave,onClose,currentUser,closedDaysH,closedDaysS,closedDatesH,closedDatesS,overrideOpen,inspLimits})=>{
   const normStore=s=>{if(!s)return'honten';if(s==='三田店'||s==='sanda')return'sanda';return'honten';};
   const defaultStaff=customer.staff||currentUser?.name||'';
   // デフォルト店舗: 顧客の店舗 > ログインユーザーの店舗 > 本店
@@ -759,6 +748,8 @@ const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerL
   const dynListH=(loanerListH&&loanerListH.length>0)?loanerListH:LOANERS_H;
   const dynListS=(loanerListS&&loanerListS.length>0)?loanerListS:LOANERS_S;
   const loanerRes=form.store==='honten'?loanerResH:loanerResS;
+  const closedDays=form.store==='honten'?closedDaysH:closedDaysS;
+  const closedDates=form.store==='honten'?closedDatesH:closedDatesS;
   const storeObj=STORES.find(s=>s.id===form.store)||STORES[0];
   const upd=k=>e=>setForm(p=>({...p,[k]:typeof e==='object'&&e.target?e.target.value:e}));
 
@@ -993,7 +984,7 @@ const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerL
             <div style={{border:'2px solid #bfdbfe',borderRadius:10,padding:8,background:'#eff6ff'}}>
               <LoanerGrid storeId={form.store} entryDate={form.entryDate} loanerRes={loanerRes}
                 loanerList={form.store==='honten'?loanerListH:loanerListS}
-                onSelect={(cid,days)=>{setSelCarId(cid);setSelDays(days||[]);}}
+                onSelect={(cid,days)=>{setSelCarId(cid);setSelDays(days);}}
                 selCarId={selCarId} selDays={selDays}/>
             </div>
           </div>
@@ -1060,7 +1051,7 @@ const CustomerRow=memo(({customer,onBook,onRevive})=>{
         )}
       </td>
       <td style={{padding:'7px 6px',verticalAlign:'middle',textAlign:'center'}}>
-        {courseObj&&<span style={{padding:'2px 7px',background:courseObj.bg,color:courseObj.color,borderRadius:10,fontSize:11,fontWeight:700}}>{courseObj.short}</span>}
+        {customer.status!=='none'&&courseObj&&<span style={{padding:'2px 7px',background:courseObj.bg,color:courseObj.color,borderRadius:10,fontSize:11,fontWeight:700}}>{courseObj.short}</span>}
       </td>
       <td style={{padding:'7px 8px',color:'#111827',verticalAlign:'middle',fontSize:11}}>
         {customer.store==='honten'?'本店':customer.store==='sanda'?'三田店':customer.store}
@@ -1072,29 +1063,12 @@ const CustomerRow=memo(({customer,onBook,onRevive})=>{
   );
 });
 
+// 入庫日をGASキー形式（ゼロなし）に変換
+const toDk=d=>{if(!d)return'';const p=String(d).split('-');return p.length===3?`${p[0]}-${parseInt(p[1])}-${parseInt(p[2])}`:d;};
+
 // ═══════════════════════════════════════════
 // メインアプリ
 // ═══════════════════════════════════════════
-class ErrorBoundary extends React.Component {
-  constructor(props){super(props);this.state={error:null};}
-  static getDerivedStateFromError(e){return{error:e};}
-  render(){
-    if(this.state.error)return(
-      <div style={{padding:32,background:'#fef2f2',minHeight:'100vh',fontFamily:'monospace'}}>
-        <h2 style={{color:'#dc2626',marginBottom:12}}>レンダリングエラー</h2>
-        <pre style={{color:'#991b1b',fontSize:12,whiteSpace:'pre-wrap',background:'#fff1f2',padding:16,borderRadius:8,border:'1px solid #fca5a5'}}>
-          {this.state.error?.message}{'\n'}{this.state.error?.stack}
-        </pre>
-        <button onClick={()=>this.setState({error:null})}
-          style={{marginTop:16,padding:'8px 20px',background:'#dc2626',color:'white',border:'none',borderRadius:8,cursor:'pointer',fontWeight:700}}>
-          再試行
-        </button>
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
 const App=()=>{
   // index.htmlのlocalStorageからログインユーザーを取得
   const currentUser=useMemo(()=>{
@@ -1116,10 +1090,14 @@ const App=()=>{
   const [loanerListH,setLoanerListH]=useState([]);
   const [loanerListS,setLoanerListS]=useState([]);
   const [bookingModal,setBookingModal]=useState(null);
-  const [closedDays,setClosedDays]=useState([]);
-  const [closedDates,setClosedDates]=useState([]);
+  const [closedDaysH,setClosedDaysH]=useState([]);
+  const [closedDaysS,setClosedDaysS]=useState([3]);
+  const [closedDatesH,setClosedDatesH]=useState([]);
+  const [closedDatesS,setClosedDatesS]=useState([]);
   const [overrideOpen,setOverrideOpen]=useState([]);
   const [inspLimits,setInspLimits]=useState({});
+  const [syncDialog,setSyncDialog]=useState(null);
+  const [syncing,setSyncing]=useState(false);
   const fileInputRef=useRef();
 
   // GASからデータ取得
@@ -1127,24 +1105,23 @@ const App=()=>{
     (async()=>{
       // まずlocalStorageキャッシュから即座に表示（GASを待たない）
       const SAFE=n=>n.replace(/[^a-zA-Z0-9　-鿿゠-ヿ぀-ゟ]/g,'_').slice(0,30);
-      const cachedIndex=localStorage.getItem('hub-cf-index');
+      const cachedIndex=localStorage.getItem(STOR+'cf-index');
       if(cachedIndex){
         try{
           const cidx=JSON.parse(cachedIndex);
           const cached=cidx.map(fi=>{
-            const d=localStorage.getItem('hub-cf-'+SAFE(fi.name));
+            const d=localStorage.getItem(STOR+'cf-'+SAFE(fi.name));
             return d?JSON.parse(d):null;
           }).filter(Boolean);
           if(cached.length>0){
             setFiles(cached);
-            filesRef.current=cached; // filesRef同期（初回キャッシュ）
             setGasLoading(false); // キャッシュがあれば即表示
           }
         }catch{}
       }
       // GASから最新データをバックグラウンドで取得
       try{
-        const [insp,lh,ls,fileIndex,llh,lls,cdh,cdate,ov,ilim]=await Promise.all([
+        const [insp,lh,ls,fileIndex,llh,lls,cdh,cdate,ov,ilim,cdhS,cdateS]=await Promise.all([
           sGet(STOR+'insp'),
           sGet(storKey('lres','honten')),
           sGet(storKey('lres','sanda')),
@@ -1155,6 +1132,8 @@ const App=()=>{
           sGet(storKey('cdate','honten')),
           sGet(storKey('overrideOpen','honten')),
           sGet(STOR+'insp-limits'),
+          sGet(storKey('cdow-v2','sanda')),
+          sGet(storKey('cdate','sanda')),
         ]);
         // 書き込み後5秒以内はGASからの上書きをしない（ローカル更新を保護）
         if(insp&&(Date.now()-inspWriteRef.current)>8000)setInspData(insp);
@@ -1162,13 +1141,15 @@ const App=()=>{
         if(ls)setLoanerResS(ls);
         if(Array.isArray(llh)&&llh.length>0)setLoanerListH(llh);
         if(Array.isArray(lls)&&lls.length>0)setLoanerListS(lls);
-        if(Array.isArray(cdh))setClosedDays(cdh);
-        if(Array.isArray(cdate))setClosedDates(cdate);
+        if(Array.isArray(cdh))setClosedDaysH(cdh);
+        if(Array.isArray(cdate))setClosedDatesH(cdate);
+        if(Array.isArray(cdhS))setClosedDaysS(cdhS);
+        if(Array.isArray(cdateS))setClosedDatesS(cdateS);
         if(Array.isArray(ov))setOverrideOpen(ov);
         if(ilim&&typeof ilim==='object')setInspLimits(ilim);
         // GASから最新ファイルデータを取得してキャッシュ更新
         if(Array.isArray(fileIndex)&&fileIndex.length>0){
-          localStorage.setItem('hub-cf-index',JSON.stringify(fileIndex));
+          localStorage.setItem(STOR+'cf-index',JSON.stringify(fileIndex));
           for(const fi of fileIndex){
             if(__saveCount>0)continue; // 書き込み中はGASからの上書きをスキップ
             loadFileChunked(fi.name).then(f=>{
@@ -1183,16 +1164,19 @@ const App=()=>{
                       if(!lc)return fc;
                       // ローカルの方がステータスが進んでいれば保持
                       // 同優先度の場合もローカルを優先（GASの古いデータでcourse等が上書きされない）
-                      const priority={confirm:3,temp:2,new_car:2,cancel:4,none:0};
+                      const priority={cancel:4,confirm:3,temp:2,new_car:2,none:0};
                       const lp=priority[lc.status||'none']||0;
                       const fp=priority[fc.status||'none']||0;
                       return lp>=fp?lc:fc;
                     })};
-                    localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(merged));
+                    localStorage.setItem(STOR+'cf-'+SAFE(fi.name),JSON.stringify(merged));
                     return prev.map(p=>p.name===f.name?merged:p);
                   }
-                  localStorage.setItem('hub-cf-'+SAFE(fi.name),JSON.stringify(f));
+                  localStorage.setItem(STOR+'cf-'+SAFE(fi.name),JSON.stringify(f));
                   return [...prev,f];
+                  const i=prev.findIndex(x=>x.name===f.name);
+                  if(i>=0){const n=[...prev];n[i]=f;return n;}
+                  return[...prev,f];
                 });
               }
             });
@@ -1233,10 +1217,7 @@ const App=()=>{
           });
           if(!changed)return prev;
           // チャンクも更新
-          next.forEach(f=>{
-            saveFileChunked(f).catch(()=>{});
-            try{localStorage.setItem('hub-cf-'+SAFE(f.name),JSON.stringify(f));}catch(e){}
-          });
+          next.forEach(f=>saveFileChunked(f));
           filesRef.current=next; // filesRef同期
           return next;
         });
@@ -1367,7 +1348,7 @@ const App=()=>{
       if(_updFile){
         saveFileChunked(_updFile).catch(()=>{});
         // localStorageキャッシュも即時更新（タブ切替後の上書きを防ぐ）
-        try{localStorage.setItem('hub-cf-'+SAFE(_updFile.name),JSON.stringify(_updFile));}catch(e){}
+        try{localStorage.setItem(STOR+'cf-'+SAFE(_updFile.name),JSON.stringify(_updFile));}catch(e){}
       }
       return next;
     });
@@ -1397,7 +1378,7 @@ const App=()=>{
           }
         }
         // 承認待ちチェック（index.htmlと同じ判定）
-        const existingRows=(newInspData[dkFormatted]||[]).filter(r=>r&&r.name&&r.course&&!r.pendingApproval&&r.bookingStatus!=='cancelled');
+        const existingRows=(newInspData[dkFormatted]||[]).filter(r=>r&&r.name&&r.course&&!r.pendingApproval&&r.bookingStatus!=='cancelled'&&r.bookingStatus!=='cancelled');
         const lim=(inspLimits&&inspLimits[dkFormatted])??6;
         const courseNum=Number(course)||0;
         let needsApproval=false;
@@ -1430,14 +1411,14 @@ const App=()=>{
         newInspData[dkFormatted][newIdx]={...newRow,bookingKey:bKey};
         setInspData(newInspData);
         inspWriteRef.current=Date.now(); // 書き込み時刻を記録
-        // GAS保存とファイル保存を並列で実行（awaitしない→モーダルを即閉じ）
-        // GASへの保存（完了後にinspWriteRefを更新して保護を延長）
-        Promise.all([
-          sSet(STOR+'insp',newInspData),
-          changedFile?saveFileChunked(changedFile):Promise.resolve(),
-        ]).then(()=>{
+        // GAS保存を完了まで待つ（awaitしないとページ遷移で書き込みが中断され反映漏れする）
+        try{
+          await Promise.all([
+            sSet(STOR+'insp',newInspData),
+            changedFile?saveFileChunked(changedFile):Promise.resolve(),
+          ]);
           inspWriteRef.current=Date.now(); // 保存完了後に再度更新（保護延長）
-        }).catch(e=>console.error('保存エラー:',e));
+        }catch(e){console.error('保存エラー:',e);}
 
         // 4. custbk（カレンダー6枠）にも保存
         // キー形式: "氏名::2026-3-16"（ゼロなし）
@@ -1547,6 +1528,83 @@ const App=()=>{
       if(filtered.length!==updates.length)sSet(STOR+'cust-updates',filtered);
     }).catch(()=>{});
   },[loanerListH,loanerListS]);
+
+  const handleSyncCheck=useCallback(async()=>{
+    setSyncing(true);
+    try{
+      // GASから全ファイルとinspDataを直接取得（キャッシュ不使用）
+      const [latestInsp,fileIndex]=await Promise.all([
+        sGet(STOR+'insp').then(v=>v||{}),
+        sGet(STOR+'cf-index').then(v=>v||[]),
+      ]);
+      const allFiles=await Promise.all(fileIndex.map(fi=>loadFileChunked(fi.name).catch(()=>null)));
+      const allCusts=allFiles.filter(Boolean).flatMap(f=>f.customers||[]);
+      const confirmedWithDate=allCusts.filter(c=>c.status==='confirm'&&c.entryDate);
+      const missing=confirmedWithDate.filter(c=>{
+        const dk=toDk(c.entryDate);
+        if(!dk)return false;
+        // cancelledを除いた行で照合。custId一致 or 氏名一致（再インポートでcustIdが変わった場合の対策）
+        const activeRows=(latestInsp[dk]||[]).filter(r=>r&&r.bookingStatus!=='cancelled');
+        return!activeRows.some(r=>
+          (r.custId&&r.custId===c.custId)||
+          (r.name&&r.name===c.name)
+        );
+      });
+      setSyncDialog({missing,total:confirmedWithDate.length,latestInsp});
+    }catch(e){alert('GASからのデータ取得に失敗しました: '+(e.message||e));}
+    finally{setSyncing(false);}
+  },[]);
+
+  const handleSyncFix=useCallback(async()=>{
+    if(!syncDialog||syncDialog.missing.length===0)return;
+    setSyncing(true);
+    try{
+      let newInspData={...(await sGet(STOR+'insp')||{})};
+      const sizeBefore=JSON.stringify(newInspData).length;
+      let added=0;
+      const toAdd=[];
+      for(const c of syncDialog.missing){
+        const dk=toDk(c.entryDate);
+        if(!dk)continue;
+        if(!Array.isArray(newInspData[dk]))newInspData[dk]=[];
+        const activeRows=newInspData[dk].filter(r=>r&&r.bookingStatus!=='cancelled');
+        if(activeRows.some(r=>
+          (r.custId&&r.custId===c.custId)||
+          (r.name&&r.name===c.name)
+        ))continue;
+        const idx=newInspData[dk].length;
+        newInspData[dk]=[...newInspData[dk],{
+          name:c.name,carType:c.carType||'',
+          course:Number(c.course)||0,
+          store:c.store||'honten',staff:c.staff||'',
+          tokuten:c.tokuten||'-',note:c.note||'',no:c.no||'',
+          bookingStatus:'confirmed',pendingApproval:false,
+          custId:c.custId,bookingTime:c.bookingTime||'',time:c.bookingTime||'',
+          bookingKey:`insp-${dk}-${idx}`,
+        }];
+        toAdd.push({c,dk});
+        added++;
+      }
+      const sizeAfter=Math.round(JSON.stringify(newInspData).length/1024);
+      const sizeBeforeKB=Math.round(sizeBefore/1024);
+      await sSet(STOR+'insp',newInspData);
+
+      // sSetはno-corsのため成否不明。3秒後に読み返して確認する
+      await new Promise(r=>setTimeout(r,3000));
+      const readBack=await sGet(STOR+'insp')||{};
+      const verified=toAdd.filter(({c,dk})=>{
+        const rows=(readBack[dk]||[]).filter(r=>r&&r.bookingStatus!=='cancelled');
+        return rows.some(r=>(r.custId&&r.custId===c.custId)||(r.name&&r.name===c.name));
+      }).length;
+      const writeOk=toAdd.length>0&&verified===toAdd.length;
+
+      setInspData(writeOk?readBack:newInspData);
+      if(writeOk)inspWriteRef.current=Date.now();
+      setSyncDialog(prev=>({...prev,fixed:true,addedCount:added,writeOk,verified,
+        diagMsg:`データサイズ: ${sizeBeforeKB}KB → ${sizeAfter}KB（追加${added}件・確認${verified}件）`}));
+    }catch(e){alert('修復に失敗しました: '+(e.message||e));}
+    finally{setSyncing(false);}
+  },[syncDialog]);
 
   // 現在のファイルの顧客リスト
   const currentFile=files[activeIdx];
@@ -1674,7 +1732,15 @@ const App=()=>{
               </button>
             ))}
           </div>
-          <span style={{marginLeft:'auto',fontSize:11,color:'#94a3b8'}}>{filtered.length}件表示</span>
+          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
+            <button onClick={handleSyncCheck} disabled={syncing||gasLoading}
+              style={{padding:'5px 12px',borderRadius:20,border:'1.5px solid #f59e0b',
+                background:'#fffbeb',color:'#92400e',fontWeight:700,fontSize:11,cursor:'pointer',
+                opacity:(syncing||gasLoading)?0.6:1}}>
+              {syncing?'確認中...':'🔧 スケジュール同期チェック'}
+            </button>
+            <span style={{fontSize:11,color:'#94a3b8'}}>{filtered.length}件表示</span>
+          </div>
         </div>
 
         {/* ── テーブル ── */}
@@ -1702,13 +1768,98 @@ const App=()=>{
         </div>
       </>)}
 
+      {/* ── スケジュール同期ダイアログ ── */}
+      {syncDialog&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+          <div style={{background:'white',borderRadius:16,padding:28,maxWidth:580,width:'100%',maxHeight:'80vh',display:'flex',flexDirection:'column',gap:16,boxShadow:'0 20px 60px rgba(0,0,0,0.3)'}}>
+            {syncDialog.fixed?(
+              syncDialog.writeOk?(
+                <>
+                  <div style={{fontWeight:800,fontSize:18,color:'#16a34a'}}>✅ 修復完了・GAS保存確認</div>
+                  <div style={{fontSize:14,color:'#374151'}}>{syncDialog.addedCount}件をスケジュールに追加しました。</div>
+                  <div style={{fontSize:12,color:'#6b7280'}}>{syncDialog.diagMsg}</div>
+                  <div style={{fontSize:12,color:'#6b7280'}}>スケジュール画面を強制リロードすると反映されます。</div>
+                  <button onClick={()=>setSyncDialog(null)}
+                    style={{alignSelf:'flex-end',padding:'8px 24px',background:'#1d4ed8',color:'white',border:'none',borderRadius:8,fontWeight:700,cursor:'pointer'}}>
+                    閉じる
+                  </button>
+                </>
+              ):(
+                <>
+                  <div style={{fontWeight:800,fontSize:18,color:'#f59e0b'}}>⚠️ GASへの保存が確認できません</div>
+                  <div style={{fontSize:13,color:'#374151'}}>{syncDialog.addedCount}件追加を試みましたが、3秒後の読み返しで{syncDialog.verified}件しか確認できませんでした。</div>
+                  <div style={{fontSize:12,color:'#6b7280',background:'#fef9c3',padding:'8px 12px',borderRadius:6,border:'1px solid #fde047'}}>
+                    <b>診断情報:</b> {syncDialog.diagMsg}<br/>
+                    GASスクリプトのエラーログを確認してください。データサイズが大きい場合はGASのプロパティ制限（9KB/件）に達している可能性があります。
+                  </div>
+                  <button onClick={()=>setSyncDialog(null)}
+                    style={{alignSelf:'flex-end',padding:'8px 24px',background:'#6b7280',color:'white',border:'none',borderRadius:8,fontWeight:700,cursor:'pointer'}}>
+                    閉じる
+                  </button>
+                </>
+              )
+            ):syncDialog.missing.length===0?(
+              <>
+                <div style={{fontWeight:800,fontSize:18,color:'#16a34a'}}>✅ 問題ありません</div>
+                <div style={{fontSize:14,color:'#374151'}}>本予約・入庫日あり {syncDialog.total}件すべてがスケジュールに反映されています。</div>
+                <button onClick={()=>setSyncDialog(null)}
+                  style={{alignSelf:'flex-end',padding:'8px 24px',background:'#1d4ed8',color:'white',border:'none',borderRadius:8,fontWeight:700,cursor:'pointer'}}>
+                  閉じる
+                </button>
+              </>
+            ):(
+              <>
+                <div style={{fontWeight:800,fontSize:18,color:'#dc2626'}}>⚠️ {syncDialog.missing.length}件の反映漏れを検出</div>
+                <div style={{fontSize:13,color:'#6b7280'}}>入庫日あり・本予約ステータスだが、スケジュールへの反映が確認できない顧客です。（全{syncDialog.total}件中）</div>
+                <div style={{overflowY:'auto',flex:1,border:'1px solid #e5e7eb',borderRadius:8}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+                    <thead>
+                      <tr>
+                        {['氏名','No.','入庫日','コース','店舗'].map(h=>(
+                          <th key={h} style={{padding:'6px 10px',background:'#f8fafc',fontWeight:700,textAlign:'left',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0}}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {syncDialog.missing.map((c,i)=>(
+                        <tr key={c.custId||i} style={{borderBottom:'1px solid #f1f5f9',background:i%2?'#f8fafc':'white'}}>
+                          <td style={{padding:'5px 10px',fontWeight:600}}>{c.name}</td>
+                          <td style={{padding:'5px 10px',color:'#6b7280'}}>{c.no}</td>
+                          <td style={{padding:'5px 10px',fontWeight:700,color:'#1d4ed8'}}>{c.entryDate}</td>
+                          <td style={{padding:'5px 10px'}}>{c.course||'—'}</td>
+                          <td style={{padding:'5px 10px'}}>{c.store==='sanda'?'三田店':'本店'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:'flex',gap:10,justifyContent:'flex-end',flexShrink:0}}>
+                  <button onClick={()=>setSyncDialog(null)}
+                    style={{padding:'8px 20px',background:'#f1f5f9',color:'#374151',border:'1px solid #e5e7eb',borderRadius:8,fontWeight:700,cursor:'pointer'}}>
+                    キャンセル
+                  </button>
+                  <button onClick={handleSyncFix} disabled={syncing}
+                    style={{padding:'8px 24px',background:'#dc2626',color:'white',border:'none',borderRadius:8,fontWeight:700,cursor:'pointer',opacity:syncing?0.6:1}}>
+                    {syncing?'修復中...':'スケジュールに追加する'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── 予約モーダル ── */}
       {bookingModal&&(
         <BookingModal
           customer={bookingModal}
           inspData={inspData}
-          closedDays={closedDays}
-          closedDates={closedDates}
+          closedDaysH={closedDaysH}
+          closedDaysS={closedDaysS}
+          closedDatesH={closedDatesH}
+          closedDatesS={closedDatesS}
           overrideOpen={overrideOpen}
           inspLimits={inspLimits}
           loanerResH={loanerResH}
@@ -1724,7 +1875,7 @@ const App=()=>{
   );
 };
 
-ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
 </body>
 </html>
