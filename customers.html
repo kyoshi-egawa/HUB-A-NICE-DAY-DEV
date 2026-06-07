@@ -1343,15 +1343,25 @@ const App=()=>{
         return {...f,customers:custs};
       });
       filesRef.current = next; // filesRefを同期
-      // GASに保存してスケジュール切替後も青網掛けを維持
       const _updFile=next.find(f=>f.customers?.some(c=>c.custId===customer.custId));
       if(_updFile){
-        saveFileChunked(_updFile).catch(()=>{});
-        // localStorageキャッシュも即時更新（タブ切替後の上書きを防ぐ）
+        // localStorageキャッシュ即時更新（タブ切替後の上書きを防ぐ）
         try{localStorage.setItem(STOR+'cf-'+SAFE(_updFile.name),JSON.stringify(_updFile));}catch(e){}
       }
       return next;
     });
+    // 顧客ファイルをGAS最新とマージして保存（他端末の更新を消さない・中断防止のためawait）
+    if(changedFile){
+      try{
+        const _latest=await loadFileChunked(changedFile.name);
+        const _base=(_latest&&Array.isArray(_latest.customers))?_latest.customers:changedFile.customers;
+        let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
+        if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
+        const _mf={...changedFile,customers:_merged};
+        await saveFileChunked(_mf);
+        try{localStorage.setItem(STOR+'cf-'+SAFE(changedFile.name),JSON.stringify(_mf));}catch(e){}
+      }catch(e){console.error('顧客ファイル保存エラー:',e);}
+    }
 
     // 2. inspDataに予約追加（本予約のみ。仮予約はリスト表示のみでスケジュールには載せない）
     if(entryDate&&!isTemp){
@@ -1413,11 +1423,8 @@ const App=()=>{
         inspWriteRef.current=Date.now(); // 書き込み時刻を記録
         // GAS保存を完了まで待つ（awaitしないとページ遷移で書き込みが中断され反映漏れする）
         try{
-          await Promise.all([
-            sSet(STOR+'insp',newInspData),
-            changedFile?saveFileChunked(changedFile):Promise.resolve(),
-          ]);
-          inspWriteRef.current=Date.now(); // 保存完了後に再度更新（保護延長）
+          await sSet(STOR+'insp',newInspData);
+          inspWriteRef.current=Date.now(); // 保存完了後に再度更新（保護延長。顧客ファイルは上でマージ保存済み）
         }catch(e){console.error('保存エラー:',e);}
 
         // 4. custbk（カレンダー6枠）にも保存
