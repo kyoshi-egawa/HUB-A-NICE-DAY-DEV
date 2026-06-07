@@ -5117,14 +5117,14 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
     const [ty,tm,td]=editForm.endDate.split('-').map(Number);
     if(toNum(fy,fm-1,fd)>toNum(ty,tm-1,td)){alert('返却日は貸出日以降にしてください');return;}
     // 自分以外の予約と重複していないかチェック
-    const others=(loanerRes[editModal.carId]||[]).filter(r=>r.id!==editModal.resId);
+    const others=Object.values(loanerRes[editModal.carId]||{}).filter(r=>r.id!==editModal.resId);
     const conflict=others.some(r=>{
       const rs=toNum(r.fy,r.fm,r.fd),re=toNum(r.ty,r.tm,r.td);
       const ns=toNum(fy,fm-1,fd),ne=toNum(ty,tm-1,td);
       return ns<=re&&ne>=rs;
     });
     if(conflict){alert('その期間は他の予約と重複しています');return;}
-    const prev=(loanerRes[editModal.carId]||[]).find(r=>r.id===editModal.resId);
+    const prev=Object.values(loanerRes[editModal.carId]||{}).find(r=>r.id===editModal.resId);
     onDeleteRes(editModal.carId,editModal.resId);
     onAddRes(editModal.carId,{id:Date.now(),fy,fm:fm-1,fd,ty,tm:tm-1,td,user:editForm.user,color:prev?.color||RES_COLORS[0]});
     setEditModal(null);
@@ -5625,9 +5625,9 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
               {/* 他の予約状況ミニプレビュー */}
               <div style={{background:'#f8fafc',borderRadius:6,padding:'8px 10px',fontSize:11,color:'#6b7280'}}>
                 <strong style={{color:'#374151'}}>📅 {editModal.carName} の既存予約：</strong>
-                {(loanerRes[editModal.carId]||[]).filter(r=>r.id!==editModal.resId).length===0
+                {Object.values(loanerRes[editModal.carId]||{}).filter(r=>r.id!==editModal.resId).length===0
                   ?<span style={{marginLeft:6}}>なし</span>
-                  :(loanerRes[editModal.carId]||[]).filter(r=>r.id!==editModal.resId).map(r=>(
+                  :Object.values(loanerRes[editModal.carId]||{}).filter(r=>r.id!==editModal.resId).map(r=>(
                     <div key={r.id} style={{marginTop:3,color:'#dc2626'}}>
                       🚫 {r.user}：{r.fm+1}/{r.fd}〜{r.tm+1}/{r.td}
                     </div>
