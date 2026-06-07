@@ -5138,7 +5138,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
     if(toNum(fy,fm-1,fd)>toNum(ty,tm-1,td)){alert('返却日は貸出日以降にしてください');return;}
     // 重複チェック
     const rentalResLocal=rentalRes||{};
-    const others=(rentalResLocal[rentalEditModal.carId]||[]).filter(r=>r.id!==rentalEditModal.resId);
+    const others=Object.values(rentalResLocal[rentalEditModal.carId]||{}).filter(r=>r.id!==rentalEditModal.resId);
     const conflict=others.some(r=>{
       const rs=toNum(r.fy,r.fm,r.fd),re=toNum(r.ty,r.tm,r.td);
       const ns=toNum(fy,fm-1,fd),ne=toNum(ty,tm-1,td);
@@ -5660,9 +5660,9 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
               </div>
               <div style={{background:'#f0fdf4',borderRadius:6,padding:'8px 10px',fontSize:11,color:'#6b7280'}}>
                 <strong style={{color:'#065f46'}}>📅 {rentalEditModal.carName} の既存予約：</strong>
-                {((rentalRes||{})[rentalEditModal.carId]||[]).filter(r=>r.id!==rentalEditModal.resId).length===0
+                {Object.values((rentalRes||{})[rentalEditModal.carId]||{}).filter(r=>r.id!==rentalEditModal.resId).length===0
                   ?<span style={{marginLeft:6}}>なし</span>
-                  :((rentalRes||{})[rentalEditModal.carId]||[]).filter(r=>r.id!==rentalEditModal.resId).map(r=>(
+                  :Object.values((rentalRes||{})[rentalEditModal.carId]||{}).filter(r=>r.id!==rentalEditModal.resId).map(r=>(
                     <div key={r.id} style={{marginTop:3,color:'#dc2626'}}>
                       🚫 {r.user}：{r.fm+1}/{r.fd}〜{r.tm+1}/{r.td}
                     </div>
@@ -5866,9 +5866,9 @@ function AppInner() {
   // 表示中の代車リスト（店舗別）
   const currentLoaners = vsId==='honten' ? dynLoanerListH : dynLoanerListS;
   const [locks,      setLocks]     =useShared(STOR+'locks',{},3000);
-  const addRentalRes    = useCallback((carId,rec) => setRentalResData(p=>({...p,[carId]:[...(p[carId]||[]),rec]})),[setRentalResData]);
-  const deleteRentalRes = useCallback((carId,resId) => setRentalResData(p=>({...p,[carId]:(p[carId]||[]).filter(r=>r.id!==resId)})),[setRentalResData]);
-  const replaceRentalRes = useCallback((carId,resId,newRec) => setRentalResData(p=>({...p,[carId]:(p[carId]||[]).map(r=>r.id===resId?{...r,...newRec}:r)})),[setRentalResData]);
+  const addRentalRes    = useCallback((carId,rec) => setRentalResData(p=>{const days={...(p[carId]||{})};days[String(rec.id)]={...rec};return{...p,[carId]:days};}),[setRentalResData]);
+  const deleteRentalRes = useCallback((carId,resId) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)delete days[d];});return{...p,[carId]:days};}),[setRentalResData]);
+  const replaceRentalRes = useCallback((carId,resId,newRec) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)days[d]={...days[d],...newRec};});return{...p,[carId]:days};}),[setRentalResData]);
   const [loanerUndo, setLoanerUndo]=useState([]);
   // LoanerGridのpinnedRes/hoverResを親で管理（グリッドの再レンダリング防止→scrollLeft保持）
   const [loanerPinnedRes, setLoanerPinnedRes]=useState(null);
