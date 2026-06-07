@@ -1167,7 +1167,13 @@ const App=()=>{
                       const priority={cancel:4,confirm:3,temp:2,new_car:2,none:0};
                       const lp=priority[lc.status||'none']||0;
                       const fp=priority[fc.status||'none']||0;
-                      return lp>=fp?lc:fc;
+                      if(lp>fp)return lc;
+                      if(fp>lp)return fc;
+                      // 同優先度: GAS(他端末の最新)に入庫日があってローカルに無ければGASを採用（PCごとに表示が違う問題の修正）
+                      if(fc.entryDate&&!lc.entryDate)return fc;
+                      // 同優先度で両方入庫日あり・日付が異なれば他端末の変更としてGAS優先（自端末はsaveCount中スキップで保護）
+                      if(fc.entryDate&&lc.entryDate&&fc.entryDate!==lc.entryDate)return fc;
+                      return lc;
                     })};
                     localStorage.setItem(STOR+'cf-'+SAFE(fi.name),JSON.stringify(merged));
                     return prev.map(p=>p.name===f.name?merged:p);
