@@ -1076,6 +1076,7 @@ const App=()=>{
   },[]);
   const [files,setFiles]=useState([]);
   const filesRef = useRef([]); // setFilesと同期して常に最新値を保持
+  useEffect(()=>{filesRef.current=files;},[files]); // 初回ロード含めfilesを常にfilesRefへ反映（最初の予約でchangedFileがnullになりリスト未保存になるのを防ぐ）
   const pollUpdatesRef = useRef(null);
   const [activeIdx,setActiveIdx]=useState(0);
   const [search,setSearch]=useState('');
