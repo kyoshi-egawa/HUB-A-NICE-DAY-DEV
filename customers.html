@@ -1358,7 +1358,7 @@ const App=()=>{
       setSyncToast({status:'saving',name});
       let settled=false;
       const slowTimer=setTimeout(()=>{if(!settled)setSyncToast({status:'slow',name,retry:run});},30000);
-      sSet(STOR+'insp',data).then(()=>{
+      return sSet(STOR+'insp',data).then(()=>{
         settled=true;clearTimeout(slowTimer);
         inspWriteRef.current=Date.now(); // 保護延長
         setSyncToast({status:'done',name});
@@ -1368,7 +1368,7 @@ const App=()=>{
         setSyncToast({status:'error',name,retry:run});
       });
     };
-    run();
+    return run();
   },[]);
 
   const handleBookingSave=useCallback(async(form,customer)=>{
@@ -1409,22 +1409,6 @@ const App=()=>{
       }
       return next;
     });
-    // 顧客ファイルをGAS最新とマージして保存（他端末の更新を消さない）。
-    // ★バックグラウンドで実行し、スケジュール(insp)の書き込みを待たせない（反映高速化）。
-    if(changedFile){
-      (async()=>{
-        try{
-          const _latest=await loadFileChunked(changedFile.name);
-          const _base=(_latest&&Array.isArray(_latest.customers))?_latest.customers:changedFile.customers;
-          let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
-          if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
-          const _mf={...changedFile,customers:_merged};
-          await saveFileChunked(_mf);
-          try{localStorage.setItem(STOR+'cf-'+SAFE(changedFile.name),JSON.stringify(_mf));}catch(e){}
-        }catch(e){console.error('顧客ファイル保存エラー:',e);}
-      })();
-    }
-
     // 2. inspDataに予約追加（本予約のみ。仮予約はリスト表示のみでスケジュールには載せない）
     if(entryDate&&!isTemp){
       const dk=entryDate;
@@ -1484,9 +1468,9 @@ const App=()=>{
         newInspData[dkFormatted][newIdx]={...newRow,bookingKey:bKey};
         setInspData(newInspData);
         inspWriteRef.current=Date.now(); // 書き込み時刻を記録
-        // GASへスケジュール保存。反映状況をトーストで可視化（反映中→完了／30秒超で遅延・再試行）。
-        // ローカルstateは即時更新済みなので、ここはawaitせずバックグラウンドで反映確認する。
-        saveInspWithStatus(newInspData,customer.name);
+        // ★スケジュール(insp)を最優先で先に・確実に書き込む（顧客ファイル等の多数のチャンク書き込みと
+        //   GASロックを奪い合って失敗するのを防ぐため await で完了を待つ）。反映状況はトーストで可視化。
+        await saveInspWithStatus(newInspData,customer.name);
 
         // 4. custbk（カレンダー6枠）にも保存
         // キー形式: "氏名::2026-3-16"（ゼロなし）
@@ -1585,6 +1569,22 @@ const App=()=>{
           }
         }
       }
+    }
+    // 顧客ファイルをGAS最新とマージして保存（他端末の更新を消さない）。
+    // ★insp書き込みの後に・バックグラウンドで実行。先にスケジュールを確実に反映し、
+    //   その後で（多数チャンクの）顧客ファイル保存を行うことでGASロック競合を避ける。
+    if(changedFile){
+      (async()=>{
+        try{
+          const _latest=await loadFileChunked(changedFile.name);
+          const _base=(_latest&&Array.isArray(_latest.customers))?_latest.customers:changedFile.customers;
+          let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
+          if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
+          const _mf={...changedFile,customers:_merged};
+          await saveFileChunked(_mf);
+          try{localStorage.setItem(STOR+'cf-'+SAFE(changedFile.name),JSON.stringify(_mf));}catch(e){}
+        }catch(e){console.error('顧客ファイル保存エラー:',e);}
+      })();
     }
     // 再予約時はcust-updatesの古いキャンセル通知を削除（cancel優先度コリジョン防止）
     sGet(STOR+'cust-updates').then(updates=>{
