@@ -767,9 +767,14 @@ const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerL
       if(missing.length){setErr(`本予約には ${missing.join('・')} が必要です`);return;}
     }
     setSaving(true);
-    try{await onSave({...form,isTemp,selCarId,selDays},customer);}
-    catch(e){console.error('onSave error:',e);}
-    finally{setSaving(false);onClose();}
+    // モーダルは即座に閉じ、GAS保存はバックグラウンドで継続させる。
+    // GAS書き込みは直列ロック(最大25秒)＋チャンク保存で長時間かかることがあり、
+    // await完了まで待つと「保存中...」のままフリーズして見えるため。
+    // 予約はローカルstateへ即時反映されるので、閉じても予約内容は失われない。
+    onClose();
+    Promise.resolve(onSave({...form,isTemp,selCarId,selDays},customer))
+      .catch(e=>console.error('onSave error:',e))
+      .finally(()=>setSaving(false));
   };
 
   const courseObj=COURSES.find(c=>c.id===Number(form.course));
