@@ -31,6 +31,9 @@ input,select,textarea{font-family:inherit;}
 .row-confirm:hover {background:#93c5fd;}
 .row-cancel:hover  {background:#fca5a5;}
 .row-new_car:hover {background:#fbbf24;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.spinner{width:38px;height:38px;border:4px solid #e2e8f0;border-top-color:#1d4ed8;border-radius:50%;animation:spin .8s linear infinite;}
+.spinner-sm{width:15px;height:15px;border:2.5px solid #cbd5e1;border-top-color:#1d4ed8;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle;}
 </style>
 </head>
 <body>
@@ -1113,6 +1116,7 @@ const App=()=>{
   const [filterStatus,setFilterStatus]=useState('all');
   const [gasOk,setGasOk]=useState(null);
   const [gasLoading,setGasLoading]=useState(true);
+  const [bgSyncing,setBgSyncing]=useState(false); // GASバックグラウンド同期中（キャッシュ表示中の読み込みアピール）
   const [importing,setImporting]=useState(false);
   const [inspData,setInspData]=useState({});
   const inspWriteRef=useRef(0); // 最後にローカル書き込みした時刻
@@ -1152,6 +1156,7 @@ const App=()=>{
         }catch{}
       }
       // GASから最新データをバックグラウンドで取得
+      setBgSyncing(true);
       try{
         const [insp,lh,ls,fileIndex,llh,lls,cdh,cdate,ov,ilim,cdhS,cdateS]=await Promise.all([
           sGet(STOR+'insp'),
@@ -1222,7 +1227,8 @@ const App=()=>{
         }
         setGasLoading(false);
         setGasOk(true);
-      }catch{setGasOk(false);setGasLoading(false);}
+        setBgSyncing(false);
+      }catch{setGasOk(false);setGasLoading(false);setBgSyncing(false);}
     })();
 
     // cust-updatesポーリング（スケジュール側からの即時連動）
@@ -1757,15 +1763,21 @@ const App=()=>{
             opacity:importing?0.6:1}}>
           {importing?'読み込み中...':'+ Excelインポート'}
         </button>
+        {bgSyncing&&(
+          <span style={{display:'inline-flex',alignItems:'center',gap:5,marginLeft:8,marginBottom:3,
+            fontSize:11,color:'#64748b',fontWeight:700,flexShrink:0,whiteSpace:'nowrap'}}>
+            <span className="spinner-sm"/>同期中…
+          </span>
+        )}
         <input ref={fileInputRef} type="file" accept=".xlsx,.xls" multiple style={{display:'none'}}
           onChange={handleImport}/>
       </div>
 
       {/* ファイルがない場合 */}
       {gasLoading&&(
-        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:12,color:'#94a3b8'}}>
-          <div style={{fontSize:32}}>⏳</div>
-          <div style={{fontSize:14,fontWeight:600}}>データを読み込んでいます...</div>
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:14,color:'#94a3b8'}}>
+          <div className="spinner"/>
+          <div style={{fontSize:14,fontWeight:600}}>顧客ファイルを読み込んでいます...</div>
         </div>
       )}
       {!gasLoading&&files.length===0&&(
@@ -1943,10 +1955,11 @@ const App=()=>{
       {/* ── スケジュール反映 同期トースト ── */}
       {syncToast&&(()=>{
         const st=syncToast.status;
-        const theme=st==='done'?{bg:'#dcfce7',bd:'#4ade80',fg:'#166534',icon:'✅'}
+        // 完了=ライトブルー(本予約の色)、保存中=ライトグリーン(仮予約の色)。背景と差が出て見つけやすく直感的。
+        const theme=st==='done'?{bg:'#dbeafe',bd:'#60a5fa',fg:'#1e40af',icon:'✅'}
           :st==='error'?{bg:'#fee2e2',bd:'#f87171',fg:'#991b1b',icon:'⚠️'}
           :st==='slow'?{bg:'#fef3c7',bd:'#fbbf24',fg:'#92400e',icon:'⏳'}
-          :{bg:'#dbeafe',bd:'#60a5fa',fg:'#1e40af',icon:'🔄'};
+          :{bg:'#dcfce7',bd:'#4ade80',fg:'#166534',icon:'🔄'};
         const msg=st==='done'?`${syncToast.name}さんの予約をスケジュールに反映しました`
           :st==='error'?`${syncToast.name}さんの予約の反映に失敗しました`
           :st==='slow'?`反映に時間がかかっています（30秒超）`
