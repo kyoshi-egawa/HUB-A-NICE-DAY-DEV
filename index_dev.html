@@ -6756,7 +6756,17 @@ function AppInner() {
           const _seq=_editingActive?_prevRow.seq:Date.now();
           const _wasPending=_editingActive&&!!_prevRow.pendingApproval;
           const dayLimit=inspLimits[targetDk]??6;
-          rows[modalIdx]={...cleanWithStore,seq:_seq,bookingStatus:'confirmed'};
+          const _origDk=formData._originalDk||originalModalDkRef.current;
+          const _isDateChange=!!(_origDk&&_origDk!==targetDk);
+          const _newRow={...cleanWithStore,seq:_seq,bookingStatus:'confirmed'};
+          if(_isDateChange){
+            // 日付変更＝移動先で承認状態を再評価する。元の日の承認/承認待ちフラグは引き継がず、
+            // 予約順は移動先の最後尾扱いに。recomputeで上限内なら自動的に確定（承認が外れる）。
+            delete _newRow.approved;
+            delete _newRow.pendingApproval;
+            _newRow.seq=Date.now();
+          }
+          rows[modalIdx]=_newRow;
           // 予約順(seq)で承認状態を再計算（既存の確定行は確定のまま＝編集で承認を再要求しない）
           rows=recomputeInspApproval(rows,dayLimit);
           // 新規／再予約が上限超過で「承認待ちに転じた」ときだけ通知（編集中の確定客には出さない）
@@ -6774,6 +6784,19 @@ function AppInner() {
           }
           return result;
         });
+        // ★日付変更時のみ：リストから予約した顧客（custIdあり）の入庫日を顧客リストにも連動更新する。
+        //   path1（顧客リストからの予約作成）と同じ syncCustStatus の仕組み。cust-updatesキュー経由で反映。
+        {
+          const _sd2=selDateRef.current||selDate;
+          const _tgt2=formData._targetDk||modalDkRef.current||(_sd2 instanceof Date?`${_sd2.getFullYear()}-${_sd2.getMonth()+1}-${_sd2.getDate()}`:(typeof _sd2==='string'&&_sd2?_sd2:modalDk));
+          const _orig2=formData._originalDk||originalModalDkRef.current;
+          if(cleanWithStore.custId&&_orig2&&_orig2!==_tgt2){
+            const _p2=String(_tgt2).split('-').map(Number);
+            const _entryDate2=(_p2.length===3&&!isNaN(_p2[0]))?`${_p2[0]}-${String(_p2[1]).padStart(2,'0')}-${String(_p2[2]).padStart(2,'0')}`:_tgt2;
+            console.log('[SYNC entryDate→list]','custId=',cleanWithStore.custId,'name=',cleanWithStore.name,'date=',_entryDate2);
+            syncCustStatus(cleanWithStore.custId,'confirm',{entryDate:_entryDate2,linkedInspDate:_entryDate2},cleanWithStore.name,cleanWithStore.no);
+          }
+        }
         // 日付変更時：古い代車予約を削除（pendingLoanerDeleteBk または _originalDkから計算）
         const _origDkForDel=originalModalDkRef.current||formData._originalDk;
         const _delBk=pendingLoanerDeleteBk||(_origDkForDel&&_origDkForDel!==formData._targetDk?`insp-${_origDkForDel}-${modalIdx}`:'');
