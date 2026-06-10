@@ -1116,6 +1116,7 @@ const App=()=>{
   const [importing,setImporting]=useState(false);
   const [inspData,setInspData]=useState({});
   const inspWriteRef=useRef(0); // 最後にローカル書き込みした時刻
+  const [syncToast,setSyncToast]=useState(null); // スケジュール反映状況トースト {status,name,retry}
   const [loanerResH,setLoanerResH]=useState({});
   const [loanerResS,setLoanerResS]=useState({});
   const [loanerListH,setLoanerListH]=useState([]);
@@ -1349,6 +1350,27 @@ const App=()=>{
     }).catch(()=>{});
   },[]);
 
+  // スケジュール(insp)をGASへ保存し、反映状況をトーストで可視化する。
+  // sSetのawaitはGASが実際に書き終えた応答で解決するので「解決＝反映完了」。
+  // 30秒(GASロック最大25秒＋余裕)を超えても未解決なら「遅延・再試行」を表示。
+  const saveInspWithStatus=useCallback((data,name)=>{
+    const run=()=>{
+      setSyncToast({status:'saving',name});
+      let settled=false;
+      const slowTimer=setTimeout(()=>{if(!settled)setSyncToast({status:'slow',name,retry:run});},30000);
+      sSet(STOR+'insp',data).then(()=>{
+        settled=true;clearTimeout(slowTimer);
+        inspWriteRef.current=Date.now(); // 保護延長
+        setSyncToast({status:'done',name});
+        setTimeout(()=>setSyncToast(s=>(s&&s.status==='done'&&s.name===name)?null:s),4000);
+      }).catch(()=>{
+        settled=true;clearTimeout(slowTimer);
+        setSyncToast({status:'error',name,retry:run});
+      });
+    };
+    run();
+  },[]);
+
   const handleBookingSave=useCallback(async(form,customer)=>{
     const{entryDate,store,bookingTime,course,tokuten,staff,note,isTemp,selCarId,selDays}=form;
     const status=isTemp?'temp':'confirm';
@@ -1387,17 +1409,20 @@ const App=()=>{
       }
       return next;
     });
-    // 顧客ファイルをGAS最新とマージして保存（他端末の更新を消さない・中断防止のためawait）
+    // 顧客ファイルをGAS最新とマージして保存（他端末の更新を消さない）。
+    // ★バックグラウンドで実行し、スケジュール(insp)の書き込みを待たせない（反映高速化）。
     if(changedFile){
-      try{
-        const _latest=await loadFileChunked(changedFile.name);
-        const _base=(_latest&&Array.isArray(_latest.customers))?_latest.customers:changedFile.customers;
-        let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
-        if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
-        const _mf={...changedFile,customers:_merged};
-        await saveFileChunked(_mf);
-        try{localStorage.setItem(STOR+'cf-'+SAFE(changedFile.name),JSON.stringify(_mf));}catch(e){}
-      }catch(e){console.error('顧客ファイル保存エラー:',e);}
+      (async()=>{
+        try{
+          const _latest=await loadFileChunked(changedFile.name);
+          const _base=(_latest&&Array.isArray(_latest.customers))?_latest.customers:changedFile.customers;
+          let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
+          if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
+          const _mf={...changedFile,customers:_merged};
+          await saveFileChunked(_mf);
+          try{localStorage.setItem(STOR+'cf-'+SAFE(changedFile.name),JSON.stringify(_mf));}catch(e){}
+        }catch(e){console.error('顧客ファイル保存エラー:',e);}
+      })();
     }
 
     // 2. inspDataに予約追加（本予約のみ。仮予約はリスト表示のみでスケジュールには載せない）
@@ -1459,11 +1484,9 @@ const App=()=>{
         newInspData[dkFormatted][newIdx]={...newRow,bookingKey:bKey};
         setInspData(newInspData);
         inspWriteRef.current=Date.now(); // 書き込み時刻を記録
-        // GAS保存を完了まで待つ（awaitしないとページ遷移で書き込みが中断され反映漏れする）
-        try{
-          await sSet(STOR+'insp',newInspData);
-          inspWriteRef.current=Date.now(); // 保存完了後に再度更新（保護延長。顧客ファイルは上でマージ保存済み）
-        }catch(e){console.error('保存エラー:',e);}
+        // GASへスケジュール保存。反映状況をトーストで可視化（反映中→完了／30秒超で遅延・再試行）。
+        // ローカルstateは即時更新済みなので、ここはawaitせずバックグラウンドで反映確認する。
+        saveInspWithStatus(newInspData,customer.name);
 
         // 4. custbk（カレンダー6枠）にも保存
         // キー形式: "氏名::2026-3-16"（ゼロなし）
@@ -1572,7 +1595,7 @@ const App=()=>{
       );
       if(filtered.length!==updates.length)sSet(STOR+'cust-updates',filtered);
     }).catch(()=>{});
-  },[loanerListH,loanerListS]);
+  },[loanerListH,loanerListS,saveInspWithStatus]);
 
   const handleSyncCheck=useCallback(async()=>{
     setSyncing(true);
@@ -1916,6 +1939,38 @@ const App=()=>{
           onClose={()=>setBookingModal(null)}
         />
       )}
+
+      {/* ── スケジュール反映 同期トースト ── */}
+      {syncToast&&(()=>{
+        const st=syncToast.status;
+        const theme=st==='done'?{bg:'#dcfce7',bd:'#4ade80',fg:'#166534',icon:'✅'}
+          :st==='error'?{bg:'#fee2e2',bd:'#f87171',fg:'#991b1b',icon:'⚠️'}
+          :st==='slow'?{bg:'#fef3c7',bd:'#fbbf24',fg:'#92400e',icon:'⏳'}
+          :{bg:'#dbeafe',bd:'#60a5fa',fg:'#1e40af',icon:'🔄'};
+        const msg=st==='done'?`${syncToast.name}さんの予約をスケジュールに反映しました`
+          :st==='error'?`${syncToast.name}さんの予約の反映に失敗しました`
+          :st==='slow'?`反映に時間がかかっています（30秒超）`
+          :`${syncToast.name}さんの予約をスケジュールに反映中…`;
+        return (
+          <div style={{position:'fixed',right:16,bottom:16,zIndex:99999,maxWidth:340,
+            padding:'12px 14px',borderRadius:11,boxShadow:'0 8px 24px rgba(0,0,0,.18)',
+            background:theme.bg,border:`2px solid ${theme.bd}`,color:theme.fg,
+            display:'flex',alignItems:'center',gap:10,fontSize:13,fontWeight:700}}>
+            <span style={{fontSize:17,flexShrink:0}}>{theme.icon}</span>
+            <span style={{flex:1,lineHeight:1.4}}>{msg}</span>
+            {(st==='slow'||st==='error')&&syncToast.retry&&(
+              <button onClick={()=>syncToast.retry()}
+                style={{flexShrink:0,padding:'5px 12px',background:theme.fg,color:'white',border:'none',
+                  borderRadius:7,fontWeight:800,fontSize:12,cursor:'pointer'}}>再試行</button>
+            )}
+            {st!=='saving'&&(
+              <button onClick={()=>setSyncToast(null)}
+                style={{flexShrink:0,padding:'2px 7px',background:'transparent',color:theme.fg,
+                  border:'none',fontWeight:900,fontSize:15,cursor:'pointer',lineHeight:1}}>✕</button>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };
