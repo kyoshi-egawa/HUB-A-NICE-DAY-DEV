@@ -1303,6 +1303,43 @@ const CustomerListView = memo(({custFiles, setCustFiles, currentUser}) => {
 
 
 const blankInsp  = () => ({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional'});
+
+// ── 予約順(seq)ベースの承認状態 再計算（純粋関数）─────────────────────────
+// 各insp行の seq（予約順。新規予約時に Date.now() で付与）で昇順に並べ、
+//   先着 limit 台 = 確定 / 超過分 = 承認待ち(pendingApproval=true)。
+//   レギュラー車検(course=3) は別途1日3台まで（超過分は承認待ち）。
+//   手動承認済み(approved=true) は常に確定として扱い、枠を消費する。
+// seq の無い旧データは配列インデックス順（＝従来の並び）にフォールバックするので、
+// 既存予約の並び・確定状態は変わらない。表示順(店舗優先・入庫時間)とは独立。
+const recomputeInspApproval = (rows, limit) => {
+  const lim = (limit!=null) ? limit : 6;
+  const out = rows.map(r => (r ? {...r} : r));
+  const active = out
+    .map((r, i) => ({ r, i }))
+    .filter(x => x.r && x.r.name && x.r.course && x.r.bookingStatus !== 'cancelled');
+  active.sort((a, b) => {
+    const sa = (a.r.seq != null) ? a.r.seq : a.i;
+    const sb = (b.r.seq != null) ? b.r.seq : b.i;
+    return sa - sb;
+  });
+  let conf = 0, reg = 0;
+  for (const { r } of active) {
+    const isReg = Number(r.course) === 3;
+    if (r.approved) {                 // 本店が手動承認済み → 常に確定（枠を消費）
+      delete r.pendingApproval;
+      conf++; if (isReg) reg++;
+      continue;
+    }
+    const eligible = (conf < lim) && (!isReg || reg < 3);
+    if (eligible) {
+      delete r.pendingApproval;       // 先着枠内 → 確定
+      conf++; if (isReg) reg++;
+    } else {
+      r.pendingApproval = true;       // 上限超過 → 承認待ち
+    }
+  }
+  return out;
+};
 // confirmed=車検日確定(スカイブルー)  provisional/new=仮予約(ライトグリーン)  cancelled=キャンセル(レッド)
 const BOOKING_STATUS_STRIPE = {
   new:         '#dcfce7',
@@ -6347,17 +6384,9 @@ function AppInner() {
       setInspData(prev=>{
         const rows=[...(prev[dk]||[])].map(r=>r||blankInsp());
         rows.splice(idx,1); // 行を完全削除
-        // ★ 台数が制限内に戻ったら pendingApproval を自動解除
-        const _lim=inspLimits[dk]??6;
-        let _conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
-        for(let i=0;i<rows.length;i++){
-          const r=rows[i];
-          if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')continue;
-          if(_conf>=_lim)break;
-          if(Number(r.course)===3){const _reg=rows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;if(_reg>=3)continue;}
-          rows[i]={...rows[i]};delete rows[i].pendingApproval;_conf++;
-        }
-        return{...prev,[dk]:rows.length>0?rows:[]};
+        // 予約順(seq)で承認状態を再計算（空いた枠の分だけ承認待ちを自動承認）
+        const newRows=recomputeInspApproval(rows,inspLimits[dk]??6);
+        return{...prev,[dk]:newRows.length>0?newRows:[]};
       });
       // entryDate・linkedInspDateもクリア、matchName/matchNoも渡してcustId不在時も対応
       if(delCustId||delName) syncCustStatus(delCustId,'cancel',{entryDate:'',linkedInspDate:''},delName,delNo);
@@ -6437,11 +6466,13 @@ function AppInner() {
     const [y,m,d]=parts;
     const dk=`${y}-${m}-${d}`;
     setInspData(prev=>{
-      const rows=[...(prev[dk]||[])].map(r=>r||blankInsp());
+      let rows=[...(prev[dk]||[])].map(r=>r||blankInsp());
       if(rows[rowIdx]) rows[rowIdx]={...rows[rowIdx],bookingStatus:newStatus};
+      // ステータス変更（キャンセル等）で空いた枠を予約順(seq)で再計算して繰り上げ
+      rows=recomputeInspApproval(rows,inspLimits[dk]??6);
       return {...prev,[dk]:rows};
     });
-  },[setInspData]);
+  },[setInspData,inspLimits]);
 
   // 顧客リスト専用モーダル保存（仮予約 / 本予約 / キャンセル）
   const handleCustListSave=useCallback((mode, formData, meta)=>{
@@ -6473,17 +6504,9 @@ function AppInner() {
           if(rows[meta.existingIdx]) rows[meta.existingIdx]=blankInsp();
           // 末尾の空行を整理
           while(rows.length>0&&!rows[rows.length-1]?.name) rows.pop();
-          // ★ 台数が制限内に戻ったら pendingApproval を自動解除
-          const _lim=inspLimits[dk]??6;
-          let _conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
-          for(let i=0;i<rows.length;i++){
-            const r=rows[i];
-            if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')continue;
-            if(_conf>=_lim)break;
-            if(Number(r.course)===3){const _reg=rows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;if(_reg>=3)continue;}
-            rows[i]={...rows[i]};delete rows[i].pendingApproval;_conf++;
-          }
-          return{...prev,[dk]:rows.length>0?rows:[]};
+          // 予約順(seq)で承認状態を再計算（空いた枠の分だけ承認待ちを自動承認）
+          const newRows=recomputeInspApproval(rows,inspLimits[dk]??6);
+          return{...prev,[dk]:newRows.length>0?newRows:[]};
         });
         // customers-filesのステータスをcancelに更新（チャンク方式）
         // custIdがなくてもname+noでマッチング
@@ -6565,23 +6588,27 @@ function AppInner() {
         ?meta.existingIdx:-1;
       setInspData(prev=>{
         const prev_rows=(prev[dk]||[]).map(r=>r||blankInsp());
-        const rows=[...prev_rows];
+        let rows=[...prev_rows];
         const ui=existIdx>=0?existIdx:(()=>{
           // キャンセル済みは除外し、本当に名前がないスロットのみ対象
           const i=rows.findIndex(r=>!r||!r.name);
           return i>=0?i:rows.length;
         })();
         while(rows.length<=ui)rows.push(blankInsp());
-        // 承認済み台数チェック（キャンセル済みを除外）
-        const approved=rows.filter((r,i)=>i!==ui&&r.name&&r.course&&!r.pendingApproval&&r.bookingStatus!=='cancelled').length;
+        const _prevRow=prev_rows[ui];
+        // 同一のアクティブ予約を編集している時だけ既存のseq・状態を引き継ぐ。
+        // 空き／キャンセル済みスロットへの新規予約は必ず新しいseqを付与（予約順の最後に並ぶ）。
+        const _editingActive=!!(_prevRow&&_prevRow.name&&_prevRow.bookingStatus!=='cancelled');
+        const _seq=(_editingActive&&_prevRow.seq!=null)?_prevRow.seq:Date.now();
+        const _wasPending=_editingActive&&!!_prevRow.pendingApproval;
         const lim=inspLimits[dk]??6;
-        if(approved>=lim){cs.pendingApproval=true;alert(`⚠️ 制限台数（${lim}台）を超えました。本店承認が必要です。`);}
-        // レギュラー車検（course=3）の1日3台上限チェック
-        if(Number(cs.course)===3){
-          const regularCount=rows.filter((r,i)=>i!==ui&&r.name&&Number(r.course)===3&&!r.pendingApproval&&r.bookingStatus!=='cancelled').length;
-          if(regularCount>=3){cs.pendingApproval=true;alert(`⚠️ レギュラー車検は1日最大3台までです（両店合計）。\n本店での承認が必要です。`);}
+        rows[ui]={...cs,seq:_seq,bookingStatus:'confirmed'};
+        // 予約順(seq)で承認状態を再計算（既存の確定行は確定のまま＝編集で承認を再要求しない）
+        rows=recomputeInspApproval(rows,lim);
+        // 新規／再予約が上限超過で「承認待ちに転じた」ときだけ通知（編集中の確定客には出さない）
+        if(rows[ui]&&rows[ui].pendingApproval&&!_wasPending){
+          alert(`⚠️ 1日の上限を超えたため、本店承認が必要です（通常${lim}台／レギュラー車検3台）。`);
         }
-        rows[ui]={...cs,bookingStatus:'confirmed'};
         return{...prev,[dk]:rows};
       });
       if(meta&&meta.bkKey)setCustBookings(prev=>{const n={...prev};delete n[meta.bkKey];return n;});
@@ -6720,28 +6747,30 @@ function AppInner() {
             const _tdk=formData._targetDk;
           const targetDk=_tdk||modalDkRef.current||(sd instanceof Date?`${sd.getFullYear()}-${sd.getMonth()+1}-${sd.getDate()}`:(typeof sd==='string'&&sd?sd:modalDk));
           const prev_rows=(prev[targetDk]||[]).map(r=>r||blankInsp());
-          const rows=[...prev_rows];
+          let rows=[...prev_rows];
           while(rows.length<=modalIdx)rows.push(blankInsp());
-          const approvedCount=rows.filter((r,i)=>i!==modalIdx&&r.name&&r.course&&!r.pendingApproval).length;
+          const _prevRow=prev_rows[modalIdx];
+          // 同一のアクティブ予約を編集している時だけ既存のseq・状態を引き継ぐ。
+          // 空き／キャンセル済みスロットへの新規予約は必ず新しいseqを付与（予約順の最後に並ぶ）。
+          const _editingActive=!!(_prevRow&&_prevRow.name&&_prevRow.bookingStatus!=='cancelled');
+          const _seq=(_editingActive&&_prevRow.seq!=null)?_prevRow.seq:Date.now();
+          const _wasPending=_editingActive&&!!_prevRow.pendingApproval;
           const dayLimit=inspLimits[targetDk]??6;
-          if(approvedCount>=dayLimit){
-            cleanWithStore.pendingApproval=true;
-            alert(`⚠️ 1日の車検台数が制限台数（${dayLimit}台）を超えました。\n本店での承認が必要です。`);
+          rows[modalIdx]={...cleanWithStore,seq:_seq,bookingStatus:'confirmed'};
+          // 予約順(seq)で承認状態を再計算（既存の確定行は確定のまま＝編集で承認を再要求しない）
+          rows=recomputeInspApproval(rows,dayLimit);
+          // 新規／再予約が上限超過で「承認待ちに転じた」ときだけ通知（編集中の確定客には出さない）
+          if(rows[modalIdx]&&rows[modalIdx].pendingApproval&&!_wasPending){
+            alert(`⚠️ 1日の上限を超えたため、本店承認が必要です（通常${dayLimit}台／レギュラー車検3台）。`);
           }
-          // レギュラー車検（course=3）の1日3台上限チェック
-          if(Number(cleanWithStore.course)===3){
-            const regularCount=rows.filter((r,i)=>i!==modalIdx&&r.name&&Number(r.course)===3&&!r.pendingApproval).length;
-            if(regularCount>=3){
-              cleanWithStore.pendingApproval=true;
-              alert(`⚠️ レギュラー車検は1日最大3台までです（両店合計）。\n本店での承認が必要です。`);
-            }
-          }
-          rows[modalIdx]={...cleanWithStore,bookingStatus:'confirmed'};
           console.log('[SAVE]','targetDk=',targetDk,'modalDk=',modalDk,'prev keys=',Object.keys(prev).join(','));
           const result={...prev,[targetDk]:rows};
           const origDk=formData._originalDk||originalModalDkRef.current;
           if(origDk&&origDk!==targetDk&&prev[origDk]){
-            const oldRows=[...(prev[origDk]||[])];if(oldRows[modalIdx])oldRows[modalIdx]=blankInsp();result[origDk]=oldRows;
+            let oldRows=[...(prev[origDk]||[])];if(oldRows[modalIdx])oldRows[modalIdx]=blankInsp();
+            // 日付変更で空いた旧日の枠も再計算（空いた分だけ承認待ちを昇格）
+            oldRows=recomputeInspApproval(oldRows,inspLimits[origDk]??6);
+            result[origDk]=oldRows;
           }
           return result;
         });
@@ -6855,17 +6884,9 @@ function AppInner() {
         rows[modalIdx]=blankInsp(); // スケジュールから完全削除（cancelled表示を残さない）
         // 末尾の空行を整理
         while(rows.length>0&&!rows[rows.length-1]?.name) rows.pop();
-        // ★ 台数が制限内に戻ったら pendingApproval を自動解除
-        const _lim=inspLimits[modalDk]??6;
-        let _conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
-        for(let i=0;i<rows.length;i++){
-          const r=rows[i];
-          if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled')continue;
-          if(_conf>=_lim)break;
-          if(Number(r.course)===3){const _reg=rows.filter((rr,ii)=>ii!==i&&rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;if(_reg>=3)continue;}
-          rows[i]={...rows[i]};delete rows[i].pendingApproval;_conf++;
-        }
-        return{...prev,[modalDk]:rows.length>0?rows:[]};
+        // 予約順(seq)で承認状態を再計算（空いた枠の分だけ承認待ちを自動承認）
+        const newRows=recomputeInspApproval(rows,inspLimits[modalDk]??6);
+        return{...prev,[modalDk]:newRows.length>0?newRows:[]};
       });
       // ★顧客リストのステータスをcancelに連動
       if(cancelCustId||cancelName){
@@ -6909,16 +6930,18 @@ function AppInner() {
   // 承認ハンドラー
   const handleApprove=useCallback((dk,idx)=>{
     setInspData(prev=>{
-      const rows=(prev[dk]||[]).map(r=>r||blankInsp());
+      let rows=(prev[dk]||[]).map(r=>r||blankInsp());
       if(rows[idx]){
         const updated={...rows[idx]};
         delete updated.pendingApproval;
         updated.approved=true;
         rows[idx]=updated;
       }
+      // 承認後も予約順(seq)で整合（承認済みは確定として固定）
+      rows=recomputeInspApproval(rows,inspLimits[dk]??6);
       return{...prev,[dk]:rows};
     });
-  },[setInspData]);
+  },[setInspData,inspLimits]);
 
   // ★ 起動時：GASから直接読み込み不要な pendingApproval を一括解除
   // 重要: setInspData は prev（現在の最新state）とマージして書き戻すため
@@ -6936,19 +6959,19 @@ function AppInner() {
         const fixed={};
         for(const dk of Object.keys(latestInsp)){
           const rows=latestInsp[dk]||[];
+          if(!Array.isArray(rows)||rows.length===0)continue;
           if(!rows.some(r=>r?.name&&r?.pendingApproval&&r?.bookingStatus!=='cancelled'))continue;
           const lim=limitsMap[dk]??6;
-          let conf=rows.filter(r=>r?.name&&r?.course&&!r?.pendingApproval&&r?.bookingStatus!=='cancelled').length;
-          if(conf>=lim)continue;
+          // 予約順(seq)で再計算。起動時は「昇格のみ」（承認待ち→確定）。
+          // 既存の確定行を承認待ちに降格させることはしない（旧データを壊さない）。
+          const rc=recomputeInspApproval(rows,lim);
           let changed=false;
-          const newRows=rows.map(r=>{
-            if(!r?.name||!r?.course||!r?.pendingApproval||r?.bookingStatus==='cancelled'||conf>=lim)return r;
-            if(Number(r.course)===3){
-              const reg=rows.filter(rr=>rr?.name&&Number(rr.course)===3&&!rr?.pendingApproval&&rr?.bookingStatus!=='cancelled').length;
-              if(reg>=3)return r;
-            }
-            conf++;changed=true;
-            const{pendingApproval:_,...rest}=r;return rest;
+          const newRows=rows.map((r,i)=>{
+            if(!r)return r;
+            const wasPending=!!r.pendingApproval;
+            const nowPending=!!(rc[i]&&rc[i].pendingApproval);
+            if(wasPending&&!nowPending){changed=true;const{pendingApproval:_,...rest}=r;return rest;}
+            return r;
           });
           if(changed)fixed[dk]=newRows;
         }
@@ -7849,13 +7872,18 @@ function AppInner() {
                           if(so!==0)return so;
                           return timeToMin(a.time)-timeToMin(b.time);
                         };
-                        const allMapped=allRows.map((r,i)=>({...(r&&r.name?r:blankInsp()),_origIdx:i}));
                         // 台数制限取得（設定なければ6）
                         const dayInspLimit=inspLimits[dk]??6;
-                        // キャンセル除外・名前あり行をidx順（入力順）で並べる
+                        // 予約順(seq)で承認状態をその場で再計算し、これを表示の真実とする。
+                        // → 保存フラグのラグ・経路差・ポーリング競合に依存せず、承認待ちバッジを常に正しく表示。
+                        //   （繰り上がりで確定した行はバッジが消え、レギュラー3台超過は承認待ちのまま）
+                        const recomputed=recomputeInspApproval(allRows.map(r=>(r&&r.name?r:blankInsp())),dayInspLimit);
+                        const allMapped=recomputed.map((r,i)=>({...(r&&r.name?r:blankInsp()),_origIdx:i}));
+                        // キャンセル除外・名前あり行を予約順(seq)で並べる
+                        // （先着6台/7台目の判定は予約順。seq無し旧データは入力順にフォールバック）
                         const validRows=allMapped
                           .filter(r=>!!(r.name)&&r.bookingStatus!=='cancelled')
-                          .sort((a,b)=>a._origIdx-b._origIdx);
+                          .sort((a,b)=>{const sa=(a.seq!=null)?a.seq:a._origIdx;const sb=(b.seq!=null)?b.seq:b._origIdx;return sa-sb;});
 
                         // 上段6台：入力順で先着dayInspLimit台を確定（店舗・承認状態に関わらず）
                         // ただし表示順はログイン店舗優先・時刻順（sortFn）で並べる
