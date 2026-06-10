@@ -6774,20 +6774,6 @@ function AppInner() {
           }
           return result;
         });
-        // ★スケジュール側で本予約を編集／車検日（入庫日）を変更したとき、顧客リスト(customers.html)の
-        //   入庫日も連動更新する。リストから予約した顧客（custIdあり）のみ。cust-updatesキュー経由で反映。
-        if(cleanWithStore.custId){
-          const _sd=selDateRef.current||selDate;
-          const _tdk=formData._targetDk;
-          const _tgt=_tdk||modalDkRef.current||(_sd instanceof Date?`${_sd.getFullYear()}-${_sd.getMonth()+1}-${_sd.getDate()}`:(typeof _sd==='string'&&_sd?_sd:modalDk));
-          const _p=String(_tgt).split('-').map(Number);
-          const _entryDate=(_p.length===3&&!isNaN(_p[0]))?`${_p[0]}-${String(_p[1]).padStart(2,'0')}-${String(_p[2]).padStart(2,'0')}`:_tgt;
-          syncCustStatus(cleanWithStore.custId,'confirm',{
-            entryDate:_entryDate,linkedInspDate:_entryDate,
-            course:cleanWithStore.course,store:cleanWithStore.store,
-            staff:cleanWithStore.staff,tokuten:cleanWithStore.tokuten,note:cleanWithStore.note,
-          },cleanWithStore.name,cleanWithStore.no);
-        }
         // 日付変更時：古い代車予約を削除（pendingLoanerDeleteBk または _originalDkから計算）
         const _origDkForDel=originalModalDkRef.current||formData._originalDk;
         const _delBk=pendingLoanerDeleteBk||(_origDkForDel&&_origDkForDel!==formData._targetDk?`insp-${_origDkForDel}-${modalIdx}`:'');
