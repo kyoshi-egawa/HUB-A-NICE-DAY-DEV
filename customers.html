@@ -1646,14 +1646,22 @@ const App=()=>{
           (r.custId&&r.custId===c.custId)||
           (r.name&&r.name===c.name)
         ))continue;
+        // 上限判定：既存の確定台数を超える分だけ承認待ちにする（復元で既存予約を圧迫しない）
+        const confirmedRows=activeRows.filter(r=>r&&r.name&&r.course&&!r.pendingApproval);
+        const lim=(inspLimits&&inspLimits[dk])??6;
+        const courseNum=Number(c.course)||0;
+        let needsApproval=confirmedRows.length>=lim;
+        if(courseNum===3&&confirmedRows.filter(r=>Number(r.course)===3).length>=3)needsApproval=true;
+        if(courseNum===1&&confirmedRows.filter(r=>Number(r.course)===1).length>=2)needsApproval=true;
         const idx=newInspData[dk].length;
         newInspData[dk]=[...newInspData[dk],{
           name:c.name,carType:c.carType||'',
-          course:Number(c.course)||0,
+          course:courseNum,
           store:c.store||'honten',staff:c.staff||'',
           tokuten:c.tokuten||'-',note:c.note||'',no:c.no||'',
-          bookingStatus:'confirmed',pendingApproval:false,
+          bookingStatus:'confirmed',pendingApproval:needsApproval,
           custId:c.custId,bookingTime:c.bookingTime||'',time:c.bookingTime||'',
+          seq:Date.now()+added, // 予約順は最後尾へ（既存予約の並び・確定を乱さない）
           bookingKey:`insp-${dk}-${idx}`,
         }];
         toAdd.push({c,dk});
@@ -1678,7 +1686,7 @@ const App=()=>{
         diagMsg:`データサイズ: ${sizeBeforeKB}KB → ${sizeAfter}KB（追加${added}件・確認${verified}件）`}));
     }catch(e){alert('修復に失敗しました: '+(e.message||e));}
     finally{setSyncing(false);}
-  },[syncDialog]);
+  },[syncDialog,inspLimits]);
 
   // 現在のファイルの顧客リスト
   const currentFile=files[activeIdx];
