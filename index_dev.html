@@ -6599,7 +6599,7 @@ function AppInner() {
         // 同一のアクティブ予約を編集している時だけ既存のseq・状態を引き継ぐ。
         // 空き／キャンセル済みスロットへの新規予約は必ず新しいseqを付与（予約順の最後に並ぶ）。
         const _editingActive=!!(_prevRow&&_prevRow.name&&_prevRow.bookingStatus!=='cancelled');
-        const _seq=(_editingActive&&_prevRow.seq!=null)?_prevRow.seq:Date.now();
+        const _seq=_editingActive?_prevRow.seq:Date.now();
         const _wasPending=_editingActive&&!!_prevRow.pendingApproval;
         const lim=inspLimits[dk]??6;
         rows[ui]={...cs,seq:_seq,bookingStatus:'confirmed'};
@@ -6753,7 +6753,7 @@ function AppInner() {
           // 同一のアクティブ予約を編集している時だけ既存のseq・状態を引き継ぐ。
           // 空き／キャンセル済みスロットへの新規予約は必ず新しいseqを付与（予約順の最後に並ぶ）。
           const _editingActive=!!(_prevRow&&_prevRow.name&&_prevRow.bookingStatus!=='cancelled');
-          const _seq=(_editingActive&&_prevRow.seq!=null)?_prevRow.seq:Date.now();
+          const _seq=_editingActive?_prevRow.seq:Date.now();
           const _wasPending=_editingActive&&!!_prevRow.pendingApproval;
           const dayLimit=inspLimits[targetDk]??6;
           rows[modalIdx]={...cleanWithStore,seq:_seq,bookingStatus:'confirmed'};
