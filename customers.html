@@ -591,8 +591,30 @@ const LoanerGrid=memo(({storeId,entryDate,loanerRes,loanerList,onSelect,selCarId
 // 予約モーダル
 // ═══════════════════════════════════════════
 
+// ── 第2火曜日（両店共通定休）判定ユーティリティ ──
+// index_dev.html と同一ロジック。1月・5月・8月の第2火曜は通常営業（除外）。
+// overrideOpen に入っている日付は個別に「通常営業」へ戻す。
+const _secTueExemptMonths=new Set([0,4,7]); // 1月・5月・8月（0-indexed）
+const getSecondTuesday=(year,month)=>{
+  if(_secTueExemptMonths.has(month))return null;
+  let count=0;
+  for(let d=1;d<=31;d++){
+    const dt=new Date(year,month,d);
+    if(dt.getMonth()!==month)break;
+    if(dt.getDay()===2){count++;if(count===2)return d;}
+  }
+  return null;
+};
+const isSecondTuesdayHoliday=(year,month,day,overrideOpen)=>{
+  const d2=getSecondTuesday(year,month);
+  if(d2===null||d2!==day)return false;
+  const ds=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  if(overrideOpen&&overrideOpen.includes(ds))return false;
+  return true;
+};
+
 // ── 車検カレンダーピッカー（入庫日選択用）──
-function InspCalendarPicker({value,onChange,inspData,closedDays,closedDates,inspLimits,open,onClose}){
+function InspCalendarPicker({value,onChange,inspData,closedDays,closedDates,overrideOpen,inspLimits,open,onClose}){
   const [calMonth,setCalMonth]=useState(()=>{
     if(value){const p=value.split('-');return new Date(Number(p[0]),Number(p[1])-1,1);}
     return new Date();
@@ -620,7 +642,10 @@ function InspCalendarPicker({value,onChange,inspData,closedDays,closedDates,insp
     const cdates=Array.isArray(closedDates)?closedDates:[];
     if(cdays.includes(dt.getDay()))return true;
     const ds=`${cy}-${String(cm+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    return cdates.includes(ds);
+    if(cdates.includes(ds))return true;
+    // 第2火曜日（両店共通定休。overrideOpenで個別に通常営業化）
+    if(isSecondTuesdayHoliday(cy,cm,d,Array.isArray(overrideOpen)?overrideOpen:[]))return true;
+    return false;
   }
   const DOW=['日','月','火','水','木','金','土'];
   const today=new Date();
@@ -1424,6 +1449,7 @@ const App=()=>{
           custId:customer.custId,
           bookingTime,
           time:bookingTime||'',  // index.htmlのrow.time表示用
+          seq:Date.now(),        // 予約順（index_dev.htmlのseqと統一。新規＝最後尾）
         };
         if(!Array.isArray(newInspData[dkFormatted]))newInspData[dkFormatted]=[];
         newInspData[dkFormatted]=[...newInspData[dkFormatted],newRow];
