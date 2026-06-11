@@ -1234,41 +1234,56 @@ const App=()=>{
     // cust-updatesポーリング（スケジュール側からの即時連動）
     const pollUpdates=async()=>{
       if(__saveCount>0)return; // 書き込み中はスキップ
+      // ★顧客データ未ロード中は消費しない。起動直後の即時ポーリングがチャンク読込完了前に
+      //   キューを空読みして通知を消す（リスト入庫日が更新されない）不具合の修正。
+      if(!filesRef.current||filesRef.current.length===0)return;
       try{
         const updates=await sGet(STOR+'cust-updates');
         if(!Array.isArray(updates)||updates.length===0)return;
-        if(!window.__lastPollTs) window.__lastPollTs=0;
-        // tsありのものだけを対象（古い無タイムスタンプ項目は無視してクリーンアップ）
-        const fresh=updates.filter(u=>u.ts&&u.ts>window.__lastPollTs);
+        if(!window.__appliedUpdTs)window.__appliedUpdTs=new Set();
+        // tsありで未適用のものだけを対象（古い無タイムスタンプ項目は無視してクリーンアップ）
+        const fresh=updates.filter(u=>u.ts&&!window.__appliedUpdTs.has(u.ts));
         if(fresh.length===0)return;
-        const newTs=Math.max(...fresh.map(u=>u.ts));
-        // ★ 先にstate更新（適用してからクリア：ネットワーク失敗でも再試行可能）
-        let changed=false;
-        setFiles(prev=>{
-          const next=prev.map(f=>{
-            const custs=f.customers.map(c=>{
-              // custIdまたはname+noでマッチング
-              const upd=fresh.find(u=>
-                (u.custId&&u.custId===c.custId)||(u.name&&((!u.no&&u.name===c.name)||(u.no&&u.name===c.name&&String(u.no)===String(c.no))))
-              );
-              if(!upd)return c;
-              changed=true;
-              // statusとextraFieldsのみ更新（他フィールドは保護）
-              const{custId:_,name:__,no:___,ts:____,...safeFields}=upd;
-              return{...c,...safeFields};
+        // custIdまたはname+noでマッチング
+        const findUpd=(c)=>fresh.find(u=>
+          (u.custId&&u.custId===c.custId)||(u.name&&((!u.no&&u.name===c.name)||(u.no&&u.name===c.name&&String(u.no)===String(c.no))))
+        );
+        // ★適用先の有無をsetFilesの外で先に判定（filesRef基準）。
+        //   マッチした通知だけを処理済み扱いにし、マッチしない通知はキューに残す（後でデータが揃ったら適用）。
+        const appliedTs=new Set();
+        const changedFiles=new Set();
+        filesRef.current.forEach(f=>(f.customers||[]).forEach(c=>{
+          const u=findUpd(c);
+          if(u){appliedTs.add(u.ts);changedFiles.add(f.name);}
+        }));
+        if(appliedTs.size>0){
+          setFiles(prev=>{
+            const next=prev.map(f=>{
+              if(!changedFiles.has(f.name))return f;
+              const custs=f.customers.map(c=>{
+                const upd=findUpd(c);
+                if(!upd)return c;
+                // statusとextraFieldsのみ更新（他フィールドは保護）
+                const{custId:_,name:__,no:___,ts:____,...safeFields}=upd;
+                return{...c,...safeFields};
+              });
+              return{...f,customers:custs};
             });
-            return{...f,customers:custs};
+            // ★変更のあった月ファイルだけ保存（未変更月まで全保存すると、他端末の更新を
+            //   この端末の古いコピーで巻き戻すため）
+            next.forEach(f=>{if(changedFiles.has(f.name))saveFileChunked(f);});
+            filesRef.current=next; // filesRef同期
+            return next;
           });
-          if(!changed)return prev;
-          // チャンクも更新
-          next.forEach(f=>saveFileChunked(f));
-          filesRef.current=next; // filesRef同期
-          return next;
+          appliedTs.forEach(ts=>window.__appliedUpdTs.add(ts));
+        }
+        // 適用済みと期限切れ(7日)のみキューから削除。未マッチの通知は残す
+        const remaining=updates.filter(u=>{
+          if(u.ts&&appliedTs.has(u.ts))return false;
+          if(!u.ts||Date.now()-u.ts>7*24*60*60*1000)return false;
+          return true;
         });
-        window.__lastPollTs=newTs;
-        // 処理済み（ts≤newTs）のみキューから削除。新着は残す
-        const remaining=updates.filter(u=>u.ts&&u.ts>newTs);
-        await sSet(STOR+'cust-updates',remaining.length>0?remaining:[]);
+        if(remaining.length!==updates.length)await sSet(STOR+'cust-updates',remaining.length>0?remaining:[]);
       }catch{}
     };
     pollUpdatesRef.current=pollUpdates;
