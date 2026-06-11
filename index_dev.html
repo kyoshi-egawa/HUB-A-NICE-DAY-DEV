@@ -6813,17 +6813,27 @@ function AppInner() {
           }
           return result;
         });
-        // ★日付変更時のみ：リストから予約した顧客（custIdあり）の入庫日を顧客リストにも連動更新する。
+        // ★リストから予約した顧客（custIdあり）の保存内容を顧客リストへ連動更新する。
         //   path1（顧客リストからの予約作成）と同じ syncCustStatus の仕組み。cust-updatesキュー経由で反映。
+        //   入庫日だけでなくコース・店舗・担当・特典・備考・入庫時間も同期する
+        //   （スケジュール側でコース変更してもリストのバッヂが古いままになる問題の対応）。
         {
           const _sd2=selDateRef.current||selDate;
           const _tgt2=formData._targetDk||modalDkRef.current||(_sd2 instanceof Date?`${_sd2.getFullYear()}-${_sd2.getMonth()+1}-${_sd2.getDate()}`:(typeof _sd2==='string'&&_sd2?_sd2:modalDk));
-          const _orig2=formData._originalDk||originalModalDkRef.current;
-          if(cleanWithStore.custId&&_orig2&&_orig2!==_tgt2){
+          if(cleanWithStore.custId){
             const _p2=String(_tgt2).split('-').map(Number);
             const _entryDate2=(_p2.length===3&&!isNaN(_p2[0]))?`${_p2[0]}-${String(_p2[1]).padStart(2,'0')}-${String(_p2[2]).padStart(2,'0')}`:_tgt2;
-            console.log('[SYNC entryDate→list]','custId=',cleanWithStore.custId,'name=',cleanWithStore.name,'date=',_entryDate2);
-            syncCustStatus(cleanWithStore.custId,'confirm',{entryDate:_entryDate2,linkedInspDate:_entryDate2},cleanWithStore.name,cleanWithStore.no);
+            const _fields2={
+              entryDate:_entryDate2,linkedInspDate:_entryDate2,
+              course:Number(cleanWithStore.course)||0,
+              store:cleanWithStore.store||'',
+              staff:cleanWithStore.staff||'',
+              tokuten:cleanWithStore.tokuten||'-',
+              note:cleanWithStore.note||'',
+              bookingTime:cleanWithStore.time||cleanWithStore.bookingTime||'',
+            };
+            console.log('[SYNC →list]','custId=',cleanWithStore.custId,'name=',cleanWithStore.name,'fields=',JSON.stringify(_fields2));
+            syncCustStatus(cleanWithStore.custId,'confirm',_fields2,cleanWithStore.name,cleanWithStore.no);
           }
         }
         // ★保存後検証：sSetはno-corsでGAS側の失敗(lock_timeout等)を検知できないため、

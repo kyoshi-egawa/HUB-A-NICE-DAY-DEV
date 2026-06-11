@@ -1278,6 +1278,28 @@ const App=()=>{
           if(u){appliedTs.add(u.ts);changedFiles.add(f.name);}
         }));
         if(appliedTs.size>0){
+          // 保存後にGASを読み返して実反映を確認（sSetはno-corsで失敗を検知できないため）。
+          // 未反映なら最大3回再試行。スケジュール側の変更がリストのチャンクに残らない事故の防止。
+          const saveChunkVerified=async(f)=>{
+            for(let _a=0;_a<3;_a++){
+              try{
+                await saveFileChunked(f);
+                try{localStorage.setItem(STOR+'cf-'+safeName(f.name),JSON.stringify(f));}catch(e){}
+                await new Promise(r=>setTimeout(r,2000));
+                const chk=await loadFileChunked(f.name);
+                const okAll=chk&&Array.isArray(chk.customers)&&fresh.every(u=>{
+                  if(!appliedTs.has(u.ts))return true;
+                  const c=chk.customers.find(x=>(u.custId&&x.custId===u.custId)||(x.name===u.name&&String(x.no||'')===String(u.no||'')));
+                  if(!c)return true; // このファイルの顧客でなければ対象外
+                  const{custId:_,name:__,no:___,ts:____,...sf}=u;
+                  return Object.keys(sf).every(k=>String(c[k]??'')===String(sf[k]??''));
+                });
+                if(okAll)return;
+                console.warn('[SYNC] chunk保存 未反映 retry',_a+1,f.name);
+              }catch(e){console.error('[SYNC] chunk保存エラー:',e);}
+            }
+            console.error('[SYNC] chunk保存がGASに反映できませんでした:',f.name);
+          };
           setFiles(prev=>{
             const next=prev.map(f=>{
               if(!changedFiles.has(f.name))return f;
@@ -1291,8 +1313,8 @@ const App=()=>{
               return{...f,customers:custs};
             });
             // ★変更のあった月ファイルだけ保存（未変更月まで全保存すると、他端末の更新を
-            //   この端末の古いコピーで巻き戻すため）
-            next.forEach(f=>{if(changedFiles.has(f.name))saveFileChunked(f);});
+            //   この端末の古いコピーで巻き戻すため）。読み返し検証付き。
+            next.forEach(f=>{if(changedFiles.has(f.name))saveChunkVerified(f);});
             filesRef.current=next; // filesRef同期
             return next;
           });
