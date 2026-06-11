@@ -6834,6 +6834,22 @@ function AppInner() {
             };
             console.log('[SYNC →list]','custId=',cleanWithStore.custId,'name=',cleanWithStore.name,'fields=',JSON.stringify(_fields2));
             syncCustStatus(cleanWithStore.custId,'confirm',_fields2,cleanWithStore.name,cleanWithStore.no);
+            // ★キュー書き込みも読み返しで確認（sSetはno-corsでlock_timeout等を検知できない）。
+            //   キューに見つからなければ再送（最大2回）。リスト側が先に消費済みだった場合の
+            //   再送は同じ値の再適用になるだけで冪等・無害。
+            const _syncVerify=async(attempt)=>{
+              try{
+                const q=await sGet(STOR+'cust-updates');
+                const found=Array.isArray(q)&&q.some(u=>u&&u.custId===cleanWithStore.custId&&String(u.entryDate||'')===String(_entryDate2));
+                if(found){console.log('[SYNC →list] queued ok');return;}
+                if(attempt<2){
+                  console.warn('[SYNC →list] キュー未確認→再送 attempt='+(attempt+1));
+                  syncCustStatus(cleanWithStore.custId,'confirm',_fields2,cleanWithStore.name,cleanWithStore.no);
+                  setTimeout(()=>_syncVerify(attempt+1),3000);
+                }
+              }catch(e){}
+            };
+            setTimeout(()=>_syncVerify(0),2500);
           }
         }
         // ★保存後検証：sSetはno-corsでGAS側の失敗(lock_timeout等)を検知できないため、
