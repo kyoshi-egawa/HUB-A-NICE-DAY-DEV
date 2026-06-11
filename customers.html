@@ -1374,19 +1374,37 @@ const App=()=>{
   // スケジュール(insp)をGASへ保存し、反映状況をトーストで可視化する。
   // sSetのawaitはGASが実際に書き終えた応答で解決するので「解決＝反映完了」。
   // 30秒(GASロック最大25秒＋余裕)を超えても未解決なら「遅延・再試行」を表示。
-  const saveInspWithStatus=useCallback((data,name)=>{
-    const run=()=>{
+  const saveInspWithStatus=useCallback((data,name,verify)=>{
+    const run=(attempt=0)=>{
       setSyncToast({status:'saving',name});
       let settled=false;
-      const slowTimer=setTimeout(()=>{if(!settled)setSyncToast({status:'slow',name,retry:run});},30000);
-      return sSet(STOR+'insp',data).then(()=>{
+      const slowTimer=setTimeout(()=>{if(!settled)setSyncToast({status:'slow',name,retry:()=>run(0)});},30000);
+      return sSet(STOR+'insp',data).then(async()=>{
         settled=true;clearTimeout(slowTimer);
         inspWriteRef.current=Date.now(); // 保護延長
+        // ★sSetはno-corsのためGAS側の失敗(lock_timeout等)を検知できない。
+        //   読み返して予約行が実際に入ったか確認し、未反映なら自動リトライ（最大2回）。
+        if(verify&&verify.dk){
+          await new Promise(r=>setTimeout(r,2500));
+          let ok=true;
+          try{
+            const rb=await sGet(STOR+'insp');
+            if(rb&&typeof rb==='object'){
+              const rows=rb[verify.dk]||[];
+              ok=rows.some(r=>r&&(verify.custId?r.custId===verify.custId:(r.name===verify.name&&String(r.no||'')===String(verify.no||''))));
+            }
+          }catch(e){} // 読み込み失敗時は判定不能→エラー扱いにしない
+          if(!ok){
+            if(attempt<2)return run(attempt+1);
+            setSyncToast({status:'error',name,retry:()=>run(0)});
+            return;
+          }
+        }
         setSyncToast({status:'done',name});
         setTimeout(()=>setSyncToast(s=>(s&&s.status==='done'&&s.name===name)?null:s),4000);
       }).catch(()=>{
         settled=true;clearTimeout(slowTimer);
-        setSyncToast({status:'error',name,retry:run});
+        setSyncToast({status:'error',name,retry:()=>run(0)});
       });
     };
     return run();
@@ -1426,7 +1444,8 @@ const App=()=>{
       const _updFile=next.find(f=>f.customers?.some(c=>c.custId===customer.custId));
       if(_updFile){
         // localStorageキャッシュ即時更新（タブ切替後の上書きを防ぐ）
-        try{localStorage.setItem(STOR+'cf-'+SAFE(_updFile.name),JSON.stringify(_updFile));}catch(e){}
+        // ※従来はSAFE（スコープ外）参照のReferenceErrorをcatchで握り潰し、一度も動いていなかった
+        try{localStorage.setItem(STOR+'cf-'+safeName(_updFile.name),JSON.stringify(_updFile));}catch(e){}
       }
       return next;
     });
@@ -1491,7 +1510,8 @@ const App=()=>{
         inspWriteRef.current=Date.now(); // 書き込み時刻を記録
         // ★スケジュール(insp)を最優先で先に・確実に書き込む（顧客ファイル等の多数のチャンク書き込みと
         //   GASロックを奪い合って失敗するのを防ぐため await で完了を待つ）。反映状況はトーストで可視化。
-        await saveInspWithStatus(newInspData,customer.name);
+        //   verify指定で読み返し検証＋自動リトライ（無音失敗対策）。
+        await saveInspWithStatus(newInspData,customer.name,{dk:dkFormatted,custId:customer.custId,name:customer.name,no:customer.no});
 
         // 4. custbk（カレンダー6枠）にも保存
         // キー形式: "氏名::2026-3-16"（ゼロなし）
@@ -1594,17 +1614,27 @@ const App=()=>{
     // 顧客ファイルをGAS最新とマージして保存（他端末の更新を消さない）。
     // ★insp書き込みの後に・バックグラウンドで実行。先にスケジュールを確実に反映し、
     //   その後で（多数チャンクの）顧客ファイル保存を行うことでGASロック競合を避ける。
+    //   sSetはno-corsで失敗を検知できないため、読み返して実反映を確認し、最大3回まで再試行。
     if(changedFile){
       (async()=>{
-        try{
-          const _latest=await loadFileChunked(changedFile.name);
-          const _base=(_latest&&Array.isArray(_latest.customers))?_latest.customers:changedFile.customers;
-          let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
-          if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
-          const _mf={...changedFile,customers:_merged};
-          await saveFileChunked(_mf);
-          try{localStorage.setItem(STOR+'cf-'+SAFE(changedFile.name),JSON.stringify(_mf));}catch(e){}
-        }catch(e){console.error('顧客ファイル保存エラー:',e);}
+        for(let _attempt=0;_attempt<3;_attempt++){
+          try{
+            const _latest=await loadFileChunked(changedFile.name);
+            const _base=(_latest&&Array.isArray(_latest.customers))?_latest.customers:changedFile.customers;
+            let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
+            if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
+            const _mf={...changedFile,customers:_merged};
+            await saveFileChunked(_mf);
+            try{localStorage.setItem(STOR+'cf-'+safeName(changedFile.name),JSON.stringify(_mf));}catch(e){}
+            // 読み返し検証：保存した顧客のstatus/entryDateがGASに入ったか
+            await new Promise(r=>setTimeout(r,2000));
+            const _check=await loadFileChunked(changedFile.name);
+            const _saved=_check&&(_check.customers||[]).find(c=>c.custId===customer.custId);
+            if(_saved&&_saved.status===updCustomer.status&&_saved.entryDate===updCustomer.entryDate)return;
+            console.warn('顧客ファイル保存 未反映 retry',_attempt+1,customer.name);
+          }catch(e){console.error('顧客ファイル保存エラー:',e);}
+        }
+        alert(`⚠️ ${customer.name} のリスト保存がサーバーに反映できませんでした。\n通信状況を確認して、予約をやり直してください。`);
       })();
     }
     // 再予約時はcust-updatesの古いキャンセル通知を削除（cancel優先度コリジョン防止）

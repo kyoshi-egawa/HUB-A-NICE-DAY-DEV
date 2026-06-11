@@ -6797,6 +6797,33 @@ function AppInner() {
             syncCustStatus(cleanWithStore.custId,'confirm',{entryDate:_entryDate2,linkedInspDate:_entryDate2},cleanWithStore.name,cleanWithStore.no);
           }
         }
+        // ★保存後検証：sSetはno-corsでGAS側の失敗(lock_timeout等)を検知できないため、
+        //   数秒後にGASを読み返して保存行が実在するか確認。未反映ならローカル状態を再送、
+        //   それでも反映されなければアラート（無音失敗→ポーリングで巻き戻る事故の防止）。
+        {
+          const _sd3=selDateRef.current||selDate;
+          const _vDk=formData._targetDk||modalDkRef.current||(_sd3 instanceof Date?`${_sd3.getFullYear()}-${_sd3.getMonth()+1}-${_sd3.getDate()}`:(typeof _sd3==='string'&&_sd3?_sd3:modalDk));
+          const _vName=cleanWithStore.name,_vNo=cleanWithStore.no,_vCust=cleanWithStore.custId;
+          if(_vDk&&_vName){
+            const _verify=async(attempt)=>{
+              try{
+                const remote=await sGet(STOR+'insp');
+                if(!remote||typeof remote!=='object')return; // 読込失敗時は判定しない
+                const rows=remote[_vDk]||[];
+                const ok=rows.some(r=>r&&(_vCust?r.custId===_vCust:(r.name===_vName&&String(r.no||'')===String(_vNo||''))));
+                if(ok){console.log('[VERIFY insp] ok',_vName,_vDk);return;}
+                console.warn('[VERIFY insp] 未反映 attempt='+attempt,_vName,_vDk);
+                if(attempt<2){
+                  setInspData(prev=>({...prev})); // 同内容を再送（sSet再実行）
+                  setTimeout(()=>_verify(attempt+1),8000);
+                }else{
+                  alert(`⚠️ ${_vName} の予約保存がサーバーに反映されていません。\nもう一度開いて保存し直してください。`);
+                }
+              }catch(e){}
+            };
+            setTimeout(()=>_verify(0),6000);
+          }
+        }
         // 日付変更時：古い代車予約を削除（pendingLoanerDeleteBk または _originalDkから計算）
         const _origDkForDel=originalModalDkRef.current||formData._originalDk;
         const _delBk=pendingLoanerDeleteBk||(_origDkForDel&&_origDkForDel!==formData._targetDk?`insp-${_origDkForDel}-${modalIdx}`:'');
