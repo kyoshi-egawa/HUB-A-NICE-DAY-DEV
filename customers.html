@@ -32,6 +32,8 @@ input,select,textarea{font-family:inherit;}
 .row-cancel:hover  {background:#fca5a5;}
 .row-new_car:hover {background:#fbbf24;}
 @keyframes spin{to{transform:rotate(360deg);}}
+@keyframes rowflash{0%{background:#fde68a;}60%{background:#fef3c7;}100%{background:transparent;}}
+.row-flash{animation:rowflash 3.5s ease-out;}
 .spinner{width:38px;height:38px;border:4px solid #e2e8f0;border-top-color:#1d4ed8;border-radius:50%;animation:spin .8s linear infinite;}
 .spinner-sm{width:15px;height:15px;border:2.5px solid #cbd5e1;border-top-color:#1d4ed8;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle;}
 </style>
@@ -1040,12 +1042,12 @@ const BookingModal=({customer,inspData,loanerResH,loanerResS,loanerListH,loanerL
 // ═══════════════════════════════════════════
 // 顧客リスト行
 // ═══════════════════════════════════════════
-const CustomerRow=memo(({customer,onBook,onRevive})=>{
+const CustomerRow=memo(({customer,onBook,onRevive,pending,flash})=>{
   const st=STATUS_DEF[customer.status]||STATUS_DEF.none;
   const courseObj=COURSES.find(c=>c.id===Number(customer.course));
   const isCancelled=customer.status==='cancel';
   return(
-    <tr className={`row-${customer.status||'none'}`}
+    <tr className={`row-${customer.status||'none'}${flash?' row-flash':''}`}
       style={{borderBottom:'1px solid #f1f5f9',fontSize:12}}>
       {/* ＋予約ボタン ＋ 満期日 */}
       <td style={{padding:'7px 6px',whiteSpace:'nowrap',verticalAlign:'middle'}}>
@@ -1075,7 +1077,17 @@ const CustomerRow=memo(({customer,onBook,onRevive})=>{
       <td style={{padding:'7px 8px',color:'#7c3aed',verticalAlign:'middle',fontSize:11,fontWeight:600}}>{fmtDateShort(customer.dm1Book)}</td>
       <td style={{padding:'7px 8px',color:'#111827',verticalAlign:'middle',fontSize:11}}>{fmtDateShort(customer.dm2Date)}</td>
       <td style={{padding:'7px 8px',color:'#0284c7',verticalAlign:'middle',fontSize:11,fontWeight:600}}>{fmtDateShort(customer.dm2Book)}</td>
-      <td style={{padding:'7px 8px',verticalAlign:'middle',fontWeight:600,color:'#111827'}}>{fmtDate(customer.entryDate)}</td>
+      <td style={{padding:'7px 8px',verticalAlign:'middle',fontWeight:600,color:'#111827',whiteSpace:'nowrap'}}>
+        {fmtDate(customer.entryDate)}
+        {pending&&(
+          <span style={{marginLeft:6,padding:'2px 8px',background:'#fef3c7',color:'#92400e',
+            border:'1.5px solid #fbbf24',borderRadius:10,fontSize:10,fontWeight:800,
+            display:'inline-flex',alignItems:'center',gap:4,verticalAlign:'middle'}}>
+            <span className="spinner-sm" style={{width:10,height:10,borderWidth:2,borderTopColor:'#d97706'}}/>
+            反映中{pending.entryDate?`→${fmtDateShort(pending.entryDate)}`:''}
+          </span>
+        )}
+      </td>
       <td style={{padding:'7px 6px',verticalAlign:'middle',textAlign:'center'}}>
         {customer.tokuten&&customer.tokuten!=='-'&&(
           <span style={{padding:'2px 7px',background:'#ede9fe',color:'#7c3aed',borderRadius:10,fontSize:11,fontWeight:700}}>
@@ -1121,6 +1133,9 @@ const App=()=>{
   const [inspData,setInspData]=useState({});
   const inspWriteRef=useRef(0); // 最後にローカル書き込みした時刻
   const [syncToast,setSyncToast]=useState(null); // スケジュール反映状況トースト {status,name,retry}
+  const [pendingSync,setPendingSync]=useState({}); // スケジュール側からの変更が反映待ちの顧客 {custId|name__no:{name,entryDate,ts}}
+  const [syncFlash,setSyncFlash]=useState(null);   // スケジュール変更の反映完了フラッシュ {items:[{name,entryDate}],ts}
+  const [recentApplied,setRecentApplied]=useState({}); // 反映直後の行ハイライト {custId|name__no:ts}
   const [loanerResH,setLoanerResH]=useState({});
   const [loanerResS,setLoanerResS]=useState({});
   const [loanerListH,setLoanerListH]=useState([]);
@@ -1234,15 +1249,21 @@ const App=()=>{
     // cust-updatesポーリング（スケジュール側からの即時連動）
     const pollUpdates=async()=>{
       if(__saveCount>0)return; // 書き込み中はスキップ
-      // ★顧客データ未ロード中は消費しない。起動直後の即時ポーリングがチャンク読込完了前に
-      //   キューを空読みして通知を消す（リスト入庫日が更新されない）不具合の修正。
-      if(!filesRef.current||filesRef.current.length===0)return;
       try{
         const updates=await sGet(STOR+'cust-updates');
-        if(!Array.isArray(updates)||updates.length===0)return;
+        const arr=Array.isArray(updates)?updates:[];
         if(!window.__appliedUpdTs)window.__appliedUpdTs=new Set();
+        // ★「反映中」サイン：キュー上の未適用通知を行バッジ＋トーストで可視化
+        //   （反映までの数秒〜数十秒、現場で正常動作と分かるように）
+        const pend={};
+        arr.forEach(u=>{if(u&&u.ts&&!window.__appliedUpdTs.has(u.ts))pend[u.custId||`${u.name}__${u.no}`]={name:u.name,entryDate:u.entryDate,ts:u.ts};});
+        setPendingSync(prev=>JSON.stringify(prev)===JSON.stringify(pend)?prev:pend);
+        if(arr.length===0)return;
+        // ★顧客データ未ロード中は消費しない（反映中サインだけ出して待つ）。起動直後の
+        //   即時ポーリングがチャンク読込完了前にキューを空読みして通知を消す不具合の修正。
+        if(!filesRef.current||filesRef.current.length===0)return;
         // tsありで未適用のものだけを対象（古い無タイムスタンプ項目は無視してクリーンアップ）
-        const fresh=updates.filter(u=>u.ts&&!window.__appliedUpdTs.has(u.ts));
+        const fresh=arr.filter(u=>u.ts&&!window.__appliedUpdTs.has(u.ts));
         if(fresh.length===0)return;
         // custIdまたはname+noでマッチング
         const findUpd=(c)=>fresh.find(u=>
@@ -1276,14 +1297,32 @@ const App=()=>{
             return next;
           });
           appliedTs.forEach(ts=>window.__appliedUpdTs.add(ts));
+          // ★反映完了：対象行の「反映中」サインを消し、完了フラッシュを4秒表示
+          setPendingSync(prev=>{
+            const n={...prev};
+            fresh.forEach(u=>{if(appliedTs.has(u.ts))delete n[u.custId||`${u.name}__${u.no}`];});
+            return n;
+          });
+          const doneItems=fresh.filter(u=>appliedTs.has(u.ts)).map(u=>({name:u.name,entryDate:u.entryDate}));
+          if(doneItems.length>0){
+            const _fts=Date.now();
+            setSyncFlash({items:doneItems,ts:_fts});
+            setTimeout(()=>setSyncFlash(f=>(f&&f.ts===_fts)?null:f),4000);
+            // 反映された行をハイライト（どの顧客が変わったか一目で分かるように）
+            const _keys=fresh.filter(u=>appliedTs.has(u.ts)).map(u=>u.custId||`${u.name}__${u.no}`);
+            setRecentApplied(prev=>{const n={...prev};_keys.forEach(k=>{n[k]=_fts;});return n;});
+            setTimeout(()=>setRecentApplied(prev=>{
+              const n={...prev};_keys.forEach(k=>{if(n[k]===_fts)delete n[k];});return n;
+            }),4500);
+          }
         }
         // 適用済みと期限切れ(7日)のみキューから削除。未マッチの通知は残す
-        const remaining=updates.filter(u=>{
+        const remaining=arr.filter(u=>{
           if(u.ts&&appliedTs.has(u.ts))return false;
           if(!u.ts||Date.now()-u.ts>7*24*60*60*1000)return false;
           return true;
         });
-        if(remaining.length!==updates.length)await sSet(STOR+'cust-updates',remaining.length>0?remaining:[]);
+        if(remaining.length!==arr.length)await sSet(STOR+'cust-updates',remaining.length>0?remaining:[]);
       }catch{}
     };
     pollUpdatesRef.current=pollUpdates;
@@ -1893,7 +1932,9 @@ const App=()=>{
                   {search||filterStatus!=='all'?'条件に一致する顧客がいません':'データがありません'}
                 </td></tr>
               ):filtered.map(c=>(
-                <CustomerRow key={c.custId} customer={c} onBook={setBookingModal} onRevive={handleRevive}/>
+                <CustomerRow key={c.custId} customer={c} onBook={setBookingModal} onRevive={handleRevive}
+                  pending={pendingSync[c.custId]||pendingSync[`${c.name}__${c.no}`]||null}
+                  flash={!!(recentApplied[c.custId]||recentApplied[`${c.name}__${c.no}`])}/>
               ))}
             </tbody>
           </table>
@@ -2004,6 +2045,27 @@ const App=()=>{
           onClose={()=>setBookingModal(null)}
         />
       )}
+
+      {/* ── スケジュール側からの変更 反映中／完了トースト ── */}
+      {(Object.keys(pendingSync).length>0||syncFlash)&&(()=>{
+        const pendList=Object.values(pendingSync);
+        const isPend=pendList.length>0;
+        const theme=isPend?{bg:'#fef3c7',bd:'#fbbf24',fg:'#92400e'}:{bg:'#dbeafe',bd:'#60a5fa',fg:'#1e40af'};
+        const label=isPend
+          ?`スケジュールの変更を反映中… ${pendList.map(p=>p.name).filter(Boolean).join('・')}`
+          :`スケジュールの変更を反映しました：${(syncFlash.items||[]).map(i=>`${i.name}${i.entryDate?`→${i.entryDate.slice(5).replace('-','/')}`:''}`).join('・')}`;
+        return (
+          <div style={{position:'fixed',right:16,bottom:84,zIndex:99999,maxWidth:360,
+            padding:'11px 14px',borderRadius:11,boxShadow:'0 8px 24px rgba(0,0,0,.18)',
+            background:theme.bg,border:`2px solid ${theme.bd}`,color:theme.fg,
+            display:'flex',alignItems:'center',gap:10,fontSize:13,fontWeight:700}}>
+            {isPend
+              ?<span className="spinner-sm" style={{flexShrink:0,borderTopColor:'#d97706'}}/>
+              :<span style={{fontSize:17,flexShrink:0}}>✅</span>}
+            <span style={{flex:1,lineHeight:1.4}}>{label}</span>
+          </div>
+        );
+      })()}
 
       {/* ── スケジュール反映 同期トースト ── */}
       {syncToast&&(()=>{
