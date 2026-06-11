@@ -6672,6 +6672,25 @@ function AppInner() {
     // _idx/_slot/_slotNewは内部管理フィールドなので保存データから除去
     const {_idx,_slot,...cleanData}=formData;
 
+    // ★日付変更時の配置先を事前計算（上書き消失防止）。
+    //   従来は移動先でも rows[modalIdx] に書くため、移動先の同じ行番号に別の予約が
+    //   あると無警告で上書き消失していた。別予約がある場合は最初の空きスロット
+    //   （なければ末尾）へ配置する。代車のbookingKeyも同じ位置で発行する。
+    const _dcSd=selDateRef.current||selDate;
+    const _dcTargetDk=formData._targetDk||modalDkRef.current||(_dcSd instanceof Date?`${_dcSd.getFullYear()}-${_dcSd.getMonth()+1}-${_dcSd.getDate()}`:(typeof _dcSd==='string'&&_dcSd?_dcSd:modalDk));
+    const _dcOrigDk=formData._originalDk||originalModalDkRef.current;
+    const _dcIsDateChange=modalType==='insp'&&!!(_dcOrigDk&&_dcOrigDk!==_dcTargetDk);
+    let _dcPlaceIdx=modalIdx;
+    if(_dcIsDateChange){
+      const _dcRows=inspData[_dcTargetDk]||[];
+      const _dcSlot=_dcRows[modalIdx];
+      if(_dcSlot&&_dcSlot.name){
+        const _dcFree=_dcRows.findIndex(r=>!r||!r.name);
+        _dcPlaceIdx=_dcFree>=0?_dcFree:_dcRows.length;
+        console.log('[SAVE] 移動先idx',modalIdx,'は使用中→空きスロット',_dcPlaceIdx,'へ配置');
+      }
+    }
+
     // ★修正1: モーダル確定時にpendingLoanerDataをloanerResに書き込む
     if(pendingLoanerData){
       const {carId,startDay,endDay,startYear,startMonth,user,color,bookingKey:_pldBk,carName,carNum}=pendingLoanerData;
@@ -6681,7 +6700,7 @@ function AppInner() {
             ?`${selDateRef.current.getFullYear()}-${selDateRef.current.getMonth()}-${selDateRef.current.getDate()}`
             :'');
       const _finalBk=modalType==='insp'
-        ?`insp-${_loanerTdk}-${modalIdx}`
+        ?`insp-${_loanerTdk}-${_dcPlaceIdx}`
         :`sched-${_loanerTdk}-${modalSlot||''}`;
       // pendingLoanerDataのloanerRes保存（setTimeoutで非同期化してフリーズ防止）
       const _lu = {carId,startDay,endDay,startYear,startMonth,finalUser,color:color||RES_COLORS[0],
@@ -6748,16 +6767,24 @@ function AppInner() {
           const targetDk=_tdk||modalDkRef.current||(sd instanceof Date?`${sd.getFullYear()}-${sd.getMonth()+1}-${sd.getDate()}`:(typeof sd==='string'&&sd?sd:modalDk));
           const prev_rows=(prev[targetDk]||[]).map(r=>r||blankInsp());
           let rows=[...prev_rows];
-          while(rows.length<=modalIdx)rows.push(blankInsp());
-          const _prevRow=prev_rows[modalIdx];
+          const _origDk=formData._originalDk||originalModalDkRef.current;
+          const _isDateChange=!!(_origDk&&_origDk!==targetDk);
+          // ★配置先インデックス：通常は modalIdx。日付変更で移動先の同じ行番号に別の予約が
+          //   ある場合は事前計算の空きスロット（_dcPlaceIdx）へ。万一その間に埋まっていたら
+          //   この時点のprevから空きを再探索（上書き消失だけは絶対に起こさない）。
+          let _idxPlace=_isDateChange?_dcPlaceIdx:modalIdx;
+          if(_isDateChange&&rows[_idxPlace]&&rows[_idxPlace].name){
+            const _fb=rows.findIndex(r=>!r||!r.name);
+            _idxPlace=_fb>=0?_fb:rows.length;
+          }
+          while(rows.length<=_idxPlace)rows.push(blankInsp());
+          const _prevRow=prev_rows[_idxPlace];
           // 同一のアクティブ予約を編集している時だけ既存のseq・状態を引き継ぐ。
           // 空き／キャンセル済みスロットへの新規予約は必ず新しいseqを付与（予約順の最後に並ぶ）。
           const _editingActive=!!(_prevRow&&_prevRow.name&&_prevRow.bookingStatus!=='cancelled');
           const _seq=_editingActive?_prevRow.seq:Date.now();
           const _wasPending=_editingActive&&!!_prevRow.pendingApproval;
           const dayLimit=inspLimits[targetDk]??6;
-          const _origDk=formData._originalDk||originalModalDkRef.current;
-          const _isDateChange=!!(_origDk&&_origDk!==targetDk);
           const _newRow={...cleanWithStore,seq:_seq,bookingStatus:'confirmed'};
           if(_isDateChange){
             // 日付変更＝移動先で承認状態を再評価する。元の日の承認/承認待ちフラグは引き継がず、
@@ -6765,12 +6792,14 @@ function AppInner() {
             delete _newRow.approved;
             delete _newRow.pendingApproval;
             _newRow.seq=Date.now();
+            // 行が新しい位置に移るため、代車紐付け用bookingKeyも新位置で振り直す
+            _newRow.bookingKey=`insp-${targetDk}-${_idxPlace}`;
           }
-          rows[modalIdx]=_newRow;
+          rows[_idxPlace]=_newRow;
           // 予約順(seq)で承認状態を再計算（既存の確定行は確定のまま＝編集で承認を再要求しない）
           rows=recomputeInspApproval(rows,dayLimit);
           // 新規／再予約が上限超過で「承認待ちに転じた」ときだけ通知（編集中の確定客には出さない）
-          if(rows[modalIdx]&&rows[modalIdx].pendingApproval&&!_wasPending){
+          if(rows[_idxPlace]&&rows[_idxPlace].pendingApproval&&!_wasPending){
             alert(`⚠️ 1日の上限を超えたため、本店承認が必要です（通常${dayLimit}台／レギュラー車検3台）。`);
           }
           console.log('[SAVE]','targetDk=',targetDk,'modalDk=',modalDk,'prev keys=',Object.keys(prev).join(','));
@@ -6914,7 +6943,7 @@ function AppInner() {
     setCurLockKey(null);
     setTimeout(()=>releaseLock(keyToRelease),200);
     setFromCustList(false);setCustModalMeta(null);
-  },[modalType,modalDk,modalIdx,modalSlot,vsId,curLockKey,releaseLock,setInspData,setSchedData,setLoanerRes,selDate,schedRestrictions,setModalOpen,inspLimits,pendingRentalId,pendingRentalRec,pendingLoanerId,pendingLoanerData,dynRentalCars,fromCustList,custModalMeta,setCustBookings,setCustFiles]);
+  },[modalType,modalDk,modalIdx,modalSlot,vsId,curLockKey,releaseLock,setInspData,setSchedData,setLoanerRes,selDate,schedRestrictions,setModalOpen,inspLimits,pendingRentalId,pendingRentalRec,pendingLoanerId,pendingLoanerData,dynRentalCars,fromCustList,custModalMeta,setCustBookings,setCustFiles,inspData]);
 
   const handleDeleteModal=useCallback(()=>{
     // bookingKeyを特定してloanerRes・rentalResも連動削除
