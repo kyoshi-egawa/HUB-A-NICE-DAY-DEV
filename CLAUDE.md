@@ -28,6 +28,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `customers_dev.html` / `index_redirect_dev.html` は実験用サブファイル。ユーザーが日常使うのは `customers.html` と `index_dev.html`（本番は `index_main.html`）。
 - **GAS_URL と GAS_API_KEY は DEV・本番で同一**。同じGASスクリプト・同じスプレッドシートを共有し、`STOR` プレフィックスだけでデータを分離している（例: `hub-v8-insp` vs `hub-v8-dev-insp`）。localStorageキャッシュキーも必ず `STOR` を前置すること（同一オリジンでDEV/本番が混ざるため）。
 
+## DEV→本番の移植は必ず port_to_main.js を使う
+
+- DEVリポジトリで `node port_to_main.js` を実行すると、`index_dev.html` → `../hub-a-nice-day/index_main.html`、`customers.html` → 同名 をコピーし、環境固有差分を自動変換する。**手動コピー＋手動置換で移植しないこと**（2026-06-12、手動移植でDEVのオレンジ配色が本番に混入した事故あり）。
+- 環境固有差分は4種類：① `STOR`（`hub-v8-dev-` ↔ `hub-v8-`）② タイトルの `[DEV]` ③「⚠ テスト版（DEV）」バッジ ④ **配色**（DEV＝オレンジ背景・グレー戻るボタン／本番＝青背景・緑戻るボタン）。スクリプトが全変換し、パターン未検出（DEV側コードの乖離）やDEV残骸の検出時は中断する。
+- スクリプトが ✖ で中断したら、DEV側の該当コードが変わってルールが古くなった合図。`port_to_main.js` のルールを現状に合わせて更新してから再実行する。
+- 移植後の確認：本番ファイルをブラウザで開いて「**青ヘッダー・[DEV]表記なし**」を確認 → 本番リポジトリで commit & push。
+
 ## index_*.html 内のBLOCK制約（最重要）
 
 ファイル先頭のコメントに編集可否が宣言されている。逸脱しないこと：
