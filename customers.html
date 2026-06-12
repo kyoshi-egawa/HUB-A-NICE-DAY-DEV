@@ -93,6 +93,49 @@ const deleteFileFromCache=(file)=>{
 };
 const RES_COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#e11d48','#14b8a6','#a855f7'];
 
+// ── 予約順(seq)ベースの承認状態 再計算（index_dev.htmlのBLOCK-Cと同一の純関数。変更時は両方同時に）──
+// 各insp行の seq（予約順）で昇順に並べ、先着 limit 台=確定 / 超過分=承認待ち(pendingApproval=true)。
+// レギュラー車検(course=3)は別途1日3台まで。手動承認済み(approved=true)は常に確定として枠を消費。
+// キャンセル等で枠が空けば、次回再計算で承認待ちが自動的に繰り上がる（承認は予約に固定で付かない）。
+const recomputeInspApproval = (rows, limit) => {
+  const lim = (limit!=null) ? limit : 6;
+  const out = rows.map(r => (r ? {...r} : r));
+  const active = out
+    .map((r, i) => ({ r, i }))
+    .filter(x => x.r && x.r.name && x.r.course && x.r.bookingStatus !== 'cancelled');
+  active.sort((a, b) => {
+    const sa = (a.r.seq != null) ? a.r.seq : a.i;
+    const sb = (b.r.seq != null) ? b.r.seq : b.i;
+    return sa - sb;
+  });
+  let conf = 0, reg = 0;
+  for (const { r } of active) {
+    const isReg = Number(r.course) === 3;
+    if (r.approved) {
+      delete r.pendingApproval;
+      conf++; if (isReg) reg++;
+      continue;
+    }
+    const eligible = (conf < lim) && (!isReg || reg < 3);
+    if (eligible) {
+      delete r.pendingApproval;
+      conf++; if (isReg) reg++;
+    } else {
+      r.pendingApproval = true;
+    }
+  }
+  return out;
+};
+// マッハ車検1日2台ルール（リスト経由の予約だけの追加条件・従来挙動の維持）。
+// 注: スケジュール側のrecomputeにはこのルールが無いため、スケジュール側で保存されると外れる。
+const applyMahPendingRule=(rows,targetIdx)=>{
+  const t=rows[targetIdx];
+  if(!t||Number(t.course)!==1||t.pendingApproval)return rows;
+  const others=rows.filter((r,i)=>i!==targetIdx&&r&&r.name&&Number(r.course)===1&&!r.pendingApproval&&r.bookingStatus!=='cancelled');
+  if(others.length>=2){const out=[...rows];out[targetIdx]={...t,pendingApproval:true};return out;}
+  return rows;
+};
+
 const COURSES=[
   {id:1,name:'マッハ車検',  short:'マ',color:'#b91c1c',bg:'#fca5a5'},
   {id:2,name:'クイック車検',short:'ク',color:'#1d4ed8',bg:'#bfdbfe'},
@@ -636,7 +679,9 @@ function InspCalendarPicker({value,onChange,inspData,closedDays,closedDates,over
   if(wk.some(x=>x!==null))weeks.push([...wk]);
   function getDk(d){return `${cy}-${cm+1}-${d}`;}
   function getCounts(d){
-    const rows=(inspData&&inspData[getDk(d)])||[];
+    const raw=(inspData&&inspData[getDk(d)])||[];
+    // データ上に古い承認待ちフラグが残っていても正しい空き数になるよう、表示用に再計算してから数える
+    const rows=recomputeInspApproval(raw,getLmt(d));
     const v=rows.filter(r=>r&&r.name&&!r.pendingApproval&&r.bookingStatus!=='cancelled');
     return{1:v.filter(r=>Number(r.course)===1).length,2:v.filter(r=>Number(r.course)===2).length,3:v.filter(r=>Number(r.course)===3).length,total:v.length};
   }
@@ -1528,38 +1573,36 @@ const App=()=>{
         }
         // 取得したデータでstateも更新
         setInspData(newInspData);
-        // 既存の同一custIdを削除（入庫日変更対応）
+        // 既存の同一custIdを削除（入庫日変更対応）。行が減った日は後で承認を再計算する
+        //（移動元の日に承認待ちが居れば自動で繰り上がる）。元の行のseq/approvedは控えておく
+        const _recalcDays=new Set();
+        let _oldRow=null,_oldDk=null;
         for(const d of Object.keys(newInspData)){
           if(Array.isArray(newInspData[d])){
+            const _before=newInspData[d].length;
+            const _hit=newInspData[d].find(r=>r&&r.custId===customer.custId&&r.bookingStatus!=='cancelled');
+            if(_hit){_oldRow=_hit;_oldDk=d;}
             newInspData[d]=newInspData[d].filter(r=>r&&r.custId!==customer.custId);
+            if(newInspData[d].length!==_before)_recalcDays.add(d);
           }
         }
-        // 承認待ちチェック（index.htmlと同じ判定）
-        const existingRows=(newInspData[dkFormatted]||[]).filter(r=>r&&r.name&&r.course&&!r.pendingApproval&&r.bookingStatus!=='cancelled'&&r.bookingStatus!=='cancelled');
         const lim=(inspLimits&&inspLimits[dkFormatted])??6;
         const courseNum=Number(course)||0;
-        let needsApproval=false;
-        if(existingRows.length>=lim){needsApproval=true;}
-        if(courseNum===3){
-          const regCount=existingRows.filter(r=>Number(r.course)===3).length;
-          if(regCount>=3){needsApproval=true;}
-        }
-        if(courseNum===1){
-          const mahCount=existingRows.filter(r=>Number(r.course)===1).length;
-          if(mahCount>=2){needsApproval=true;}
-        }
+        // 同じ日への再保存（編集）は予約順(seq)と手動承認(approved)を引き継ぐ。
+        // 日付変更は移動先の最後尾扱い＝新しいseq（スケジュール側の日付変更と同じ規則）
+        const _sameDay=!!(_oldRow&&_oldDk===dkFormatted);
 
-        // 新しい予約を追加
+        // 新しい予約を追加（承認要否は下のrecomputeInspApprovalが予約順で決める）
         const newRow={
           name:customer.name,carType:customer.carType,
           course:courseNum,store,staff,tokuten:tokuten||'-',
           note,no:customer.no,
           bookingStatus:isTemp?'provisional':'confirmed',
-          pendingApproval:needsApproval,
           custId:customer.custId,
           bookingTime,
           time:bookingTime||'',  // index.htmlのrow.time表示用
-          seq:Date.now(),        // 予約順（index_dev.htmlのseqと統一。新規＝最後尾）
+          seq:(_sameDay&&_oldRow.seq!=null)?_oldRow.seq:Date.now(),
+          ...(_sameDay&&_oldRow.approved?{approved:true}:{}),
         };
         if(!Array.isArray(newInspData[dkFormatted]))newInspData[dkFormatted]=[];
         newInspData[dkFormatted]=[...newInspData[dkFormatted],newRow];
@@ -1567,6 +1610,13 @@ const App=()=>{
         const newIdx=newInspData[dkFormatted].length-1;
         const bKey=`insp-${dkFormatted}-${newIdx}`;
         newInspData[dkFormatted][newIdx]={...newRow,bookingKey:bKey};
+        // ★承認の再計算（index_dev.htmlと同一ルール）: 先着lim台=確定・超過=承認待ち・
+        //   レギュラー3台。この日に古い承認待ちフラグが残っていれば繰り上げ解除も行われる
+        newInspData[dkFormatted]=recomputeInspApproval(newInspData[dkFormatted],lim);
+        newInspData[dkFormatted]=applyMahPendingRule(newInspData[dkFormatted],newIdx);
+        // 入庫日変更で行が抜けた移動元の日も再計算（承認待ちの自動繰り上げ）
+        _recalcDays.delete(dkFormatted);
+        _recalcDays.forEach(d=>{newInspData[d]=recomputeInspApproval(newInspData[d],(inspLimits&&inspLimits[d])??6);});
         setInspData(newInspData);
         inspWriteRef.current=Date.now(); // 書き込み時刻を記録
         // ★スケジュール(insp)を最優先で先に・確実に書き込む（顧客ファイル等の多数のチャンク書き込みと
@@ -1752,27 +1802,26 @@ const App=()=>{
           (r.custId&&r.custId===c.custId)||
           (r.name&&r.name===c.name)
         ))continue;
-        // 上限判定：既存の確定台数を超える分だけ承認待ちにする（復元で既存予約を圧迫しない）
-        const confirmedRows=activeRows.filter(r=>r&&r.name&&r.course&&!r.pendingApproval);
-        const lim=(inspLimits&&inspLimits[dk])??6;
         const courseNum=Number(c.course)||0;
-        let needsApproval=confirmedRows.length>=lim;
-        if(courseNum===3&&confirmedRows.filter(r=>Number(r.course)===3).length>=3)needsApproval=true;
-        if(courseNum===1&&confirmedRows.filter(r=>Number(r.course)===1).length>=2)needsApproval=true;
         const idx=newInspData[dk].length;
         newInspData[dk]=[...newInspData[dk],{
           name:c.name,carType:c.carType||'',
           course:courseNum,
           store:c.store||'honten',staff:c.staff||'',
           tokuten:c.tokuten||'-',note:c.note||'',no:c.no||'',
-          bookingStatus:'confirmed',pendingApproval:needsApproval,
+          bookingStatus:'confirmed',
           custId:c.custId,bookingTime:c.bookingTime||'',time:c.bookingTime||'',
           seq:Date.now()+added, // 予約順は最後尾へ（既存予約の並び・確定を乱さない）
           bookingKey:`insp-${dk}-${idx}`,
         }];
-        toAdd.push({c,dk});
+        toAdd.push({c,dk,idx});
         added++;
       }
+      // ★承認の再計算（index_dev.htmlと同一ルール）。復元行はseq最後尾なので
+      //   既存予約の確定を乱さず、上限超過分だけ承認待ちになる。マッハ2台は追加条件。
+      const _fixDays=new Set(toAdd.map(x=>x.dk));
+      _fixDays.forEach(dk=>{newInspData[dk]=recomputeInspApproval(newInspData[dk],(inspLimits&&inspLimits[dk])??6);});
+      toAdd.forEach(({dk,idx})=>{newInspData[dk]=applyMahPendingRule(newInspData[dk],idx);});
       const sizeAfter=Math.round(JSON.stringify(newInspData).length/1024);
       const sizeBeforeKB=Math.round(sizeBefore/1024);
       await sSet(STOR+'insp',newInspData);
