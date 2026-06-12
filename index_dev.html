@@ -5460,9 +5460,12 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
         const getRState=(carId,dateObj)=>{
           const {year,month,day}=dateObj;
           const dn=toNum(year,month,day);
-          const resList=rentalResLocal[carId]||[];
+          // rresはオブジェクト構造{key:予約}が正（旧データは配列）。両対応で配列化してから走査
+          // （本番データで「resList is not iterable」クラッシュが出た箇所。配列前提にしないこと）
+          const raw=rentalResLocal[carId]||[];
+          const resList=Array.isArray(raw)?raw:Object.values(raw||{});
           for(const r of resList){
-            if(dn>=toNum(r.fy,r.fm,r.fd)&&dn<=toNum(r.ty,r.tm,r.td))return r;
+            if(r&&dn>=toNum(r.fy,r.fm,r.fd)&&dn<=toNum(r.ty,r.tm,r.td))return r;
           }
           return null;
         };
