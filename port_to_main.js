@@ -91,5 +91,5 @@ if (failed) {
   process.exit(1);
 }
 console.log('\n★完了。次の手順:');
-console.log('  1. 本番ファイルをブラウザで開いて動作確認（青ヘッダー・[DEV]なし）');
+console.log('  1. node smoke_main.js  ← 本番実データで全画面スモーク（必須・PASSするまでpush禁止）');
 console.log('  2. cd ../hub-a-nice-day && git diff で確認 → commit & push');
