@@ -1308,7 +1308,9 @@ const blankInsp  = () => ({name:'',staff:'',carType:'',course:0,loaner:'',loaner
 // 各insp行の seq（予約順。新規予約時に Date.now() で付与）で昇順に並べ、
 //   先着 limit 台 = 確定 / 超過分 = 承認待ち(pendingApproval=true)。
 //   レギュラー車検(course=3) は別途1日3台まで（超過分は承認待ち）。
-//   手動承認済み(approved=true) は常に確定として扱い、枠を消費する。
+// 承認は「予約に固定されず枠に紐づく」: 先着枠内に入った行は承認待ち・手動承認(approved)とも
+//   外して通常確定にする（キャンセル等で6台以内に繰り上がれば承認バッジは消える）。
+//   枠外でも本店が手動承認(approved)した行だけは確定維持（承認済みバッジ）。
 // seq の無い旧データは配列インデックス順（＝従来の並び）にフォールバックするので、
 // 既存予約の並び・確定状態は変わらない。表示順(店舗優先・入庫時間)とは独立。
 const recomputeInspApproval = (rows, limit) => {
@@ -1325,17 +1327,17 @@ const recomputeInspApproval = (rows, limit) => {
   let conf = 0, reg = 0;
   for (const { r } of active) {
     const isReg = Number(r.course) === 3;
-    if (r.approved) {                 // 本店が手動承認済み → 常に確定（枠を消費）
-      delete r.pendingApproval;
-      conf++; if (isReg) reg++;
-      continue;
-    }
+    // seq順で先着枠（通常lim台・レギュラー3台）に入れるかを純粋に位置で判定
     const eligible = (conf < lim) && (!isReg || reg < 3);
     if (eligible) {
       delete r.pendingApproval;       // 先着枠内 → 確定
+      delete r.approved;              // 枠内に繰り上がった → 手動承認も解除（承認バッジを消す）
+      conf++; if (isReg) reg++;
+    } else if (r.approved) {
+      delete r.pendingApproval;       // 枠外だが手動承認済み → 確定維持（枠を消費）
       conf++; if (isReg) reg++;
     } else {
-      r.pendingApproval = true;       // 上限超過 → 承認待ち
+      r.pendingApproval = true;       // 枠外・未承認 → 承認待ち
     }
   }
   return out;

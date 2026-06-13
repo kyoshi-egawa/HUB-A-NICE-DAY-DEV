@@ -95,8 +95,9 @@ const RES_COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#
 
 // ── 予約順(seq)ベースの承認状態 再計算（index_dev.htmlのBLOCK-Cと同一の純関数。変更時は両方同時に）──
 // 各insp行の seq（予約順）で昇順に並べ、先着 limit 台=確定 / 超過分=承認待ち(pendingApproval=true)。
-// レギュラー車検(course=3)は別途1日3台まで。手動承認済み(approved=true)は常に確定として枠を消費。
-// キャンセル等で枠が空けば、次回再計算で承認待ちが自動的に繰り上がる（承認は予約に固定で付かない）。
+// レギュラー車検(course=3)は別途1日3台まで。承認は予約に固定されず枠に紐づく:
+// 先着枠内に入った行は承認待ち・手動承認(approved)とも外して通常確定（6台以内に繰り上がれば承認バッジが消える）。
+// 枠外でも本店が手動承認(approved)した行だけは確定維持（承認済みバッジ）。
 const recomputeInspApproval = (rows, limit) => {
   const lim = (limit!=null) ? limit : 6;
   const out = rows.map(r => (r ? {...r} : r));
@@ -111,17 +112,16 @@ const recomputeInspApproval = (rows, limit) => {
   let conf = 0, reg = 0;
   for (const { r } of active) {
     const isReg = Number(r.course) === 3;
-    if (r.approved) {
-      delete r.pendingApproval;
-      conf++; if (isReg) reg++;
-      continue;
-    }
     const eligible = (conf < lim) && (!isReg || reg < 3);
     if (eligible) {
-      delete r.pendingApproval;
+      delete r.pendingApproval;       // 先着枠内 → 確定
+      delete r.approved;              // 枠内に繰り上がった → 手動承認も解除
+      conf++; if (isReg) reg++;
+    } else if (r.approved) {
+      delete r.pendingApproval;       // 枠外だが手動承認済み → 確定維持
       conf++; if (isReg) reg++;
     } else {
-      r.pendingApproval = true;
+      r.pendingApproval = true;       // 枠外・未承認 → 承認待ち
     }
   }
   return out;
