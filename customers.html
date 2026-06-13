@@ -1168,6 +1168,7 @@ const App=()=>{
   const filesRef = useRef([]); // setFilesと同期して常に最新値を保持
   useEffect(()=>{filesRef.current=files;},[files]); // 初回ロード含めfilesを常にfilesRefへ反映（最初の予約でchangedFileがnullになりリスト未保存になるのを防ぐ）
   const pollUpdatesRef = useRef(null);
+  const reconcileRef = useRef(null); // スケジュール→リスト突き合わせ（自己修復）
   const [activeIdx,setActiveIdx]=useState(0);
   const [search,setSearch]=useState('');
   const [filterStatus,setFilterStatus]=useState('all');
@@ -1407,9 +1408,94 @@ const App=()=>{
       sGet(STOR+'insp').then(v=>{if(v&&typeof v==='object')setInspData(v);});
       sGet(storKey('lres','honten')).then(v=>{if(v)setLoanerResH(v);});
       sGet(storKey('lres','sanda')).then(v=>{if(v)setLoanerResS(v);});
+      // 突き合わせ自己修復（GASから最新inspを読み直して照合）
+      setTimeout(()=>{if(reconcileRef.current)reconcileRef.current();},2500);
     };
     document.addEventListener('visibilitychange',onVisible);
     return()=>document.removeEventListener('visibilitychange',onVisible);
+  },[]);
+
+  // ── スケジュール→リスト突き合わせ（自己修復）──────────────────────
+  // 同期通知（cust-updates）が通信障害・旧コード端末などで失われても、リスト起動時と
+  // 画面復帰時にスケジュール(insp)の実予約と照合し、ズレた本予約の入庫日・コース・
+  // 入庫時間を自動修正して収束させる。statusは変更しない（キャンセル等の判断は同期チェックの領分）。
+  const reconcileListWithInsp=useCallback(async()=>{
+    try{
+      if(__saveCount>0)return;
+      if(Date.now()-(window.__lastReconcile||0)<15000)return; // 15秒スロットル
+      window.__lastReconcile=Date.now();
+      const files=filesRef.current||[];
+      if(!files.length)return;
+      // 必ずGASから最新inspを読む（手元の古いinspDataで逆方向に巻き戻さないため）
+      const inspObj=await sGet(STOR+'insp');
+      if(!inspObj||typeof inspObj!=='object')return; // 読めない時は何もしない
+      // custId→最新のアクティブinsp行（キャンセル除外・同一顧客はseq最大を採用）
+      const byCust={};
+      for(const dk of Object.keys(inspObj)){
+        const rows=inspObj[dk];
+        if(!Array.isArray(rows))continue;
+        rows.forEach(r=>{
+          if(!r||!r.custId||!r.name||r.bookingStatus==='cancelled')return;
+          const prev=byCust[r.custId];
+          if(!prev||(r.seq||0)>(prev.r.seq||0))byCust[r.custId]={r,dk};
+        });
+      }
+      const pad=(dk)=>{const p=String(dk).split('-').map(Number);return(p.length===3&&!isNaN(p[0]))?`${p[0]}-${String(p[1]).padStart(2,'0')}-${String(p[2]).padStart(2,'0')}`:String(dk);};
+      const fixFor=(c)=>{
+        const hit=byCust[c.custId];
+        if(!hit)return null;
+        const ed=pad(hit.dk),r=hit.r;
+        const upd={};
+        if(c.entryDate!==ed){upd.entryDate=ed;upd.linkedInspDate=ed;}
+        if(r.course!=null&&Number(c.course)!==Number(r.course))upd.course=Number(r.course)||0;
+        const bt=r.time||r.bookingTime||'';
+        if(bt&&c.bookingTime!==bt)upd.bookingTime=bt;
+        return Object.keys(upd).length?upd:null;
+      };
+      const changedFiles=new Set();
+      const fixedItems=[];
+      const fixedByCustId={};
+      const next=files.map(f=>{
+        let changed=false;
+        const custs=f.customers.map(c=>{
+          if(!c||c.status!=='confirm'||!c.custId)return c;
+          const upd=fixFor(c);
+          if(!upd)return c;
+          changed=true;changedFiles.add(f.name);
+          fixedByCustId[c.custId]=upd;
+          fixedItems.push({name:c.name,entryDate:upd.entryDate||c.entryDate,key:c.custId});
+          return{...c,...upd};
+        });
+        return changed?{...f,customers:custs}:f;
+      });
+      if(changedFiles.size===0)return;
+      filesRef.current=next;
+      setFiles(next);
+      console.log('[RECONCILE] スケジュールに合わせてリスト修正:',fixedItems.map(i=>i.name).join('・'));
+      // 完了フラッシュ＋行ハイライト（どこが直ったか見えるように）
+      const _fts=Date.now();
+      setSyncFlash({items:fixedItems.map(i=>({name:i.name,entryDate:i.entryDate})),ts:_fts});
+      setTimeout(()=>setSyncFlash(f=>(f&&f.ts===_fts)?null:f),4000);
+      setRecentApplied(prev=>{const n={...prev};fixedItems.forEach(i=>{n[i.key]=_fts;});return n;});
+      setTimeout(()=>setRecentApplied(prev=>{const n={...prev};fixedItems.forEach(i=>{if(n[i.key]===_fts)delete n[i.key];});return n;}),4500);
+      // 変更ファイルを保存。GAS最新とマージし、直した顧客のフィールドだけ上書き（他端末の更新を消さない）
+      for(const f of next){
+        if(!changedFiles.has(f.name))continue;
+        try{
+          const latest=await loadFileChunked(f.name);
+          const base=(latest&&Array.isArray(latest.customers))?latest.customers:f.customers;
+          const merged=base.map(c=>(c&&c.custId&&fixedByCustId[c.custId])?{...c,...fixedByCustId[c.custId]}:c);
+          await saveFileChunked({...f,customers:merged});
+          try{localStorage.setItem(STOR+'cf-'+safeName(f.name),JSON.stringify({...f,customers:merged}));}catch(e){}
+        }catch(e){console.error('[RECONCILE] 保存エラー:',e);}
+      }
+    }catch(e){console.error('[RECONCILE] エラー:',e);}
+  },[]);
+  reconcileRef.current=reconcileListWithInsp;
+  // 起動時にも一度実行（チャンク読込完了を待って20秒後）
+  useEffect(()=>{
+    const t=setTimeout(()=>{if(reconcileRef.current)reconcileRef.current();},20000);
+    return()=>clearTimeout(t);
   },[]);
 
   // Excelインポート
