@@ -1551,6 +1551,9 @@ function useShared(key, def, pollMs=60000) {
     if (!GAS_READY) return;
     pollTimer.current = setInterval(() => {
       if (!mounted.current || !initialized.current) return; // writeCountチェック削除済み
+      // ★非表示タブはポーリング停止（GAS同時実行数の負荷軽減。2026-06-13 Kyoshi承認のBLOCK-B変更）
+      //   画面復帰時はvisibilitychangeハンドラがinspを即時再取得し、他キーも次のポーリングで追いつく
+      if (document.visibilityState === 'hidden') return;
       sGet(key).then(v => {
         if (!mounted.current || v === null || writeCount.current > 0) return;
         const cur  = JSON.stringify(localRef.current);
@@ -5838,10 +5841,10 @@ function AppInner() {
   const [schedCollapsed,setSchedCollapsed]=useState(false); // スケジュール畳む/開く（デフォルト：開く）
 
   // 車検は両店舗共通
-  const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},3000);
+  const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},6000);
   // 顧客リストからの仮予約（スケジュール未登録）専用ストレージ
   // キー: "名前::YYYY-M-D"  値: {status:'provisional', formData:{...}, custMonth, custRowIdx, savedAt}
-  const [custBookings, setCustBookings]=useShared(STOR+'custbk',{},3000);
+  const [custBookings, setCustBookings]=useShared(STOR+'custbk',{},6000);
   // 表示中の店舗（ログイン後に切り替え可能）
   const [viewStore,  setViewStore] =useState(()=>{
     // 初期値：ログイン済みユーザーの店舗を復元
@@ -5849,14 +5852,14 @@ function AppInner() {
   }); // 'honten' | 'sanda'
   const vsId = viewStore||'honten';
   // 店舗別データ（本店）
-  const [schedDataH, setSchedDataH]=useShared(storKey('sched','honten'),{},3000);
+  const [schedDataH, setSchedDataH]=useShared(storKey('sched','honten'),{},6000);
   const [memoDataH,  setMemoDataH] =useShared(storKey('memo', 'honten'),{});
   const [loanerResH, setLoanerResH]=useShared(storKey('lres', 'honten'),{});
   const [closedDaysH,setClosedDaysH]=useShared(storKey('cdow', 'honten'),[],60000);
   const [closedDatesH,setClosedDatesH]=useShared(storKey('cdate','honten'),[],60000);
   const [dayOffDataH, setDayOffDataH] =useShared(storKey('dayoff','honten'),{},60000);
   // 店舗別データ（三田店）
-  const [schedDataS, setSchedDataS]=useShared(storKey('sched','sanda'),{},3000);
+  const [schedDataS, setSchedDataS]=useShared(storKey('sched','sanda'),{},6000);
   const [memoDataS,  setMemoDataS] =useShared(storKey('memo', 'sanda'),{});
   const [loanerResS, setLoanerResS]=useShared(storKey('lres', 'sanda'),{});
   // 三田店：水曜(3)をデフォルト定休 ※-v2でリセット
@@ -5905,7 +5908,7 @@ function AppInner() {
   const dynRentalCars  = (rentalCars &&rentalCars.length >0) ? rentalCars  : DEFAULT_RENTAL_CARS;
   // 表示中の代車リスト（店舗別）
   const currentLoaners = vsId==='honten' ? dynLoanerListH : dynLoanerListS;
-  const [locks,      setLocks]     =useShared(STOR+'locks',{},3000);
+  const [locks,      setLocks]     =useShared(STOR+'locks',{},6000);
   const addRentalRes    = useCallback((carId,rec) => setRentalResData(p=>{const days={...(p[carId]||{})};days[String(rec.id)]={...rec};return{...p,[carId]:days};}),[setRentalResData]);
   const deleteRentalRes = useCallback((carId,resId) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)delete days[d];});return{...p,[carId]:days};}),[setRentalResData]);
   const replaceRentalRes = useCallback((carId,resId,newRec) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)days[d]={...days[d],...newRec};});return{...p,[carId]:days};}),[setRentalResData]);

@@ -1294,6 +1294,7 @@ const App=()=>{
     // cust-updatesポーリング（スケジュール側からの即時連動）
     const pollUpdates=async()=>{
       if(__saveCount>0)return; // 書き込み中はスキップ
+      if(document.visibilityState==='hidden')return; // 非表示タブはポーリング停止（復帰時はonVisibleが即時実行）
       try{
         const updates=await sGet(STOR+'cust-updates');
         const arr=Array.isArray(updates)?updates:[];
