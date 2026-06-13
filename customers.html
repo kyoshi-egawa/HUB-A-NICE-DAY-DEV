@@ -1609,6 +1609,9 @@ const App=()=>{
   const handleBookingSave=useCallback(async(form,customer)=>{
     const{entryDate,store,bookingTime,course,tokuten,staff,note,isTemp,selCarId,selDays}=form;
     const status=isTemp?'temp':'confirm';
+    // ★本予約確定の瞬間に「反映中…」吹き出しを即時表示（バックグラウンド処理の開始を待たない）。
+    //   後段の saveInspWithStatus が同じ name で done/error に更新する。
+    if(entryDate&&!isTemp)setSyncToast({status:'saving',name:customer.name});
     const bookDate=today();
     const dm1=customer.dm1Date,dm2=customer.dm2Date;
     const dmCol=calcDMCol(dm1,dm2,bookDate);
@@ -2241,11 +2244,12 @@ const App=()=>{
           :st==='slow'?`反映に時間がかかっています（30秒超）`
           :`${syncToast.name}さんの予約をスケジュールに反映中…`;
         return (
-          <div style={{position:'fixed',right:16,bottom:16,zIndex:99999,maxWidth:340,
-            padding:'12px 14px',borderRadius:11,boxShadow:'0 8px 24px rgba(0,0,0,.18)',
+          <div style={{position:'fixed',top:'50%',left:'50%',transform:'translate(-50%,-50%)',zIndex:99999,
+            minWidth:300,maxWidth:420,
+            padding:'18px 22px',borderRadius:14,boxShadow:'0 12px 40px rgba(0,0,0,.28)',
             background:theme.bg,border:`2px solid ${theme.bd}`,color:theme.fg,
-            display:'flex',alignItems:'center',gap:10,fontSize:13,fontWeight:700}}>
-            <span style={{fontSize:17,flexShrink:0}}>{theme.icon}</span>
+            display:'flex',alignItems:'center',gap:12,fontSize:15,fontWeight:700}}>
+            <span style={{fontSize:22,flexShrink:0}}>{theme.icon}</span>
             <span style={{flex:1,lineHeight:1.4}}>{msg}</span>
             {(st==='slow'||st==='error')&&syncToast.retry&&(
               <button onClick={()=>syncToast.retry()}

@@ -3713,7 +3713,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
         {/* パネルヘッダー */}
         <div style={{background:isInsp?'linear-gradient(135deg,#9a3412,#ea580c)':'linear-gradient(135deg,#0e7490,#0891b2)',padding:'16px 20px',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,zIndex:20}}>
           <div>
-            <div style={{color:'white',fontWeight:800,fontSize:16}}>{isInsp?'🚗 車検予約':'📋 一般予約'}</div>
+            <div style={{color:'white',fontWeight:800,fontSize:16}}>{isInsp?'🚗 車検予約カード':'📋 一般予約カード'}</div>
             <div style={{color:'rgba(255,255,255,0.75)',fontSize:12,marginTop:2,position:'relative'}}>
               {(!isNew&&isInsp)?(<span onClick={()=>{if(!pickerMonth){const m=dateLabel.match(/(\d+)月(\d+)日/),now=new Date();setPickerMonth({year:now.getFullYear(),month:m?parseInt(m[1])-1:now.getMonth()});}setShowDatePicker(p=>!p);}} style={{cursor:'pointer',borderBottom:'1px dashed rgba(255,255,255,0.6)',paddingBottom:1}} title="クリックで日付変更">{dateLabel}</span>):dateLabel}
               {timeSlot?` / ${timeSlot}`:''}
@@ -5200,7 +5200,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
     <div>
       {/* ヘッダー */}
       <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:6,flexWrap:'wrap',flexShrink:0}}>
-        <button onClick={onBack} style={BACK_S}><ChevronLeft size={16}/>{pickMode?'モーダルに戻る':'カレンダーへ'}</button>
+        <button onClick={onBack} style={BACK_S}><ChevronLeft size={16}/>{pickMode?'予約カードに戻る':'カレンダーへ'}</button>
         <h2 style={{fontSize:18,fontWeight:800,color:'#7c2d12',margin:0}}>
           🚗 代車管理
           {!pickMode&&<span style={{fontSize:12,color:'#6b7280',marginLeft:8,fontWeight:500}}>（閲覧専用）</span>}
