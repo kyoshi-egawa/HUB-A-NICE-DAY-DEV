@@ -84,9 +84,14 @@ const GAS_HOST = 'https://script.google.com';
   await page.goto(`http://127.0.0.1:${PORT}/index_main.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(15000);
   await checkPage(page, '起動直後');
-  for (const view of ['カレンダー', 'スケジュール', '代車管理', '🔔 車両管理', '空き枠検索']) {
+  for (const view of ['カレンダー', 'スケジュール', '代車管理', '車両管理', '空き枠検索']) {
     try {
-      await page.getByText(view, { exact: true }).first().click({ timeout: 8000 });
+      // 代車管理など特殊ビューに遷移した後もナビを確実に押せるよう evaluate でクリック
+      const ok = await page.evaluate((v) => {
+        const b = [...document.querySelectorAll('button')].find(el => el.textContent.includes(v) && el.offsetParent !== null && el.textContent.replace(/\s/g, '').length < 16);
+        if (b) { b.scrollIntoView(); b.click(); return true; } return false;
+      }, view);
+      if (!ok) throw new Error('ナビボタンが見つからない');
       await page.waitForTimeout(3500);
       await checkPage(page, view);
       console.log(`  ✔ ${view}`);
