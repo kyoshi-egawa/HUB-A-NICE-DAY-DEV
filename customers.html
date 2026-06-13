@@ -1492,16 +1492,19 @@ const App=()=>{
         //   読み返して予約行が実際に入ったか確認し、未反映なら自動リトライ（最大2回）。
         if(verify&&verify.dk){
           await new Promise(r=>setTimeout(r,2500));
-          let ok=true;
+          // ★読み返し自体が失敗した場合も「未確認」として再試行する（成功扱いにしない）。
+          //   GAS全滅時は書き込みも読み返しも失敗するため、旧実装は偽の完了トーストを出していた。
+          let ok=false;
           try{
             const rb=await sGet(STOR+'insp');
             if(rb&&typeof rb==='object'){
               const rows=rb[verify.dk]||[];
               ok=rows.some(r=>r&&(verify.custId?r.custId===verify.custId:(r.name===verify.name&&String(r.no||'')===String(verify.no||''))));
             }
-          }catch(e){} // 読み込み失敗時は判定不能→エラー扱いにしない
+          }catch(e){}
           if(!ok){
             if(attempt<2)return run(attempt+1);
+            // 最終的に確認できない/未反映 → 正直にエラー表示（再試行ボタン付き）
             setSyncToast({status:'error',name,retry:()=>run(0)});
             return;
           }

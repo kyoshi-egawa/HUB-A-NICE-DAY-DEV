@@ -6866,7 +6866,12 @@ function AppInner() {
             const _verify=async(attempt)=>{
               try{
                 const remote=await sGet(STOR+'insp');
-                if(!remote||typeof remote!=='object')return; // 読込失敗時は判定しない
+                if(!remote||typeof remote!=='object'){
+                  // ★読み返し自体の失敗＝未確認。黙って成功扱いにせず再確認、最終的にダメなら知らせる
+                  if(attempt<2){setTimeout(()=>_verify(attempt+1),8000);}
+                  else{alert(`⚠️ ${_vName} の予約保存を確認できませんでした（通信不安定）。\n画面を再読み込みして予約が残っているか確認してください。`);}
+                  return;
+                }
                 const rows=remote[_vDk]||[];
                 const ok=rows.some(r=>r&&(_vCust?r.custId===_vCust:(r.name===_vName&&String(r.no||'')===String(_vNo||''))));
                 if(ok){console.log('[VERIFY insp] ok',_vName,_vDk);return;}
