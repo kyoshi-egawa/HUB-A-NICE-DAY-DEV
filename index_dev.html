@@ -3045,7 +3045,7 @@ const StaffCalendarModal=memo(({isOpen,onClose,initMonth,currentUser,
           {/* 月ナビ */}
           <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:14,marginBottom:12}}>
             <button onClick={()=>setCalMonth(new Date(cy,cm-1,1))} style={NAV_S}><ChevronLeft size={16}/></button>
-            <span style={{fontWeight:800,fontSize:17,color:'white'}}>{cy}年{cm+1}月</span>
+            <span style={{fontWeight:800,fontSize:17,color:'#1f2937'}}>{cy}年{cm+1}月</span>
             <button onClick={()=>setCalMonth(new Date(cy,cm+1,1))} style={NAV_S}><ChevronRight size={16}/></button>
           </div>
 
