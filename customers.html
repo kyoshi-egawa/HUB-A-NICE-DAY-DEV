@@ -1567,43 +1567,49 @@ const App=()=>{
   // スケジュール(insp)をGASへ保存し、反映状況をトーストで可視化する。
   // sSetのawaitはGASが実際に書き終えた応答で解決するので「解決＝反映完了」。
   // 30秒(GASロック最大25秒＋余裕)を超えても未解決なら「遅延・再試行」を表示。
+  // スケジュール(insp)をGASへ保存。体感を最短にするため、書き込み送信(sSet)が完了した時点で
+  // すぐ「完了」を表示し、返すPromiseもそこで resolve する（予約処理は先へ進む）。
+  // 実際に保存されたかの読み返し検証はバックグラウンドで行い、万一サーバーが受け付けていなければ
+  // 「完了」を「エラー」に自動訂正＋再送する（速度を優先しつつデータ消失は検知する設計）。
   const saveInspWithStatus=useCallback((data,name,verify)=>{
-    const run=(attempt=0)=>{
+    const start=()=>{
       setSyncToast({status:'saving',name});
       let settled=false;
-      const slowTimer=setTimeout(()=>{if(!settled)setSyncToast({status:'slow',name,retry:()=>run(0)});},30000);
-      return sSet(STOR+'insp',data).then(async()=>{
-        settled=true;clearTimeout(slowTimer);
-        inspWriteRef.current=Date.now(); // 保護延長
-        // ★sSetはno-corsのためGAS側の失敗(lock_timeout等)を検知できない。
-        //   読み返して予約行が実際に入ったか確認し、未反映なら自動リトライ（最大2回）。
-        if(verify&&verify.dk){
-          await new Promise(r=>setTimeout(r,2500));
-          // ★読み返し自体が失敗した場合も「未確認」として再試行する（成功扱いにしない）。
-          //   GAS全滅時は書き込みも読み返しも失敗するため、旧実装は偽の完了トーストを出していた。
-          let ok=false;
-          try{
-            const rb=await sGet(STOR+'insp');
-            if(rb&&typeof rb==='object'){
-              const rows=rb[verify.dk]||[];
-              ok=rows.some(r=>r&&(verify.custId?r.custId===verify.custId:(r.name===verify.name&&String(r.no||'')===String(verify.no||''))));
-            }
-          }catch(e){}
-          if(!ok){
-            if(attempt<2)return run(attempt+1);
-            // 最終的に確認できない/未反映 → 正直にエラー表示（再試行ボタン付き）
-            setSyncToast({status:'error',name,retry:()=>run(0)});
-            return;
-          }
-        }
+      const slowTimer=setTimeout(()=>{if(!settled)setSyncToast({status:'slow',name,retry:start});},30000);
+      const finishDone=()=>{
         setSyncToast({status:'done',name});
         setTimeout(()=>setSyncToast(s=>(s&&s.status==='done'&&s.name===name)?null:s),4000);
+      };
+      // 読み返し検証＋自動再送（完全バックグラウンド）。GAS書き込み完了を待って1.5秒後に確認。
+      // 反映済み→何もしない（既に「完了」表示）。未反映→再送（最大2回）。最終的に未反映なら
+      // 「完了」を「エラー」に訂正。読み返し自体の失敗も「未確認」として成功側に倒さない。
+      const verifyBg=async(attempt)=>{
+        await new Promise(r=>setTimeout(r,1500));
+        let ok=false;
+        try{
+          const rb=await sGet(STOR+'insp');
+          if(rb&&typeof rb==='object'){
+            const rows=rb[verify.dk]||[];
+            ok=rows.some(r=>r&&(verify.custId?r.custId===verify.custId:(r.name===verify.name&&String(r.no||'')===String(verify.no||''))));
+          }
+        }catch(e){}
+        if(ok)return; // 反映確認OK → 既に出している「完了」のままでよい
+        if(attempt<2){await sSet(STOR+'insp',data);return verifyBg(attempt+1);} // 未反映→再送
+        setSyncToast({status:'error',name,retry:start}); // 最終的に未反映 → 「完了」をエラーに訂正
+      };
+      const p=sSet(STOR+'insp',data);
+      p.then(()=>{
+        settled=true;clearTimeout(slowTimer);
+        inspWriteRef.current=Date.now(); // 保護延長
+        finishDone(); // ★書き込み送信完了で即「完了」表示（体感を最短化）
+        if(verify&&verify.dk)verifyBg(0); // 裏で実反映を検証。失敗時のみ上で「エラー」に訂正
       }).catch(()=>{
         settled=true;clearTimeout(slowTimer);
-        setSyncToast({status:'error',name,retry:()=>run(0)});
+        setSyncToast({status:'error',name,retry:start});
       });
+      return p; // ★呼び出し側はsSet解決で先へ進む（検証待ちを待たない）
     };
-    return run();
+    return start();
   },[]);
 
   const handleBookingSave=useCallback(async(form,customer)=>{
