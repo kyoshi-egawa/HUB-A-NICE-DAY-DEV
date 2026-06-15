@@ -1187,6 +1187,12 @@ const App=()=>{
   const [loanerListH,setLoanerListH]=useState([]);
   const [loanerListS,setLoanerListS]=useState([]);
   const [bookingModal,setBookingModal]=useState(null);
+  // ★予約モーダルを開く瞬間にスケジュール(insp)を再取得して、カレンダーの予約済み枠が
+  //   常に最新で表示されるようにする（起動直後やinsp読込失敗時に枠が空表示になる不具合の対策）。
+  const openBookingModal=useCallback((customer)=>{
+    setBookingModal(customer);
+    sGet(STOR+'insp').then(v=>{if(v&&typeof v==='object')setInspData(v);}).catch(()=>{});
+  },[]);
   const [closedDaysH,setClosedDaysH]=useState([]);
   const [closedDaysS,setClosedDaysS]=useState([3]);
   const [closedDatesH,setClosedDatesH]=useState([]);
@@ -2102,7 +2108,7 @@ const App=()=>{
                   {search||filterStatus!=='all'?'条件に一致する顧客がいません':'データがありません'}
                 </td></tr>
               ):filtered.map(c=>(
-                <CustomerRow key={c.custId} customer={c} onBook={setBookingModal} onRevive={handleRevive}
+                <CustomerRow key={c.custId} customer={c} onBook={openBookingModal} onRevive={handleRevive}
                   pending={pendingSync[c.custId]||pendingSync[`${c.name}__${c.no}`]||null}
                   flash={!!(recentApplied[c.custId]||recentApplied[`${c.name}__${c.no}`])}/>
               ))}
