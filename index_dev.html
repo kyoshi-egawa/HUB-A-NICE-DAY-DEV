@@ -7042,6 +7042,37 @@ function AppInner() {
       return next;
     });
 
+    // 削除の無音失敗対策。insp削除のsSetがGAS側で失敗するとポーリングで予約が復活する。
+    // 数秒後にGASを読み返し、当該予約が残っていたら再送（最大2回）、最終的にダメならアラート。
+    // リストへのキャンセル通知(cust-updates)もキューに入ったか確認し未反映なら再送。
+    if(modalType==='insp'){
+      const _drow=(inspData[modalDk]||[])[modalIdx];
+      const _vDk=modalDk,_vCust=_drow&&_drow.custId,_vName=_drow&&_drow.name,_vNo=_drow&&_drow.no;
+      if(_vCust||_vName){
+        const _delVerify=async(attempt)=>{
+          try{
+            const remote=await sGet(STOR+'insp');
+            if(!remote||typeof remote!=='object'){if(attempt<2)setTimeout(function(){_delVerify(attempt+1);},8000);return;}
+            const rows=remote[_vDk]||[];
+            const stillThere=rows.some(function(r){return r&&r.bookingStatus!=='cancelled'&&(_vCust?r.custId===_vCust:(r.name===_vName&&String(r.no||'')===String(_vNo||'')));});
+            if(!stillThere)return;
+            if(attempt<2){setInspData(function(prev){return Object.assign({},prev);});setTimeout(function(){_delVerify(attempt+1);},8000);}
+            else{alert('警告: '+_vName+' の削除がサーバーに反映されていません。もう一度開いて削除し直してください。');}
+          }catch(e){}
+        };
+        setTimeout(function(){_delVerify(0);},6000);
+        const _cancelVerify=async(attempt)=>{
+          try{
+            const q=await sGet(STOR+'cust-updates');
+            const found=Array.isArray(q)&&q.some(function(u){return u&&u.status==='cancel'&&(_vCust?u.custId===_vCust:(u.name===_vName&&String(u.no||'')===String(_vNo||'')));});
+            if(found)return;
+            if(attempt<2){syncCustStatus(_vCust,'cancel',{entryDate:'',linkedInspDate:''},_vName,_vNo);setTimeout(function(){_cancelVerify(attempt+1);},3000);}
+          }catch(e){}
+        };
+        setTimeout(function(){_cancelVerify(0);},2500);
+      }
+    }
+
     releaseLock(curLockKey);setCurLockKey(null);setModalOpen(false);
   },[modalType,modalDk,modalIdx,modalSlot,curLockKey,releaseLock,setInspData,setSchedData,setLoanerRes,setRentalResData,inspData,syncCustStatus,inspLimits]);
 
