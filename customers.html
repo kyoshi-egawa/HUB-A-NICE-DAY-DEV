@@ -1302,6 +1302,8 @@ const App=()=>{
     const pollUpdates=async()=>{
       if(__saveCount>0)return; // 書き込み中はスキップ
       if(document.visibilityState==='hidden')return; // 非表示タブはポーリング停止（復帰時はonVisibleが即時実行）
+      if(window.__pollUpdatesBusy)return; // 前回のGAS反映確認(最大6秒)が走行中なら多重実行しない
+      window.__pollUpdatesBusy=true;
       try{
         const updates=await sGet(STOR+'cust-updates');
         const arr=Array.isArray(updates)?updates:[];
@@ -1326,13 +1328,15 @@ const App=()=>{
         //   マッチした通知だけを処理済み扱いにし、マッチしない通知はキューに残す（後でデータが揃ったら適用）。
         const appliedTs=new Set();
         const changedFiles=new Set();
+        const tsFiles={};            // ts→該当ファイル名(月)の集合。ファイル単位でGAS反映を確認するため
+        let verifiedTs=new Set();    // GASチャンクに確実に保存できた通知のtsだけ。これだけをキューから消す
         filesRef.current.forEach(f=>(f.customers||[]).forEach(c=>{
           const u=findUpd(c);
-          if(u){appliedTs.add(u.ts);changedFiles.add(f.name);}
+          if(u){appliedTs.add(u.ts);changedFiles.add(f.name);(tsFiles[u.ts]=tsFiles[u.ts]||new Set()).add(f.name);}
         }));
         if(appliedTs.size>0){
           // 保存後にGASを読み返して実反映を確認（sSetはno-corsで失敗を検知できないため）。
-          // 未反映なら最大3回再試行。スケジュール側の変更がリストのチャンクに残らない事故の防止。
+          // 未反映なら最大3回再試行。成否をbooleanで返し、確認できたファイルの通知だけをキューから消す。
           const saveChunkVerified=async(f)=>{
             for(let _a=0;_a<3;_a++){
               try{
@@ -1347,58 +1351,69 @@ const App=()=>{
                   const{custId:_,name:__,no:___,ts:____,...sf}=u;
                   return Object.keys(sf).every(k=>String(c[k]??'')===String(sf[k]??''));
                 });
-                if(okAll)return;
+                if(okAll)return true;
                 console.warn('[SYNC] chunk保存 未反映 retry',_a+1,f.name);
               }catch(e){console.error('[SYNC] chunk保存エラー:',e);}
             }
             console.error('[SYNC] chunk保存がGASに反映できませんでした:',f.name);
+            return false;
           };
-          setFiles(prev=>{
-            const next=prev.map(f=>{
-              if(!changedFiles.has(f.name))return f;
-              const custs=f.customers.map(c=>{
-                const upd=findUpd(c);
-                if(!upd)return c;
-                // statusとextraFieldsのみ更新（他フィールドは保護）
-                const{custId:_,name:__,no:___,ts:____,...safeFields}=upd;
-                return{...c,...safeFields};
-              });
-              return{...f,customers:custs};
+          // 先にローカル状態を更新（即時反映）。GAS保存の確認は後で行い、確認できた通知だけ消す。
+          const next=filesRef.current.map(f=>{
+            if(!changedFiles.has(f.name))return f;
+            const custs=f.customers.map(c=>{
+              const upd=findUpd(c);
+              if(!upd)return c;
+              // statusとextraFieldsのみ更新（他フィールドは保護）
+              const{custId:_,name:__,no:___,ts:____,...safeFields}=upd;
+              return{...c,...safeFields};
             });
-            // ★変更のあった月ファイルだけ保存（未変更月まで全保存すると、他端末の更新を
-            //   この端末の古いコピーで巻き戻すため）。読み返し検証付き。
-            next.forEach(f=>{if(changedFiles.has(f.name))saveChunkVerified(f);});
-            filesRef.current=next; // filesRef同期
-            return next;
+            return{...f,customers:custs};
           });
-          appliedTs.forEach(ts=>window.__appliedUpdTs.add(ts));
+          filesRef.current=next; // filesRef同期
+          setFiles(next);
+          // ★変更のあった月ファイルだけ保存（未変更月まで全保存すると、他端末の更新を
+          //   この端末の古いコピーで巻き戻すため）。読み返し検証付きで、成功した月だけ記録。
+          const okFiles=new Set();
+          await Promise.all([...changedFiles].map(async fn=>{
+            const f=next.find(x=>x.name===fn);
+            if(f&&await saveChunkVerified(f))okFiles.add(fn);
+          }));
+          // ★GAS反映を確認できた通知のtsだけを「適用済み」確定。未確認は__appliedUpdTsに入れず、
+          //   キューにも残して次ポーリングで再試行する（無音失敗での取りこぼし＝反映漏れ恒久化を防ぐ）。
+          verifiedTs=new Set([...appliedTs].filter(ts=>{
+            const fs=tsFiles[ts];return fs&&[...fs].every(fn=>okFiles.has(fn));
+          }));
+          verifiedTs.forEach(ts=>window.__appliedUpdTs.add(ts));
           // ★反映完了：対象行の「反映中」サインを消し、完了フラッシュを4秒表示
           setPendingSync(prev=>{
             const n={...prev};
-            fresh.forEach(u=>{if(appliedTs.has(u.ts))delete n[u.custId||`${u.name}__${u.no}`];});
+            fresh.forEach(u=>{if(verifiedTs.has(u.ts))delete n[u.custId||`${u.name}__${u.no}`];});
             return n;
           });
-          const doneItems=fresh.filter(u=>appliedTs.has(u.ts)).map(u=>({name:u.name,entryDate:u.entryDate}));
+          const doneItems=fresh.filter(u=>verifiedTs.has(u.ts)).map(u=>({name:u.name,entryDate:u.entryDate}));
           if(doneItems.length>0){
             const _fts=Date.now();
             setSyncFlash({items:doneItems,ts:_fts});
             setTimeout(()=>setSyncFlash(f=>(f&&f.ts===_fts)?null:f),4000);
             // 反映された行をハイライト（どの顧客が変わったか一目で分かるように）
-            const _keys=fresh.filter(u=>appliedTs.has(u.ts)).map(u=>u.custId||`${u.name}__${u.no}`);
+            const _keys=fresh.filter(u=>verifiedTs.has(u.ts)).map(u=>u.custId||`${u.name}__${u.no}`);
             setRecentApplied(prev=>{const n={...prev};_keys.forEach(k=>{n[k]=_fts;});return n;});
             setTimeout(()=>setRecentApplied(prev=>{
               const n={...prev};_keys.forEach(k=>{if(n[k]===_fts)delete n[k];});return n;
             }),4500);
           }
         }
-        // 適用済みと期限切れ(7日)のみキューから削除。未マッチの通知は残す
+        // ★GAS反映を確認できた通知のみキューから削除。未確認・未マッチは残して次回再試行。
+        //   無ts(旧式)と60日超(最終backstop)だけ掃除。キャンセル通知が7日で消えて反映漏れが
+        //   恒久化していた不具合の対策として、保持期間を7日→60日へ延長。
         const remaining=arr.filter(u=>{
-          if(u.ts&&appliedTs.has(u.ts))return false;
-          if(!u.ts||Date.now()-u.ts>7*24*60*60*1000)return false;
+          if(u.ts&&verifiedTs.has(u.ts))return false;
+          if(!u.ts||Date.now()-u.ts>60*24*60*60*1000)return false;
           return true;
         });
         if(remaining.length!==arr.length)await sSet(STOR+'cust-updates',remaining.length>0?remaining:[]);
-      }catch{}
+      }catch{}finally{window.__pollUpdatesBusy=false;}
     };
     pollUpdatesRef.current=pollUpdates;
     pollUpdates(); // 開いた瞬間に即時適用
