@@ -1405,37 +1405,39 @@ const App=()=>{
           });
           filesRef.current=next; // filesRef同期
           setFiles(next);
-          // ★変更のあった月ファイルだけ保存（未変更月まで全保存すると、他端末の更新を
-          //   この端末の古いコピーで巻き戻すため）。読み返し検証付きで、成功した月だけ記録。
-          const okFiles=new Set();
-          await Promise.all([...changedFiles].map(async fn=>{
-            const f=next.find(x=>x.name===fn);
-            if(f&&await saveChunkVerified(f))okFiles.add(fn);
-          }));
-          // ★GAS反映を確認できた通知のtsだけを「適用済み」確定。未確認は__appliedUpdTsに入れず、
-          //   キューにも残して次ポーリングで再試行する（無音失敗での取りこぼし＝反映漏れ恒久化を防ぐ）。
-          verifiedTs=new Set([...appliedTs].filter(ts=>{
-            const fs=tsFiles[ts];return fs&&[...fs].every(fn=>okFiles.has(fn));
-          }));
-          verifiedTs.forEach(ts=>window.__appliedUpdTs.add(ts));
-          // ★反映完了：対象行の「反映中」サインを消し、完了フラッシュを4秒表示
+          // ★体感速度優先: ローカル適用の時点で「反映中」バッジを即クリア＋完了フラッシュを出す。
+          //   GAS保存の確認(数秒)は待たせない。__appliedUpdTsにも即追加し、次ポーリングでの
+          //   再処理・再フラッシュを防ぐ。
+          //   信頼性: キューからの削除だけは保存確認後(verifiedTs)に限定。未確認はキューに残り、
+          //   saveChunkVerified自体の3回読み返し再試行＋リロード時の再適用で最終的に必ず反映される。
+          appliedTs.forEach(ts=>window.__appliedUpdTs.add(ts));
           setPendingSync(prev=>{
             const n={...prev};
-            fresh.forEach(u=>{if(verifiedTs.has(u.ts))delete n[u.custId||`${u.name}__${u.no}`];});
+            fresh.forEach(u=>{if(appliedTs.has(u.ts))delete n[u.custId||`${u.name}__${u.no}`];});
             return n;
           });
-          const doneItems=fresh.filter(u=>verifiedTs.has(u.ts)).map(u=>({name:u.name,entryDate:u.entryDate}));
+          const doneItems=fresh.filter(u=>appliedTs.has(u.ts)).map(u=>({name:u.name,entryDate:u.entryDate}));
           if(doneItems.length>0){
             const _fts=Date.now();
             setSyncFlash({items:doneItems,ts:_fts});
             setTimeout(()=>setSyncFlash(f=>(f&&f.ts===_fts)?null:f),4000);
             // 反映された行をハイライト（どの顧客が変わったか一目で分かるように）
-            const _keys=fresh.filter(u=>verifiedTs.has(u.ts)).map(u=>u.custId||`${u.name}__${u.no}`);
+            const _keys=fresh.filter(u=>appliedTs.has(u.ts)).map(u=>u.custId||`${u.name}__${u.no}`);
             setRecentApplied(prev=>{const n={...prev};_keys.forEach(k=>{n[k]=_fts;});return n;});
             setTimeout(()=>setRecentApplied(prev=>{
               const n={...prev};_keys.forEach(k=>{if(n[k]===_fts)delete n[k];});return n;
             }),4500);
           }
+          // ★GAS保存＋読み返し確認は背景で実行（バッジ表示はもう待たせない）。確認できた月の
+          //   通知だけをキューから消す。未確認はキューに残してリロード時に再試行する。
+          const okFiles=new Set();
+          await Promise.all([...changedFiles].map(async fn=>{
+            const f=next.find(x=>x.name===fn);
+            if(f&&await saveChunkVerified(f))okFiles.add(fn);
+          }));
+          verifiedTs=new Set([...appliedTs].filter(ts=>{
+            const fs=tsFiles[ts];return fs&&[...fs].every(fn=>okFiles.has(fn));
+          }));
         }
         // ★GAS反映を確認できた通知のみキューから削除。未確認・未マッチは残して次回再試行。
         //   無ts(旧式)と60日超(最終backstop)だけ掃除。キャンセル通知が7日で消えて反映漏れが
@@ -1627,13 +1629,11 @@ const App=()=>{
   // 「完了」を「エラー」に自動訂正＋再送する（速度を優先しつつデータ消失は検知する設計）。
   const saveInspWithStatus=useCallback((data,name,verify)=>{
     const start=()=>{
-      setSyncToast({status:'saving',name});
-      let settled=false;
-      const slowTimer=setTimeout(()=>{if(!settled)setSyncToast({status:'slow',name,retry:start});},30000);
-      const finishDone=()=>{
-        setSyncToast({status:'done',name});
-        setTimeout(()=>setSyncToast(s=>(s&&s.status==='done'&&s.name===name)?null:s),4000);
-      };
+      // ★楽観的UI: 書込の往復(約0.7秒)を待たず、その場で即「反映しました」を表示して体感を即時化。
+      //   実保存はバックグラウンドで読み返し検証し、未反映なら再送→最終的に失敗した時のみ
+      //   「エラー」に訂正する（速度を優先しつつデータ消失は必ず検知する設計）。
+      setSyncToast({status:'done',name});
+      setTimeout(()=>setSyncToast(s=>(s&&s.status==='done'&&s.name===name)?null:s),4000);
       // 読み返し検証＋自動再送（完全バックグラウンド）。GAS書き込み完了を待って1.5秒後に確認。
       // 反映済み→何もしない（既に「完了」表示）。未反映→再送（最大2回）。最終的に未反映なら
       // 「完了」を「エラー」に訂正。読み返し自体の失敗も「未確認」として成功側に倒さない。
@@ -1653,12 +1653,9 @@ const App=()=>{
       };
       const p=sSet(STOR+'insp',data);
       p.then(()=>{
-        settled=true;clearTimeout(slowTimer);
         inspWriteRef.current=Date.now(); // 保護延長
-        finishDone(); // ★書き込み送信完了で即「完了」表示（体感を最短化）
         if(verify&&verify.dk)verifyBg(0); // 裏で実反映を検証。失敗時のみ上で「エラー」に訂正
       }).catch(()=>{
-        settled=true;clearTimeout(slowTimer);
         setSyncToast({status:'error',name,retry:start});
       });
       return p; // ★呼び出し側はsSet解決で先へ進む（検証待ちを待たない）
@@ -1669,9 +1666,12 @@ const App=()=>{
   const handleBookingSave=useCallback(async(form,customer)=>{
     const{entryDate,store,bookingTime,course,tokuten,staff,note,isTemp,selCarId,selDays}=form;
     const status=isTemp?'temp':'confirm';
-    // ★本予約確定の瞬間に「反映中…」吹き出しを即時表示（バックグラウンド処理の開始を待たない）。
-    //   後段の saveInspWithStatus が同じ name で done/error に更新する。
-    if(entryDate&&!isTemp)setSyncToast({status:'saving',name:customer.name});
+    // ★本予約確定の瞬間に楽観的に「反映しました」を即表示（書込往復もバックグラウンド処理も待たない）。
+    //   後段の saveInspWithStatus が裏でGAS反映を検証し、万一未反映なら同じ name を「エラー」に訂正する。
+    if(entryDate&&!isTemp){
+      setSyncToast({status:'done',name:customer.name});
+      setTimeout(()=>setSyncToast(s=>(s&&s.status==='done'&&s.name===customer.name)?null:s),4000);
+    }
     const bookDate=today();
     const dm1=customer.dm1Date,dm2=customer.dm2Date;
     const dmCol=calcDMCol(dm1,dm2,bookDate);
