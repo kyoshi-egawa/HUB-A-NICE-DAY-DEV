@@ -3748,7 +3748,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
           <div>
             <div style={{color:'white',fontWeight:800,fontSize:16}}>{isInsp?'🚗 車検予約カード':'📋 一般予約カード'}</div>
             <div style={{color:'rgba(255,255,255,0.75)',fontSize:12,marginTop:2,position:'relative'}}>
-              {(!isNew&&isInsp)?(<span onClick={()=>{if(!pickerMonth){const m=dateLabel.match(/(\d+)月(\d+)日/),now=new Date();setPickerMonth({year:now.getFullYear(),month:m?parseInt(m[1])-1:now.getMonth()});}setShowDatePicker(p=>!p);}} style={{cursor:'pointer',borderBottom:'1px dashed rgba(255,255,255,0.6)',paddingBottom:1}} title="クリックで日付変更">{dateLabel}</span>):dateLabel}
+              {(!isNew)?(<span onClick={()=>{if(!pickerMonth){const m=dateLabel.match(/(\d+)月(\d+)日/),now=new Date();setPickerMonth({year:now.getFullYear(),month:m?parseInt(m[1])-1:now.getMonth()});}setShowDatePicker(p=>!p);}} style={{cursor:'pointer',borderBottom:'1px dashed rgba(255,255,255,0.6)',paddingBottom:1}} title="クリックで日付変更">{dateLabel}</span>):dateLabel}
               {timeSlot?` / ${timeSlot}`:''}
               {showDatePicker&&pickerMonth&&(
                 <div style={{position:'fixed',top:'100px',left:'20px',zIndex:9999,background:'white',borderRadius:10,boxShadow:'0 8px 30px rgba(0,0,0,0.25)',padding:12,minWidth:240}} onClick={e=>e.stopPropagation()}>
@@ -6989,23 +6989,41 @@ function AppInner() {
         }
       }
       
-      // フォーム内の_slotが変更された場合は新スロットに移動
+      // 日付変更・スロット変更に対応して移動（旧日付・旧スロットを削除し新位置へ配置）。
+      // 日付は左上の吹き出しカレンダーで変更でき、handleDateChangeModalがmodalDk/_targetDkを更新する。
+      const _scOrigDk=formData._originalDk||originalModalDkRef.current||modalDk;
+      const _scTgtDk=formData._targetDk||modalDk;
+      const _scDateChanged=!!(_scOrigDk&&_scOrigDk!==_scTgtDk);
+      // 移動先(日付＋スロット)に別の予約があれば上書き消失を防ぐため中断（自分自身の編集は除く）
+      if(_scDateChanged||newSlot!==modalSlot){
+        const _tgtExisting=(schedData[_scTgtDk]||{})[newSlot];
+        const _isSelf=!_scDateChanged&&newSlot===modalSlot;
+        if(_tgtExisting&&!_isSelf){
+          alert(`🚫 ${String(_scTgtDk).split('-').slice(1).join('/')} の ${newSlot} には既に予約があります。別の日時を選んでください。`);
+          setModalOpen(true); // 中断してモーダルを開き直す
+          return;
+        }
+      }
       setSchedData(prev=>{
-        const day={...(prev[modalDk]||{})};
-        const baseModalSlot=getBaseSlot(modalSlot);
-        const baseNewSlot=getBaseSlot(newSlot);
-        if(newSlot!==modalSlot) delete day[modalSlot]; // 旧スロット削除
-        day[newSlot]=cleanData;
-        return{...prev,[modalDk]:day};
+        const next={...prev};
+        // 旧日付から旧スロットを削除
+        const oldDay={...(next[_scOrigDk]||{})};
+        delete oldDay[modalSlot];
+        next[_scOrigDk]=oldDay;
+        // 新日付へ新スロットで配置（同日変更時は上で削除済みの oldDay を引き継ぐ）
+        const tgtDay={...(next[_scTgtDk]||{})};
+        tgtDay[newSlot]=cleanData;
+        next[_scTgtDk]=tgtDay;
+        return next;
       });
-      // bookingKeyも新スロットに更新
-      if(newSlot!==modalSlot){
-        const oldBk=`sched-${modalDk}-${modalSlot}`;
-        const newBk=`sched-${modalDk}-${newSlot}`;
+      // bookingKeyも新日付・新スロットに更新（代車紐付けを維持）
+      const _scOldBk=`sched-${_scOrigDk}-${modalSlot}`;
+      const _scNewBk=`sched-${_scTgtDk}-${newSlot}`;
+      if(_scOldBk!==_scNewBk){
         setLoanerRes(prev=>{
           const next={};
           for(const cid of Object.keys(prev)){
-            const daysU={...(prev[cid]||{})};Object.keys(daysU).forEach(d=>{if(daysU[d]?.bookingKey===oldBk)daysU[d]={...daysU[d],bookingKey:newBk};});next[cid]=daysU;
+            const daysU={...(prev[cid]||{})};Object.keys(daysU).forEach(d=>{if(daysU[d]?.bookingKey===_scOldBk)daysU[d]={...daysU[d],bookingKey:_scNewBk};});next[cid]=daysU;
           }
           return next;
         });
@@ -7015,7 +7033,7 @@ function AppInner() {
     setCurLockKey(null);
     setTimeout(()=>releaseLock(keyToRelease),200);
     setFromCustList(false);setCustModalMeta(null);
-  },[modalType,modalDk,modalIdx,modalSlot,vsId,curLockKey,releaseLock,setInspData,setSchedData,setLoanerRes,selDate,schedRestrictions,setModalOpen,inspLimits,pendingRentalId,pendingRentalRec,pendingLoanerId,pendingLoanerData,dynRentalCars,fromCustList,custModalMeta,setCustBookings,setCustFiles,inspData]);
+  },[modalType,modalDk,modalIdx,modalSlot,vsId,curLockKey,releaseLock,setInspData,setSchedData,schedData,setLoanerRes,selDate,schedRestrictions,setModalOpen,inspLimits,pendingRentalId,pendingRentalRec,pendingLoanerId,pendingLoanerData,dynRentalCars,fromCustList,custModalMeta,setCustBookings,setCustFiles,inspData]);
 
   const handleDeleteModal=useCallback(()=>{
     // bookingKeyを特定してloanerRes・rentalResも連動削除
