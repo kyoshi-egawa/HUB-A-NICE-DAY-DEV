@@ -1333,20 +1333,28 @@ const App=()=>{
 
     // cust-updatesポーリング（スケジュール側からの即時連動）
     const pollUpdates=async()=>{
-      if(__saveCount>0)return; // 書き込み中はスキップ
       if(document.visibilityState==='hidden')return; // 非表示タブはポーリング停止（復帰時はonVisibleが即時実行）
-      if(window.__pollUpdatesBusy)return; // 前回のGAS反映確認(最大6秒)が走行中なら多重実行しない
-      window.__pollUpdatesBusy=true;
+      // ★「反映中」バッジ表示は、重い適用処理のガード(__saveCount/__pollUpdatesBusy)より前に・毎回更新する。
+      //   取得は軽量なcust-updatesのみ。保存検証中(最大6秒)や書込中でもバッジは止めない＝
+      //   スケジュールでキャンセル後にリストを開いた時、バッジが出るまでのラグを最小化する。
+      let arr=[];
       try{
         const updates=await sGet(STOR+'cust-updates');
-        const arr=Array.isArray(updates)?updates:[];
+        arr=Array.isArray(updates)?updates:[];
         if(!window.__appliedUpdTs)window.__appliedUpdTs=new Set();
         // ★「反映中」サイン：キュー上の未適用通知を行バッジ＋トーストで可視化
         //   （反映までの数秒〜数十秒、現場で正常動作と分かるように）
         const pend={};
         arr.forEach(u=>{if(u&&u.ts&&!window.__appliedUpdTs.has(u.ts))pend[u.custId||`${u.name}__${u.no}`]={name:u.name,entryDate:u.entryDate,ts:u.ts};});
         setPendingSync(prev=>JSON.stringify(prev)===JSON.stringify(pend)?prev:pend);
-        if(arr.length===0)return;
+      }catch{return;}
+      if(arr.length===0)return;
+      // ここから先は実際にリストへ反映する重い処理（チャンク保存・読み返し検証を伴う）。書込中・
+      // 前回の保存検証走行中はスキップ（バッジは上で更新済みなので表示が遅れることはない）。
+      if(__saveCount>0)return; // 書き込み中はスキップ
+      if(window.__pollUpdatesBusy)return; // 前回のGAS反映確認(最大6秒)が走行中なら多重実行しない
+      window.__pollUpdatesBusy=true;
+      try{
         // ★顧客データ未ロード中は消費しない（反映中サインだけ出して待つ）。起動直後の
         //   即時ポーリングがチャンク読込完了前にキューを空読みして通知を消す不具合の修正。
         if(!filesRef.current||filesRef.current.length===0)return;
