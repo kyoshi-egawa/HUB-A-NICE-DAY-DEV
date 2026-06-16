@@ -37,9 +37,15 @@ const INDEX_REGEX_RULES = [
   [/\s*<span style=\{\{fontSize:10,fontWeight:700,padding:'2px 8px',borderRadius:10,background:'#FFF7ED',color:'#9A3412',border:'2px solid #EA580C',flexShrink:0\}\}>⚠ テスト版（DEV）<\/span>/g, '', 1, 'DEVバッジspan'],
   [/\s*\{\/\* ===== DEV版警告バナー ===== \*\/\}/g, '', 0, 'DEVバナーコメント'],
   [/force-deploy-\d+/g, 'force-deploy-' + Date.now(), 1, 'force-deployタイムスタンプ'],
+  // 自動アップデート検知のビルド識別子をデプロイ毎に更新（旧タブが新版を検知してバナー表示）
+  [/__APP_BUILD='build-\d+'/, "__APP_BUILD='build-" + Date.now() + "'", 1, 'APP_BUILDタイムスタンプ'],
 ];
 const CUST_RULES = [
   ["const STOR='hub-v8-dev-';", "const STOR='hub-v8-';", 1],
+];
+const CUST_REGEX_RULES = [
+  // 自動アップデート検知のビルド識別子をデプロイ毎に更新
+  [/__APP_BUILD='build-\d+'/, "__APP_BUILD='build-" + Date.now() + "'", 1, 'APP_BUILDタイムスタンプ'],
 ];
 // 変換後にあってはならない文字列（残骸チェック）
 const FORBIDDEN = ['hub-v8-dev', '[DEV]', 'テスト版（DEV）', 'DEV版警告バナー',
@@ -84,7 +90,7 @@ function port(srcName, dstName, rules, regexRules) {
 
 if (!fs.existsSync(MAIN_DIR)) { console.error('本番リポジトリが見つかりません: ' + MAIN_DIR); process.exit(1); }
 port('index_dev.html', 'index_main.html', INDEX_RULES, INDEX_REGEX_RULES);
-port('customers.html', 'customers.html', CUST_RULES, []);
+port('customers.html', 'customers.html', CUST_RULES, CUST_REGEX_RULES);
 
 if (failed) {
   console.error('\n★中断: 上記の✖を解消してから再実行してください（本番ファイルは書き込み済みのものだけ更新）。');
