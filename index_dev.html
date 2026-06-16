@@ -6991,34 +6991,31 @@ function AppInner() {
       
       // 日付変更・スロット変更に対応して移動（旧日付・旧スロットを削除し新位置へ配置）。
       // 日付は左上の吹き出しカレンダーで変更でき、handleDateChangeModalがmodalDk/_targetDkを更新する。
+      // ★タイムスケジュールは同時刻に複数予約OK。移動先の時刻が埋まっていてもブロックせず、
+      //   その時刻の空きサブ枠（base→base__1→base__2…）へ自動配置する。
       const _scOrigDk=formData._originalDk||originalModalDkRef.current||modalDk;
       const _scTgtDk=formData._targetDk||modalDk;
-      const _scDateChanged=!!(_scOrigDk&&_scOrigDk!==_scTgtDk);
-      // 移動先(日付＋スロット)に別の予約があれば上書き消失を防ぐため中断（自分自身の編集は除く）
-      if(_scDateChanged||newSlot!==modalSlot){
-        const _tgtExisting=(schedData[_scTgtDk]||{})[newSlot];
-        const _isSelf=!_scDateChanged&&newSlot===modalSlot;
-        if(_tgtExisting&&!_isSelf){
-          alert(`🚫 ${String(_scTgtDk).split('-').slice(1).join('/')} の ${newSlot} には既に予約があります。別の日時を選んでください。`);
-          setModalOpen(true); // 中断してモーダルを開き直す
-          return;
-        }
-      }
+      const _scBase=getBaseSlot(newSlot);
+      // 移動先の現在の枠状況（同日移動なら自分=modalSlotを除外）から、base時刻の空きサブ枠を決定
+      const _scTgtNow={...(schedData[_scTgtDk]||{})};
+      if(_scOrigDk===_scTgtDk) delete _scTgtNow[modalSlot];
+      let _scFinalSlot=_scBase, _scSub=0;
+      while(_scTgtNow[_scFinalSlot]){ _scSub++; _scFinalSlot=makeSlotKey(_scBase,_scSub); }
       setSchedData(prev=>{
         const next={...prev};
         // 旧日付から旧スロットを削除
         const oldDay={...(next[_scOrigDk]||{})};
         delete oldDay[modalSlot];
         next[_scOrigDk]=oldDay;
-        // 新日付へ新スロットで配置（同日変更時は上で削除済みの oldDay を引き継ぐ）
+        // 新日付の空きサブ枠へ配置（同日移動時は上で削除済みの oldDay を引き継ぐ）
         const tgtDay={...(next[_scTgtDk]||{})};
-        tgtDay[newSlot]=cleanData;
+        tgtDay[_scFinalSlot]=cleanData;
         next[_scTgtDk]=tgtDay;
         return next;
       });
-      // bookingKeyも新日付・新スロットに更新（代車紐付けを維持）
+      // bookingKeyも新日付・新スロット（割り当て後）に更新（代車紐付けを維持）
       const _scOldBk=`sched-${_scOrigDk}-${modalSlot}`;
-      const _scNewBk=`sched-${_scTgtDk}-${newSlot}`;
+      const _scNewBk=`sched-${_scTgtDk}-${_scFinalSlot}`;
       if(_scOldBk!==_scNewBk){
         setLoanerRes(prev=>{
           const next={};
