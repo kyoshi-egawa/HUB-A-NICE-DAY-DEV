@@ -6176,6 +6176,7 @@ function AppInner() {
     const sortedInsp = [...myRows, ...noStoreRows, ...otherRows];
 
     const courseLabel = id => {const c=COURSES.find(c=>c.id===Number(id));return c?c.name:'';};
+    const courseBadge = id => {const c=COURSES.find(c=>c.id===Number(id));if(!c)return '';return c.id===1?`<span class="course-badge course-ma">${c.initial}</span>`:`<span class="course-badge course-other" style="color:${c.color}">${c.initial}</span>`;};
     const getLoanerLabel = (dk, name) => {
       for(const cid of Object.keys(loanerRes)){
         for(const r of Object.values(loanerRes[cid]||{})){
@@ -6194,12 +6195,12 @@ function AppInner() {
     // タイムスケジュール：9:00〜18:00 全枠（空き含む）
     const PRINT_SLOTS = TIME_SLOTS.filter(s=>{
       const h=parseInt(s.split(':')[0]);
-      return h>=9 && h<=18;
+      return h>=9 && h<=18 && s!=='12:30';  // 12:30（昼休み枠）は印刷では省く
     });
 
     const schedRows = [];
     for(const slot of PRINT_SLOTS){
-      const subKeys = Object.keys(schedData[dk]||{}).filter(k=>k===slot||k.startsWith(slot+'-'));
+      const subKeys = Object.keys(schedData[dk]||{}).filter(k=>getBaseSlot(k)===slot).sort();
       const dataKeys = subKeys.filter(k=>{const r=schedData[dk][k];return r&&r.name;});
       if(dataKeys.length===0){
         schedRows.push({slot, name:'', carType:'', work:'', loaner:'', note:'', isEmpty:true});
@@ -6213,9 +6214,11 @@ function AppInner() {
 
     // 備考・メモ
     const memos = (memoData&&memoData[dk])||[];
+    const memoLen = memos.reduce((a,m)=>a+(((m.content||m.text||'')).length),0);
+    const memoCls = memoLen>180?'m-xs':memoLen>90?'m-sm':'';  // 文字量で段階縮小
     const memoHtml = memos.length>0
-      ? memos.map(m=>`<div style="padding:3px 0;border-bottom:1px solid #f1f5f9;font-size:9px">${m.content||m.text||''}</div>`).join('')
-      : '<div style="color:#9ca3af;font-size:9px">なし</div>';
+      ? memos.map(m=>`<div style="padding:4px 0;border-bottom:1px solid #cbd5e1;color:#000">${m.content||m.text||''}</div>`).join('')
+      : '<div style="color:#64748b">なし</div>';
 
     const html = `<!DOCTYPE html>
 <html lang="ja">
@@ -6224,32 +6227,62 @@ function AppInner() {
 <title>${dateLabel} ${storeName} スケジュール</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 10px; color: #111; background: white; }
-  @page { size: A4 landscape; margin: 8mm; }
-  .page { width: 100%; display: flex; gap: 8px; }
+  html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; height: 100%; }
+  body { font-family: -apple-system, "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 13px; color: #000; background: white; }
+  @page { size: A4 landscape; margin: 6mm; }
+  .page { width: 100%; height: 196mm; display: flex; gap: 8px; }
   .left { width: 46%; display: flex; flex-direction: column; gap: 7px; }
-  .right { width: 54%; }
-  h2 { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; color: white; margin-bottom: 4px; }
+  .right { width: 54%; display: flex; flex-direction: column; }
+  .right .section-box { flex: 1; display: flex; flex-direction: column; overflow: visible; }
+  h2 { font-size: 14px; font-weight: 800; padding: 5px 9px; border-radius: 4px; color: white; margin-bottom: 4px; }
   table { width: 100%; border-collapse: collapse; }
-  th { padding: 4px 5px; font-weight: 700; font-size: 8px; text-align: left; color: white; }
-  td { padding: 3px 5px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; font-size: 9px; }
+  th { padding: 5px 6px; font-weight: 800; font-size: 11px; text-align: left; color: white; }
+  td { padding: 5px 6px; border-bottom: 1px solid #94a3b8; vertical-align: middle; font-size: 12px; font-weight: 500; }
+  /* 車検：タイムスケジュールの文字に合わせて拡大 */
+  .insp-table td { font-size: 14px; padding: 7px 6px; }
+  .insp-table th { font-size: 12px; }
+  /* 車検コース：一文字を〇バッジで（マ＝赤丸白字／他は丸枠のみ） */
+  .course-badge { display:inline-flex; align-items:center; justify-content:center; width:21px; height:21px; border-radius:50%; font-weight:800; font-size:12px; line-height:1; }
+  .course-ma { background:#b91c1c; color:#fff; }
+  .course-other { border:1.5px solid currentColor; background:transparent; }
+  @media print and (monochrome){
+    .course-ma { background:#000; color:#fff; }
+    .course-other { border-color:#000 !important; color:#000 !important; }
+  }
+  /* タイムスケジュール：1予約=1行・12:30削除分を行高に回す */
+  .right .section-box > table { flex: 1; }
+  .sched-table td { font-size: 13px; padding: 9px 6px; line-height: 1.2; }
+  .sched-table th { font-size: 12px; }
+  /* 氏名・車種は折り返さず1行表示 */
+  .sched-table td:nth-child(2), .sched-table td:nth-child(3) { white-space: nowrap; }
+  /* 代車も1行表示・長ければ段階縮小 */
+  .sched-table td.loaner { white-space: nowrap; }
+  .sched-table td.loaner.l-sm { font-size: 11px; }
+  .sched-table td.loaner.l-xs { font-size: 9px; }
+  /* 内容が長い枠は枠内に収まるよう段階縮小・折返し */
+  .sched-table td.note-sm { font-size: 11px; white-space: normal; }
+  .sched-table td.note-xs { font-size: 9px;  white-space: normal; line-height: 1.15; }
   .insp-head { background: #9a3412; }
   .sched-head { background: #0e7490; }
   .memo-head { background: #7c3aed; }
   .store-my { border-left: 3px solid ${storeColor}; }
-  .store-other { border-left: 3px solid #94a3b8; }
-  .slot-empty td { color: #cbd5e1; background: #fafafa; }
-  .slot-empty td:first-child { color: #94a3b8; font-weight: 700; }
+  .store-other { border-left: 3px solid #64748b; }
+  .slot-empty td { color: #94a3b8; background: #f1f5f9; }
+  .slot-empty td:first-child { color: #334155; font-weight: 700; }
   .has-data td { background: white; }
-  .staff-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; font-size: 9px; }
-  .chip { padding: 1px 6px; border-radius: 10px; font-weight: 700; }
-  .chip-work { background: #e0f2fe; color: #0369a1; }
-  .chip-off { background: #f1f5f9; color: #94a3b8; }
+  .staff-row { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; font-size: 12px; }
+  .chip { padding: 2px 8px; border-radius: 10px; font-weight: 700; }
+  .chip-work { background: #e0f2fe; color: #075985; }
+  .chip-off { background: #e2e8f0; color: #475569; }
   .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; border-bottom: 2px solid #1e293b; padding-bottom: 4px; }
-  h1 { font-size: 15px; font-weight: 800; }
-  .print-info { font-size: 8px; color: #94a3b8; }
-  .section-box { border: 1px solid #e5e7eb; border-radius: 5px; overflow: hidden; }
-  .memo-body { padding: 5px 8px; min-height: 30px; }
+  h1 { font-size: 21px; font-weight: 800; }
+  .print-info { font-size: 10px; color: #475569; }
+  .section-box { border: 1px solid #94a3b8; border-radius: 5px; overflow: hidden; }
+  /* メモ欄：左カラムの余白を埋めて枠いっぱい使う・文字量で段階縮小 */
+  .memo-section { flex: 1; display: flex; flex-direction: column; }
+  .memo-body { flex: 1; padding: 6px 9px; font-size: 12px; }
+  .memo-body.m-sm { font-size: 11px; }
+  .memo-body.m-xs { font-size: 10px; line-height: 1.3; }
 </style>
 </head>
 <body>
@@ -6262,18 +6295,18 @@ function AppInner() {
 
     <div class="section-box">
       <h2 class="insp-head">🚗 車検（${sortedInsp.length}台）</h2>
-      <table>
+      <table class="insp-table">
         <thead><tr class="insp-head">
           <th style="width:16px">No</th>
           <th style="width:68px">氏名</th>
           <th style="width:58px">車種</th>
-          <th style="width:52px">コース</th>
+          <th style="width:40px">コース</th>
           <th style="width:42px">代車</th>
-          <th style="width:18px">特典</th>
+          <th style="width:24px">特典</th>
           <th>備考</th>
         </tr></thead>
         <tbody>
-          ${sortedInsp.length===0?'<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:8px">予約なし</td></tr>':
+          ${sortedInsp.length===0?'<tr><td colspan="7" style="text-align:center;color:#64748b;padding:8px">予約なし</td></tr>':
             sortedInsp.map((r,i)=>{
               const isOther = normSt(r.store)&&normSt(r.store)!==vsId;
               const storeTag = normSt(r.store)==='honten'?'本':normSt(r.store)==='sanda'?'三':'';
@@ -6281,11 +6314,11 @@ function AppInner() {
               const tagColor = normSt(r.store)==='honten'?'#2563eb':'#dc2626';
               return `<tr class="${isOther?'store-other':'store-my'}">
                 <td style="font-weight:700;color:${isOther?'#94a3b8':storeColor}">${i+1}</td>
-                <td style="font-weight:700">${r.name||''}${storeTag?`<span style="font-size:7px;background:${tagColor};color:white;padding:1px 3px;border-radius:2px;margin-left:2px">${storeTag}</span>`:''}</td>
+                <td style="font-weight:700">${r.name||''}${storeTag?`<span style="font-size:9px;background:${tagColor};color:white;padding:1px 4px;border-radius:2px;margin-left:3px">${storeTag}</span>`:''}</td>
                 <td>${r.carType||''}</td>
-                <td>${courseLabel(r.course)}</td>
+                <td>${courseBadge(r.course)}</td>
                 <td>${loaner}</td>
-                <td style="text-align:center">${r.tokuten||''}</td>
+                <td style="text-align:center">${r.tokuten||'-'}</td>
                 <td>${r.note||''}</td>
               </tr>`;
             }).join('')
@@ -6295,14 +6328,13 @@ function AppInner() {
     </div>
 
     <div class="staff-row">
-      <span style="font-weight:700;color:#374151">出勤：</span>
-      ${workStaff.map(s=>`<span class="chip chip-work">${s.name}</span>`).join('')}
-      ${dayOff.length>0?`<span style="color:#94a3b8;margin-left:4px">休：</span>${dayOff.map(n=>`<span class="chip chip-off">${n}</span>`).join('')}`:''}
+      <span style="font-weight:700;color:#374151">本日の休み：</span>
+      ${dayOff.length>0?dayOff.map(n=>`<span class="chip chip-off">${n}</span>`).join(''):'<span style="color:#64748b">なし</span>'}
     </div>
 
-    <div class="section-box">
+    <div class="section-box memo-section">
       <h2 class="memo-head">📝 備考・メモ</h2>
-      <div class="memo-body">${memoHtml}</div>
+      <div class="memo-body ${memoCls}">${memoHtml}</div>
     </div>
   </div>
 
@@ -6310,25 +6342,28 @@ function AppInner() {
     <div style="margin-top:28px"></div>
     <div class="section-box">
       <h2 class="sched-head">⏰ タイムスケジュール（9:00〜18:00）</h2>
-      <table>
+      <table class="sched-table">
         <thead><tr class="sched-head">
           <th style="width:34px">時間</th>
-          <th style="width:65px">氏名</th>
-          <th style="width:55px">車種</th>
-          <th style="width:45px">作業</th>
-          <th style="width:50px">代車</th>
+          <th style="width:92px">氏名</th>
+          <th style="width:78px">車種</th>
+          <th style="width:42px">作業</th>
+          <th style="width:60px">代車</th>
           <th>内容</th>
         </tr></thead>
         <tbody>
-          ${schedRows.map(r=>`
-            <tr class="${r.isEmpty?'slot-empty':'has-data'}">
+          ${schedRows.map(r=>{
+            const ln=(r.loaner||'').length, nn=(r.note||'').length;
+            const lCls='loaner'+(ln>8?' l-xs':ln>4?' l-sm':'');
+            const nCls=nn>34?'note-xs':nn>22?'note-sm':'';
+            return `<tr class="${r.isEmpty?'slot-empty':'has-data'}">
               <td style="font-weight:700;color:#0e7490;white-space:nowrap">${r.slot||''}</td>
               <td style="font-weight:${r.name?'700':'400'}">${r.name||''}</td>
               <td>${r.carType||''}</td>
               <td>${r.work||''}</td>
-              <td>${r.loaner||''}</td>
-              <td>${r.note||''}</td>
-            </tr>`).join('')}
+              <td class="${lCls}">${r.loaner||''}</td>
+              <td class="${nCls}">${r.note||''}</td>
+            </tr>`;}).join('')}
         </tbody>
       </table>
     </div>
