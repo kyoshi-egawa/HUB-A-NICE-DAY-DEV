@@ -6249,9 +6249,9 @@ function AppInner() {
     .course-ma { background:#000; color:#fff; }
     .course-other { border-color:#000 !important; color:#000 !important; }
   }
-  /* タイムスケジュール：1予約=1行・12:30削除分を行高に回す */
+  /* タイムスケジュール：1予約=1行・用紙1枚に収める（行高は控えめ） */
   .right .section-box > table { flex: 1; }
-  .sched-table td { font-size: 13px; padding: 9px 6px; line-height: 1.2; }
+  .sched-table td { font-size: 13px; padding: 5px 6px; line-height: 1.2; }
   .sched-table th { font-size: 12px; }
   /* 氏名・車種は折り返さず1行表示 */
   .sched-table td:nth-child(2), .sched-table td:nth-child(3) { white-space: nowrap; }
@@ -6339,7 +6339,7 @@ function AppInner() {
   </div>
 
   <div class="right">
-    <div style="margin-top:28px"></div>
+    <div style="margin-top:14px"></div>
     <div class="section-box">
       <h2 class="sched-head">⏰ タイムスケジュール（9:00〜18:00）</h2>
       <table class="sched-table">
