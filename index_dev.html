@@ -6189,19 +6189,20 @@ function AppInner() {
       let nameMatch='';
       for(const cid of Object.keys(loanerRes)){
         for(const r of Object.values(loanerRes[cid]||{})){
-          const label = r.carName ? fmtLoaner(r.carName, r.carNum)
-            : (()=>{const car=LOANERS.find(c=>String(c.id)===String(cid)); return car?fmtLoaner(car.name,car.num):'代車';})();
+          const label = r.carName ? fmtLoaner(r.carName, r.carNum) : '代車';  // 静的LOANERSは本番と別物なので名前に使わない
           if(bookingKey && r.bookingKey===bookingKey && (!r.user || r.user===name)) return label;
           if(!nameMatch && name && r.user===name && dateNum>=toNum(r.fy,r.fm,r.fd) && dateNum<=toNum(r.ty,r.tm,r.td)) nameMatch=label;
         }
       }
       return nameMatch;
     };
-    // スケジュール枠の代車表示：レンタカー優先、次に代車id→車種名（番号）、無ければ保存済み文字列
+    // スケジュール枠の代車表示：枠に保存された実値を忠実に使う（loanerIdから静的LOANERSを逆引きすると
+    // 本番では別車種のデフォルト名＝DEV相当が出てしまうため使わない）。カッコだけ全角に正規化。
     const schedLoaner = r => {
       if(r.rentalLabel) return r.rentalLabel;
-      if(r.loanerId!=null){const c=LOANERS.find(x=>String(x.id)===String(r.loanerId)); if(c) return fmtLoaner(c.name,c.num);}
-      return r.loaner||'';
+      const s = r.loaner||'';
+      const m = s.match(/^(.*?)\s*[（(]([^）)]*)[）)]\s*$/);
+      return m ? fmtLoaner(m[1], m[2]) : s;
     };
 
     const dayOff = dayOffData[dk]||[];
