@@ -6177,16 +6177,26 @@ function AppInner() {
 
     const courseLabel = id => {const c=COURSES.find(c=>c.id===Number(id));return c?c.name:'';};
     const courseBadge = id => {const c=COURSES.find(c=>c.id===Number(id));if(!c)return '';return c.id===1?`<span class="course-badge course-ma">${c.initial}</span>`:`<span class="course-badge course-other" style="color:${c.color}">${c.initial}</span>`;};
+    // 代車表記：車種名（番号）。文字量で段階縮小（fitクラスは各表の文字サイズにem追従）
+    const fmtLoaner = (nm, num) => num?`${nm}（${num}）`:(nm||'');
+    const loanerFitCls = s => {const n=(s||'').length; return 'loaner-fit'+(n>13?' f3':n>9?' f2':n>6?' f1':'');};
     const getLoanerLabel = (dk, name) => {
       for(const cid of Object.keys(loanerRes)){
         for(const r of Object.values(loanerRes[cid]||{})){
           if(r.user===name){
+            if(r.carName) return fmtLoaner(r.carName, r.carNum);  // 予約自身の車名/番号を優先（堅牢）
             const car=LOANERS.find(c=>String(c.id)===String(cid));
-            return car?car.name:'代車';
+            return car?fmtLoaner(car.name,car.num):'代車';
           }
         }
       }
       return '';
+    };
+    // スケジュール枠の代車表示：レンタカー優先、次に代車id→車種名（番号）、無ければ保存済み文字列
+    const schedLoaner = r => {
+      if(r.rentalLabel) return r.rentalLabel;
+      if(r.loanerId!=null){const c=LOANERS.find(x=>String(x.id)===String(r.loanerId)); if(c) return fmtLoaner(c.name,c.num);}
+      return r.loaner||'';
     };
 
     const dayOff = dayOffData[dk]||[];
@@ -6207,7 +6217,7 @@ function AppInner() {
       } else {
         dataKeys.forEach((k,i)=>{
           const r=schedData[dk][k];
-          schedRows.push({slot:i===0?slot:'', name:r.name||'', carType:r.carType||'', work:r.workType||'', loaner:r.loanerLabel||'', note:r.content||'', isEmpty:false});
+          schedRows.push({slot:i===0?slot:'', name:r.name||'', carType:r.carType||'', work:r.work||'', loaner:schedLoaner(r), note:r.content||'', isEmpty:false});
         });
       }
     }
@@ -6255,10 +6265,11 @@ function AppInner() {
   .sched-table th { font-size: 12px; }
   /* 氏名・車種は折り返さず1行表示 */
   .sched-table td:nth-child(2), .sched-table td:nth-child(3) { white-space: nowrap; }
-  /* 代車も1行表示・長ければ段階縮小 */
-  .sched-table td.loaner { white-space: nowrap; }
-  .sched-table td.loaner.l-sm { font-size: 11px; }
-  .sched-table td.loaner.l-xs { font-size: 9px; }
+  /* 代車（車検・一般共通）：車種名（番号）を1行表示・長さで段階縮小（emで各表の文字に追従、最長は折返し許可） */
+  td.loaner-fit { white-space: nowrap; }
+  td.loaner-fit.f1 { font-size: 0.82em; }
+  td.loaner-fit.f2 { font-size: 0.68em; }
+  td.loaner-fit.f3 { font-size: 0.56em; white-space: normal; line-height: 1.15; word-break: break-all; }
   /* 内容が長い枠は枠内に収まるよう段階縮小・折返し */
   .sched-table td.note-sm { font-size: 11px; white-space: normal; }
   .sched-table td.note-xs { font-size: 9px;  white-space: normal; line-height: 1.15; }
@@ -6301,7 +6312,7 @@ function AppInner() {
           <th style="width:68px">氏名</th>
           <th style="width:58px">車種</th>
           <th style="width:40px">コース</th>
-          <th style="width:42px">代車</th>
+          <th style="width:64px">代車</th>
           <th style="width:24px">特典</th>
           <th>備考</th>
         </tr></thead>
@@ -6317,7 +6328,7 @@ function AppInner() {
                 <td style="font-weight:700">${r.name||''}${storeTag?`<span style="font-size:9px;background:${tagColor};color:white;padding:1px 4px;border-radius:2px;margin-left:3px">${storeTag}</span>`:''}</td>
                 <td>${r.carType||''}</td>
                 <td>${courseBadge(r.course)}</td>
-                <td>${loaner}</td>
+                <td class="${loanerFitCls(loaner)}">${loaner}</td>
                 <td style="text-align:center">${r.tokuten||'-'}</td>
                 <td>${r.note||''}</td>
               </tr>`;
@@ -6348,20 +6359,19 @@ function AppInner() {
           <th style="width:92px">氏名</th>
           <th style="width:78px">車種</th>
           <th style="width:42px">作業</th>
-          <th style="width:60px">代車</th>
+          <th style="width:84px">代車</th>
           <th>内容</th>
         </tr></thead>
         <tbody>
           ${schedRows.map(r=>{
-            const ln=(r.loaner||'').length, nn=(r.note||'').length;
-            const lCls='loaner'+(ln>8?' l-xs':ln>4?' l-sm':'');
+            const nn=(r.note||'').length;
             const nCls=nn>34?'note-xs':nn>22?'note-sm':'';
             return `<tr class="${r.isEmpty?'slot-empty':'has-data'}">
               <td style="font-weight:700;color:#0e7490;white-space:nowrap">${r.slot||''}</td>
               <td style="font-weight:${r.name?'700':'400'}">${r.name||''}</td>
               <td>${r.carType||''}</td>
-              <td>${r.work||''}</td>
-              <td class="${lCls}">${r.loaner||''}</td>
+              <td style="text-align:center">${r.work||''}</td>
+              <td class="${loanerFitCls(r.loaner)}">${r.loaner||''}</td>
               <td class="${nCls}">${r.note||''}</td>
             </tr>`;}).join('')}
         </tbody>
