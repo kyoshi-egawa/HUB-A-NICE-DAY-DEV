@@ -6168,7 +6168,8 @@ function AppInner() {
   const handlePrint = useCallback((dk, inspData, schedData, dateLabel, vsId, loanerRes, COURSES, LOANERS, TIME_SLOTS, staffList, dayOffData, closedDays, closedDates, memoData) => {
     const storeName = vsId==='honten'?'本店':'三田店';
     const storeColor = vsId==='honten'?'#2563eb':'#dc2626';
-    const inspRows = inspData[dk]||[];
+    // 元配列インデックス(_idx)を保持：代車のbookingKey(insp-${dk}-${idx})照合に必要
+    const inspRows = (inspData[dk]||[]).map((r,idx)=> r?{...r,_idx:idx}:r);
     const normSt = s=>{if(!s)return'';if(s==='honten'||s==='本店')return'honten';if(s==='sanda'||s==='三田店')return'sanda';return s;};
     const myRows = inspRows.filter(r=>r&&r.name&&normSt(r.store)===vsId);
     const otherRows = inspRows.filter(r=>r&&r.name&&normSt(r.store)&&normSt(r.store)!==vsId);
@@ -6180,17 +6181,21 @@ function AppInner() {
     // 代車表記：車種名（番号）。文字量で段階縮小（fitクラスは各表の文字サイズにem追従）
     const fmtLoaner = (nm, num) => num?`${nm}（${num}）`:(nm||'');
     const loanerFitCls = s => {const n=(s||'').length; return 'loaner-fit'+(n>13?' f3':n>9?' f2':n>6?' f1':'');};
-    const getLoanerLabel = (dk, name) => {
+    // 本体(getLoanerLabel/1409行)と同一判定: bookingKey一致(氏名ガード付き)を最優先、なければ「この日付を含む期間×氏名一致」。
+    // 旧実装は氏名のみで全期間照合し、別日の代車を誤表示していた（本番印刷で実害）。dkはhandlePrint引数を使用。
+    const getLoanerLabel = (name, bookingKey) => {
+      const parts=dk.split('-').map(Number);
+      const dateNum=toNum(parts[0], parts[1]-1, parts[2]);
+      let nameMatch='';
       for(const cid of Object.keys(loanerRes)){
         for(const r of Object.values(loanerRes[cid]||{})){
-          if(r.user===name){
-            if(r.carName) return fmtLoaner(r.carName, r.carNum);  // 予約自身の車名/番号を優先（堅牢）
-            const car=LOANERS.find(c=>String(c.id)===String(cid));
-            return car?fmtLoaner(car.name,car.num):'代車';
-          }
+          const label = r.carName ? fmtLoaner(r.carName, r.carNum)
+            : (()=>{const car=LOANERS.find(c=>String(c.id)===String(cid)); return car?fmtLoaner(car.name,car.num):'代車';})();
+          if(bookingKey && r.bookingKey===bookingKey && (!r.user || r.user===name)) return label;
+          if(!nameMatch && name && r.user===name && dateNum>=toNum(r.fy,r.fm,r.fd) && dateNum<=toNum(r.ty,r.tm,r.td)) nameMatch=label;
         }
       }
-      return '';
+      return nameMatch;
     };
     // スケジュール枠の代車表示：レンタカー優先、次に代車id→車種名（番号）、無ければ保存済み文字列
     const schedLoaner = r => {
@@ -6321,7 +6326,7 @@ function AppInner() {
             sortedInsp.map((r,i)=>{
               const isOther = normSt(r.store)&&normSt(r.store)!==vsId;
               const storeTag = normSt(r.store)==='honten'?'本':normSt(r.store)==='sanda'?'三':'';
-              const loaner = getLoanerLabel(dk, r.name);
+              const loaner = getLoanerLabel(r.name, `insp-${dk}-${r._idx}`);
               const tagColor = normSt(r.store)==='honten'?'#2563eb':'#dc2626';
               return `<tr class="${isOther?'store-other':'store-my'}">
                 <td style="font-weight:700;color:${isOther?'#94a3b8':storeColor}">${i+1}</td>
