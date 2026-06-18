@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>車検WEB予約（試作）| Hub a Nice Day</title>
+<!-- ============================================================
+     LINE車検予約 LIFFアプリの「画面・流れ」確認用プロトタイプ。
+     ※ダミーデータで動作。予約は実際には登録されません（試作）。
+     確定仕様: 本店/三田店 両方・自動確定・入庫9:00/9:15/9:30・
+              代車=コース連動・支払い=現金/PayPay/クレカ
+     ============================================================ -->
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{font-family:-apple-system,"Hiragino Sans","Yu Gothic",sans-serif;background:#e9eef2;color:#1f2937}
+  #root{max-width:480px;margin:0 auto;min-height:100vh;background:#fff;display:flex;flex-direction:column}
+  .demo-bar{background:#facc15;color:#7c2d12;font-size:11px;font-weight:700;text-align:center;padding:5px 8px}
+  .hd{background:#06C755;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:8px}
+  .hd h1{font-size:16px;font-weight:800}
+  .hd .store{margin-left:auto;font-size:12px;background:rgba(255,255,255,.25);padding:3px 9px;border-radius:12px;font-weight:700}
+  .steps{display:flex;gap:4px;padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e5e7eb}
+  .steps .s{flex:1;height:5px;border-radius:3px;background:#e2e8f0}
+  .steps .s.on{background:#06C755}
+  .body{flex:1;padding:18px 16px 96px}
+  h2{font-size:18px;font-weight:800;margin-bottom:4px}
+  .sub{font-size:12px;color:#6b7280;margin-bottom:16px}
+  .card{border:2px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:10px;cursor:pointer;transition:.12s}
+  .card:active{transform:scale(.99)}
+  .card.sel{border-color:#06C755;background:#f0fdf4}
+  .card .t{font-size:15px;font-weight:700}
+  .card .d{font-size:12px;color:#6b7280;margin-top:3px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+  .pill{border:2px solid #e5e7eb;border-radius:10px;padding:14px 6px;text-align:center;font-weight:700;font-size:15px;cursor:pointer}
+  .pill.sel{border-color:#06C755;background:#06C755;color:#fff}
+  .note{font-size:12px;color:#92400e;background:#fef3c7;border-radius:9px;padding:10px 12px;margin-top:12px;line-height:1.5}
+  .cal{border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
+  .cal .mhd{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#f8fafc;font-weight:800}
+  .cal .mhd button{border:none;background:#06C755;color:#fff;width:30px;height:30px;border-radius:8px;font-size:16px;cursor:pointer}
+  .cal .mhd button:disabled{background:#cbd5e1}
+  .dow{display:grid;grid-template-columns:repeat(7,1fr);font-size:11px;color:#94a3b8;padding:6px 0;text-align:center}
+  .days{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;padding:4px}
+  .day{aspect-ratio:1;border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;cursor:pointer;border:2px solid transparent}
+  .day .mk{font-size:11px;line-height:1;margin-top:1px}
+  .day.ok{background:#f0fdf4}.day.ok .mk{color:#06C755}
+  .day.few{background:#fff7ed}.day.few .mk{color:#ea580c}
+  .day.x{color:#cbd5e1;cursor:not-allowed}.day.x .mk{color:#e2e8f0}
+  .day.sel{border-color:#06C755;background:#06C755;color:#fff}.day.sel .mk{color:#fff}
+  .day.empty{visibility:hidden}
+  .legend{display:flex;gap:14px;justify-content:center;font-size:11px;color:#6b7280;padding:8px}
+  label.f{display:block;font-size:13px;font-weight:700;margin:14px 0 5px}
+  input,select{width:100%;padding:12px;border:2px solid #e5e7eb;border-radius:10px;font-size:15px;background:#fff}
+  input:focus,select:focus{outline:none;border-color:#06C755}
+  .sumrow{display:flex;justify-content:space-between;padding:11px 2px;border-bottom:1px solid #f1f5f9;font-size:14px}
+  .sumrow .k{color:#6b7280}.sumrow .v{font-weight:700;text-align:right}
+  .foot{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;padding:12px 16px;background:#fff;border-top:1px solid #e5e7eb;display:flex;gap:10px}
+  .btn{flex:1;padding:15px;border:none;border-radius:12px;font-size:16px;font-weight:800;cursor:pointer}
+  .btn.primary{background:#06C755;color:#fff}
+  .btn.primary:disabled{background:#cbd5e1}
+  .btn.ghost{background:#f1f5f9;color:#475569;flex:0 0 90px}
+  .done{text-align:center;padding:40px 16px}
+  .done .ic{width:76px;height:76px;border-radius:50%;background:#06C755;color:#fff;font-size:42px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+  .done h2{font-size:21px}
+  .resno{font-size:13px;color:#6b7280;margin-top:8px}
+  .donecard{text-align:left;border:2px solid #e5e7eb;border-radius:12px;padding:14px;margin:18px 0}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState} = React;
+
+const STORES=[{id:'honten',name:'本店'},{id:'sanda',name:'三田店'}];
+const COURSES=[
+  {id:1,name:'マッハ車検',initial:'マ',color:'#b91c1c',desc:'最短スピード車検。代車なし。',loaner:'none'},
+  {id:2,name:'クイック車検',initial:'ク',color:'#1d4ed8',desc:'お預かり車検。代車は1日1,000円（税別）。',loaner:'option'},
+  {id:3,name:'レギュラー車検',initial:'レ',color:'#d97706',desc:'じっくり整備。代車サービス（無料）。',loaner:'service'},
+];
+const TIMES=['9:00','9:15','9:30'];
+const PAYS=['現金','PayPay','クレジットカード'];
+const DOW=['日','月','火','水','木','金','土'];
+
+// ダミー空き状況: 過去/日曜は×、ランダムで△/×、それ以外○
+function avail(y,m,d){
+  const dt=new Date(y,m,d), today=new Date(); today.setHours(0,0,0,0);
+  if(dt<today) return 'x';
+  if(dt.getDay()===0) return 'x';            // 日曜定休（ダミー）
+  const h=(y*37+m*101+d*17)%10;
+  if(h<2) return 'x';                          // 満車（ダミー）
+  if(h<4) return 'few';                        // 残りわずか
+  return 'ok';
+}
+
+function App(){
+  const [step,setStep]=useState(0);
+  const [store,setStore]=useState(null);
+  const [cur,setCur]=useState(()=>{const t=new Date();return{y:t.getFullYear(),m:t.getMonth()};});
+  const [date,setDate]=useState(null);        // {y,m,d}
+  const [course,setCourse]=useState(null);
+  const [loaner,setLoaner]=useState(null);    // true/false（クイックのみ選択）
+  const [time,setTime]=useState(null);
+  const [form,setForm]=useState({name:'',tel:'',car:'',expiry:''});
+  const [pay,setPay]=useState(null);
+
+  const TOTAL=7;
+  const storeName=store?STORES.find(s=>s.id===store).name:'';
+  const courseObj=course?COURSES.find(c=>c.id===course):null;
+
+  const loanerText=()=>{
+    if(!courseObj) return '';
+    if(courseObj.loaner==='none') return '代車なし';
+    if(courseObj.loaner==='service') return '代車あり（サービス）';
+    return loaner? '代車あり（1日1,000円）':'代車なし';
+  };
+
+  const next=()=>setStep(s=>s+1);
+  const back=()=>setStep(s=>Math.max(0,s-1));
+
+  // カレンダー生成
+  const renderCal=()=>{
+    const first=new Date(cur.y,cur.m,1).getDay();
+    const dim=new Date(cur.y,cur.m+1,0).getDate();
+    const cells=[];
+    for(let i=0;i<first;i++) cells.push(<div key={'e'+i} className="day empty"/>);
+    for(let d=1;d<=dim;d++){
+      const a=avail(cur.y,cur.m,d);
+      const sel=date&&date.y===cur.y&&date.m===cur.m&&date.d===d;
+      const mk=a==='ok'?'○':a==='few'?'△':'×';
+      cells.push(
+        <div key={d} className={`day ${a} ${sel?'sel':''}`}
+          onClick={()=>{if(a!=='x'){setDate({y:cur.y,m:cur.m,d});}}}>
+          <div>{d}</div><div className="mk">{mk}</div>
+        </div>);
+    }
+    const t=new Date();
+    const isThisMonth=cur.y===t.getFullYear()&&cur.m===t.getMonth();
+    return (
+      <div className="cal">
+        <div className="mhd">
+          <button disabled={isThisMonth} onClick={()=>setCur(c=>({y:c.m===0?c.y-1:c.y,m:(c.m+11)%12}))}>‹</button>
+          <span>{cur.y}年 {cur.m+1}月</span>
+          <button onClick={()=>setCur(c=>({y:c.m===11?c.y+1:c.y,m:(c.m+1)%12}))}>›</button>
+        </div>
+        <div className="dow">{DOW.map(d=><div key={d}>{d}</div>)}</div>
+        <div className="days">{cells}</div>
+        <div className="legend"><span>○ 空きあり</span><span>△ 残りわずか</span><span>× 不可</span></div>
+      </div>
+    );
+  };
+
+  const dateLabel=date?`${date.m+1}月${date.d}日（${DOW[new Date(date.y,date.m,date.d).getDay()]}）`:'';
+
+  // 各ステップの「次へ」可否
+  const canNext=[
+    !!store,
+    !!date,
+    !!course,
+    courseObj?(courseObj.loaner==='option'? loaner!==null : true):false,
+    !!time,
+    form.name&&form.tel&&form.car&&form.expiry&&pay,
+  ][step];
+
+  if(step===TOTAL){ // 完了
+    return (
+      <>
+        <div className="demo-bar">⚠ これは試作です。実際の予約は登録されていません。</div>
+        <div className="hd"><span>🚗</span><h1>車検WEB予約</h1></div>
+        <div className="body">
+          <div className="done">
+            <div className="ic">✓</div>
+            <h2>ご予約を受け付けました</h2>
+            <div className="resno">予約番号：HB-{Math.floor(Math.random()*900000+100000)}（ダミー）</div>
+            <div className="donecard">
+              <div className="sumrow"><span className="k">店舗</span><span className="v">{storeName}</span></div>
+              <div className="sumrow"><span className="k">日時</span><span className="v">{dateLabel} {time}</span></div>
+              <div className="sumrow"><span className="k">コース</span><span className="v">{courseObj.name}</span></div>
+              <div className="sumrow"><span className="k">代車</span><span className="v">{loanerText()}</span></div>
+              <div className="sumrow"><span className="k">支払い</span><span className="v">{pay}</span></div>
+            </div>
+            <div className="note">本番ではこの内容がスケジュール表とカレンダーに自動反映され、LINEに確定メッセージが届きます。</div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="demo-bar">⚠ 試作（ダミーデータ）｜画面と流れの確認用</div>
+      <div className="hd">
+        <span>🚗</span><h1>車検WEB予約</h1>
+        {store&&<span className="store">{storeName}</span>}
+      </div>
+      <div className="steps">{Array.from({length:TOTAL}).map((_,i)=><div key={i} className={`s ${i<=step?'on':''}`}/>)}</div>
+
+      <div className="body">
+        {step===0&&<>
+          <h2>店舗を選択</h2><div className="sub">ご来店店舗をお選びください</div>
+          {STORES.map(s=>(
+            <div key={s.id} className={`card ${store===s.id?'sel':''}`} onClick={()=>setStore(s.id)}>
+              <div className="t">{s.name}</div>
+            </div>))}
+        </>}
+
+        {step===1&&<>
+          <h2>希望日を選択</h2><div className="sub">{storeName}／○空きあり △残りわずか</div>
+          {renderCal()}
+        </>}
+
+        {step===2&&<>
+          <h2>車検コースを選択</h2><div className="sub">{dateLabel}</div>
+          {COURSES.map(c=>(
+            <div key={c.id} className={`card ${course===c.id?'sel':''}`} onClick={()=>{setCourse(c.id);setLoaner(null);}}>
+              <div className="t"><span style={{display:'inline-flex',width:22,height:22,borderRadius:'50%',background:c.color,color:'#fff',alignItems:'center',justifyContent:'center',fontSize:12,marginRight:6,verticalAlign:'middle'}}>{c.initial}</span>{c.name}</div>
+              <div className="d">{c.desc}</div>
+            </div>))}
+        </>}
+
+        {step===3&&<>
+          <h2>代車について</h2><div className="sub">{courseObj.name}</div>
+          {courseObj.loaner==='none'&&<div className="card sel"><div className="t">代車なし</div><div className="d">マッハ車検は当日仕上げのため代車のご用意はありません。</div></div>}
+          {courseObj.loaner==='service'&&<div className="card sel"><div className="t">代車あり（サービス）</div><div className="d">レギュラー車検は代車を無料でご用意します。</div></div>}
+          {courseObj.loaner==='option'&&<>
+            <div className={`card ${loaner===true?'sel':''}`} onClick={()=>setLoaner(true)}><div className="t">代車を希望する</div><div className="d">1日 1,000円（税別）</div></div>
+            <div className={`card ${loaner===false?'sel':''}`} onClick={()=>setLoaner(false)}><div className="t">代車は不要</div></div>
+          </>}
+        </>}
+
+        {step===4&&<>
+          <h2>入庫時間を選択</h2><div className="sub">{dateLabel}</div>
+          <div className="grid3">
+            {TIMES.map(t=><div key={t} className={`pill ${time===t?'sel':''}`} onClick={()=>setTime(t)}>{t}</div>)}
+          </div>
+          <div className="note">上記以外の時間をご希望の場合は、お手数ですが <b>お電話（◯◯-◯◯◯◯-◯◯◯◯）</b> にてご予約ください。</div>
+        </>}
+
+        {step===5&&<>
+          <h2>お客様情報</h2><div className="sub">ご予約に必要な情報をご入力ください</div>
+          <label className="f">お名前</label>
+          <input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="例）山田 太郎"/>
+          <label className="f">電話番号</label>
+          <input value={form.tel} onChange={e=>setForm({...form,tel:e.target.value})} placeholder="例）090-1234-5678" inputMode="tel"/>
+          <label className="f">車種</label>
+          <input value={form.car} onChange={e=>setForm({...form,car:e.target.value})} placeholder="例）プリウス"/>
+          <label className="f">車検満了日</label>
+          <input type="date" value={form.expiry} onChange={e=>setForm({...form,expiry:e.target.value})}/>
+          <label className="f">お支払い方法</label>
+          <select value={pay||''} onChange={e=>setPay(e.target.value)}>
+            <option value="" disabled>選択してください</option>
+            {PAYS.map(p=><option key={p} value={p}>{p}</option>)}
+          </select>
+        </>}
+
+        {step===6&&<>
+          <h2>ご予約内容の確認</h2><div className="sub">この内容で予約します</div>
+          <div style={{border:'2px solid #e5e7eb',borderRadius:12,padding:'2px 14px'}}>
+            <div className="sumrow"><span className="k">店舗</span><span className="v">{storeName}</span></div>
+            <div className="sumrow"><span className="k">日付</span><span className="v">{dateLabel}</span></div>
+            <div className="sumrow"><span className="k">入庫時間</span><span className="v">{time}</span></div>
+            <div className="sumrow"><span className="k">コース</span><span className="v">{courseObj.name}</span></div>
+            <div className="sumrow"><span className="k">代車</span><span className="v">{loanerText()}</span></div>
+            <div className="sumrow"><span className="k">お名前</span><span className="v">{form.name}</span></div>
+            <div className="sumrow"><span className="k">電話番号</span><span className="v">{form.tel}</span></div>
+            <div className="sumrow"><span className="k">車種</span><span className="v">{form.car}</span></div>
+            <div className="sumrow"><span className="k">車検満了日</span><span className="v">{form.expiry}</span></div>
+            <div className="sumrow" style={{borderBottom:'none'}}><span className="k">支払い</span><span className="v">{pay}</span></div>
+          </div>
+        </>}
+      </div>
+
+      <div className="foot">
+        {step>0&&<button className="btn ghost" onClick={back}>戻る</button>}
+        <button className="btn primary" disabled={!canNext} onClick={next}>
+          {step===6?'この内容で予約する':'次へ'}
+        </button>
+      </div>
+    </>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
