@@ -87,7 +87,12 @@ const COURSES=[
   {id:3,name:'レギュラー車検',initial:'レ',color:'#d97706',desc:'じっくり整備。代車サービス（無料）。',loaner:'service'},
 ];
 const CAPS={1:2,2:6,3:3}; // コース別 1日の上限（クイックは全体6台の枠内）
-const TIMES_BY_COURSE={1:['10:00','14:00'],2:['9:00','9:15','9:30'],3:['9:00','9:15','9:30']}; // マッハのみ10:00/14:00限定
+// 入庫時間は店舗×コースで決まる：マッハ=10:00/14:00（本店のみ）、三田店クイック=9:00/9:15、他=9:00/9:15/9:30
+const timesFor=(store,course)=>{
+  if(course===1) return ['10:00','14:00'];
+  if(course===2 && store==='sanda') return ['9:00','9:15'];
+  return ['9:00','9:15','9:30'];
+};
 const PAYS=['現金','PayPay','クレジットカード'];
 const DOW=['日','月','火','水','木','金','土'];
 const THEMES={
@@ -258,8 +263,8 @@ function App(){
 
         {step===4&&<>
           <h2>入庫時間を選択</h2><div className="sub">{dateLabel}／{courseObj.name}</div>
-          <div className="grid3" style={{gridTemplateColumns:`repeat(${TIMES_BY_COURSE[course].length},1fr)`}}>
-            {TIMES_BY_COURSE[course].map(t=><div key={t} className={`pill ${time===t?'sel':''}`} onClick={()=>setTime(t)}>{t}</div>)}
+          <div className="grid3" style={{gridTemplateColumns:`repeat(${timesFor(store,course).length},1fr)`}}>
+            {timesFor(store,course).map(t=><div key={t} className={`pill ${time===t?'sel':''}`} onClick={()=>setTime(t)}>{t}</div>)}
           </div>
           <div className="note">上記以外の時間をご希望の場合は、お手数ですが <b>お電話（◯◯-◯◯◯◯-◯◯◯◯）</b> にてご予約ください。</div>
         </>}
