@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>車検のご案内（試作）| Hub a Nice Day</title>
+<!-- ============================================================
+     車検「コース解説＋できる作業 早見表＋料金表」サンプル。
+     タップで吹き出し解説。内容は midori-m.com/syaken を参考にした試作。
+     料金は実際の料金表画像を掲載（後でタップ式の表に整形可能）。
+     色テーマ切替（緑/青/ティール/橙）。?theme=… で初期指定可。
+     ============================================================ -->
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.25.9/babel.min.js"></script>
+<style>
+  :root{--pri:#06C755;--pri-bg:#f0fdf4}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  body{font-family:-apple-system,"Hiragino Sans","Yu Gothic",sans-serif;background:#e9eef2;color:#1f2937}
+  #root{max-width:480px;margin:0 auto;min-height:100vh;background:#fff}
+  .demo-bar{background:#facc15;color:#7c2d12;font-size:11px;font-weight:700;text-align:center;padding:5px 8px}
+  .theme-bar{display:flex;gap:6px;align-items:center;padding:7px 12px;background:#f1f5f9;border-bottom:1px solid #e5e7eb;font-size:11px}
+  .theme-bar .lbl{color:#64748b;font-weight:700}
+  .swatch{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:14px;border:2px solid #e2e8f0;background:#fff;cursor:pointer;font-weight:700;color:#475569}
+  .swatch .dot{width:12px;height:12px;border-radius:50%}
+  .swatch.on{border-color:#334155}
+  .hd{background:var(--pri);color:#fff;padding:16px}
+  .hd h1{font-size:18px;font-weight:800}
+  .hd p{font-size:12px;opacity:.9;margin-top:3px}
+  .sec{padding:18px 16px}
+  .sec h2{font-size:16px;font-weight:800;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+  .sec .lead{font-size:12px;color:#6b7280;margin-bottom:14px}
+  .ccard{border:2px solid #e5e7eb;border-radius:14px;padding:14px;margin-bottom:12px}
+  .ccard .top{display:flex;align-items:center;gap:9px}
+  .badge{width:30px;height:30px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;flex:0 0 auto}
+  .ccard .nm{font-size:16px;font-weight:800}
+  .ccard .cc{font-size:12px;color:#6b7280}
+  .ccard .meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .tag{font-size:11px;font-weight:700;background:#f1f5f9;color:#475569;border-radius:8px;padding:4px 8px}
+  .more{margin-top:11px;width:100%;border:none;background:var(--pri-bg);color:var(--pri);font-weight:800;font-size:13px;padding:10px;border-radius:9px;cursor:pointer}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{border:1px solid #e5e7eb;padding:9px 6px;text-align:center}
+  th{background:#f8fafc;font-weight:800;font-size:12px}
+  td.item{text-align:left;font-weight:700;cursor:pointer;color:#1f2937}
+  td.item .i{display:inline-flex;width:16px;height:16px;border-radius:50%;background:var(--pri);color:#fff;font-size:11px;align-items:center;justify-content:center;margin-left:5px;vertical-align:middle}
+  .mk-ex{color:#16a34a;font-weight:800}.mk-ok{color:#0891b2;font-weight:800}.mk-fe{color:#ea580c;font-weight:800}.mk-no{color:#cbd5e1}
+  .legend{font-size:11px;color:#6b7280;margin-top:10px;line-height:1.7}
+  .price-img{width:100%;border:1px solid #e5e7eb;border-radius:10px;margin-top:6px}
+  .pricenote{font-size:11px;color:#92400e;background:#fef3c7;border-radius:9px;padding:10px 12px;margin-top:10px;line-height:1.5}
+  .cta{position:sticky;bottom:0;padding:12px 16px;background:#fff;border-top:1px solid #e5e7eb}
+  .cta button{width:100%;border:none;background:var(--pri);color:#fff;font-size:16px;font-weight:800;padding:15px;border-radius:12px;cursor:pointer}
+  /* 吹き出しポップアップ */
+  .ov{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;padding:24px;z-index:50}
+  .pop{background:#fff;border-radius:16px;max-width:340px;width:100%;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,.3)}
+  .pop h3{font-size:16px;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .pop p{font-size:13.5px;line-height:1.7;color:#374151}
+  .pop .close{margin-top:14px;width:100%;border:none;background:var(--pri);color:#fff;font-weight:800;padding:11px;border-radius:10px;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect}=React;
+const THEMES={green:{name:'LINE緑',pri:'#06C755',bg:'#f0fdf4'},blue:{name:'ブルー',pri:'#2563eb',bg:'#eff6ff'},teal:{name:'ティール',pri:'#0e7490',bg:'#ecfeff'},orange:{name:'オレンジ',pri:'#ea580c',bg:'#fff7ed'}};
+
+const COURSES=[
+  {id:1,nm:'マッハ車検',ini:'マ',col:'#b91c1c',cc:'最短45分・当日仕上げ',tags:['所要 最短45分','当日お返し','代車なし'],
+   detail:'法定56項目の点検をスピーディに行い、最短45分・当日仕上げ。「とにかく早く・安く済ませたい」方向け。お預かりが短いため代車のご用意はありません。'},
+  {id:2,nm:'クイック車検',ini:'ク',col:'#1d4ed8',cc:'朝入庫で当日18時頃お返し',tags:['当日18時頃','光軸/試運転/洗車','代車 1日1,000円'],
+   detail:'朝のご入庫で当日18時頃のお返し。光軸調整・試運転・洗車込みで、気になる箇所も一緒に確認できます。代車はご希望で1日1,000円（税別）。'},
+  {id:3,nm:'レギュラー車検',ini:'レ',col:'#d97706',cc:'じっくり整備で翌日夕方お返し',tags:['翌日夕方','下回り錆止め','超はっすい洗車','代車サービス'],
+   detail:'下回り洗浄・錆止め、ブレーキ分解清掃までしっかり整備。超はっすい洗車＆代車サービス付きで、走行距離の多いお車も安心。お返しは翌日夕方頃。'},
+];
+
+// できる作業 早見表（◎手厚い ○あり △基本のみ ×なし）＋ 各項目の吹き出し解説
+const ROWS=[
+  {k:'法定56項目点検',m:'○',c:'○',r:'○',tip:'国が定めた車検の必須検査。ブレーキ・ライト・ハンドルなど安全に関わる箇所を一通り点検します。全コース実施します。'},
+  {k:'光軸調整',m:'×',c:'○',r:'○',tip:'ヘッドライトの照らす向きを基準内に合わせる調整。夜の見やすさと、対向車をまぶしくさせない安全のための作業です。'},
+  {k:'試運転',m:'×',c:'○',r:'○',tip:'整備後に実際に走行し、ブレーキの効き・異音・ハンドルのブレなどを最終チェックします。'},
+  {k:'洗車・室内清掃',m:'×',c:'○',r:'○',tip:'お返し前にお車をきれいにしてお渡しします。'},
+  {k:'ブレーキ清掃・鳴き止め',m:'△',c:'○',r:'◎',tip:'ブレーキを清掃・調整して「キーッ」という鳴きを抑えます。レギュラーは分解してより丁寧に行います（◎）。マッハは基本確認のみ（△）。'},
+  {k:'下回り洗浄・錆止め',m:'×',c:'×',r:'○',tip:'車の下回りの汚れを洗い、錆を防ぐ塗装をします。雪道・海沿いを走る方に特におすすめ。レギュラーのみ。'},
+  {k:'超はっすい洗車',m:'×',c:'×',r:'○',tip:'強力な撥水コートの特別洗車。雨をはじいて汚れも付きにくくなります。レギュラーの特典です。'},
+  {k:'代車',m:'なし',c:'希望可',r:'サービス',tip:'お車をお預かりする間にお貸しする車。マッハは当日仕上げのため無し、クイックはご希望で1日1,000円、レギュラーは無料サービスです。'},
+];
+
+function mark(v){
+  if(v==='◎')return <span className="mk-ex">◎</span>;
+  if(v==='○')return <span className="mk-ok">○</span>;
+  if(v==='△')return <span className="mk-fe">△</span>;
+  if(v==='×')return <span className="mk-no">×</span>;
+  return <span style={{fontSize:11,fontWeight:700}}>{v}</span>;
+}
+
+function App(){
+  const params=new URLSearchParams(location.search);
+  const [theme,setTheme]=useState(THEMES[params.get('theme')]?params.get('theme'):'green');
+  useEffect(()=>{const t=THEMES[theme];document.documentElement.style.setProperty('--pri',t.pri);document.documentElement.style.setProperty('--pri-bg',t.bg);},[theme]);
+  const [pop,setPop]=useState(null); // {title, body, color}
+
+  return (
+    <>
+      <div className="demo-bar">⚠ 試作｜車検案内ページのサンプル（内容・料金は要確認）</div>
+      <div className="theme-bar">
+        <span className="lbl">色：</span>
+        {Object.keys(THEMES).map(k=>(
+          <span key={k} className={`swatch ${theme===k?'on':''}`} onClick={()=>setTheme(k)}>
+            <span className="dot" style={{background:THEMES[k].pri}}/>{THEMES[k].name}
+          </span>))}
+      </div>
+
+      <div className="hd">
+        <h1>🚗 車検のご案内</h1>
+        <p>3つのコースから、お車とご予算に合わせてお選びいただけます</p>
+      </div>
+
+      {/* コース早わかり */}
+      <div className="sec">
+        <h2>コース早わかり</h2>
+        <div className="lead">カードをタップすると詳しい説明が出ます</div>
+        {COURSES.map(c=>(
+          <div key={c.id} className="ccard">
+            <div className="top">
+              <span className="badge" style={{background:c.col}}>{c.ini}</span>
+              <div><div className="nm">{c.nm}</div><div className="cc">{c.cc}</div></div>
+            </div>
+            <div className="meta">{c.tags.map(t=><span key={t} className="tag">{t}</span>)}</div>
+            <button className="more" onClick={()=>setPop({title:`${c.ini}　${c.nm}`,body:c.detail,color:c.col})}>詳しく見る ＞</button>
+          </div>
+        ))}
+      </div>
+
+      {/* できる作業 早見表 */}
+      <div className="sec" style={{paddingTop:0}}>
+        <h2>各コースでできる作業</h2>
+        <div className="lead">項目名（ⓘ）をタップすると、やさしい解説が出ます</div>
+        <table>
+          <thead><tr><th style={{textAlign:'left'}}>作業・点検</th><th>マ</th><th>ク</th><th>レ</th></tr></thead>
+          <tbody>
+            {ROWS.map(r=>(
+              <tr key={r.k}>
+                <td className="item" onClick={()=>setPop({title:r.k,body:r.tip})}>{r.k}<span className="i">i</span></td>
+                <td>{mark(r.m)}</td><td>{mark(r.c)}</td><td>{mark(r.r)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="legend">◎ 手厚く実施／○ 実施／△ 基本のみ／× なし<br/>マ＝マッハ・ク＝クイック・レ＝レギュラー</div>
+      </div>
+
+      {/* 料金表 */}
+      <div className="sec" style={{paddingTop:0}}>
+        <h2>料金表</h2>
+        <div className="lead">車両の重量区分ごとの目安です（法定費用込み）</div>
+        <img className="price-img" src="https://www.midori-m.com/images/20250805/1.png" alt="車検料金表"/>
+        <div className="pricenote">※ これは現行HPの料金表画像をそのまま表示しています。ご希望なら、この数字を<strong>タップで詳細が出るきれいな表</strong>に作り替えられます（重量区分を選ぶと該当コースの金額がパッと出る形など）。</div>
+      </div>
+
+      <div className="cta"><button onClick={()=>alert('（試作）ここから予約画面へ進みます')}>このまま予約に進む</button></div>
+
+      {pop&&(
+        <div className="ov" onClick={()=>setPop(null)}>
+          <div className="pop" onClick={e=>e.stopPropagation()}>
+            <h3>{pop.color&&<span style={{display:'inline-flex',width:24,height:24,borderRadius:'50%',background:pop.color,color:'#fff',alignItems:'center',justifyContent:'center',fontSize:13}}>{pop.title.charAt(0)}</span>}{pop.title}</h3>
+            <p>{pop.body}</p>
+            <button className="close" onClick={()=>setPop(null)}>閉じる</button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
