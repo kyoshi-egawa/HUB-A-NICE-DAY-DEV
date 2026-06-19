@@ -227,14 +227,14 @@ function App(){
         {step===0&&<>
           <h2>店舗を選択</h2><div className="sub">ご来店店舗をお選びください</div>
           {STORES.map(s=>(
-            <div key={s.id} className={`card ${store===s.id?'sel':''}`} onClick={()=>setStore(s.id)}>
+            <div key={s.id} className={`card ${store===s.id?'sel':''}`} onClick={()=>{setStore(s.id);setCourse(null);setDate(null);setLoaner(null);setTime(null);}}>
               <div className="t">{s.name}</div>
             </div>))}
         </>}
 
         {step===1&&<>
-          <h2>車検コースを選択</h2><div className="sub">コースにより空き状況が変わります</div>
-          {COURSES.map(c=>(
+          <h2>車検コースを選択</h2><div className="sub">{store==='sanda'?'三田店はクイック・レギュラー車検のみ（マッハは本店のみ）':'コースにより空き状況が変わります'}</div>
+          {COURSES.filter(c=>store==='honten'||c.id!==1).map(c=>(
             <div key={c.id} className={`card ${course===c.id?'sel':''}`} onClick={()=>{setCourse(c.id);setLoaner(null);setDate(null);setTime(null);}}>
               <div className="t"><span style={{display:'inline-flex',width:22,height:22,borderRadius:'50%',background:c.color,color:'#fff',alignItems:'center',justifyContent:'center',fontSize:12,marginRight:6,verticalAlign:'middle'}}>{c.initial}</span>{c.name}</div>
               <div className="d">{c.desc}</div>
