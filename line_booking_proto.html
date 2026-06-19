@@ -82,12 +82,12 @@ const {useState,useEffect} = React;
 
 const STORES=[{id:'honten',name:'本店'},{id:'sanda',name:'三田店'}];
 const COURSES=[
-  {id:1,name:'マッハ車検',initial:'マ',color:'#b91c1c',desc:'最短スピード車検（当日仕上げ）。1日2台まで・代車なし。',loaner:'none'},
+  {id:1,name:'マッハ車検',initial:'マ',color:'#b91c1c',desc:'最短スピード車検（当日仕上げ）。代車なし。入庫は10:00・14:00。',loaner:'none'},
   {id:2,name:'クイック車検',initial:'ク',color:'#1d4ed8',desc:'お預かり車検。代車は1日1,000円（税別）。',loaner:'option'},
-  {id:3,name:'レギュラー車検',initial:'レ',color:'#d97706',desc:'じっくり整備。1日3台まで・代車サービス（無料）。',loaner:'service'},
+  {id:3,name:'レギュラー車検',initial:'レ',color:'#d97706',desc:'じっくり整備。代車サービス（無料）。',loaner:'service'},
 ];
 const CAPS={1:2,2:6,3:3}; // コース別 1日の上限（クイックは全体6台の枠内）
-const TIMES=['9:00','9:15','9:30'];
+const TIMES_BY_COURSE={1:['10:00','14:00'],2:['9:00','9:15','9:30'],3:['9:00','9:15','9:30']}; // マッハのみ10:00/14:00限定
 const PAYS=['現金','PayPay','クレジットカード'];
 const DOW=['日','月','火','水','木','金','土'];
 const THEMES={
@@ -235,7 +235,7 @@ function App(){
         {step===1&&<>
           <h2>車検コースを選択</h2><div className="sub">コースにより空き状況が変わります</div>
           {COURSES.map(c=>(
-            <div key={c.id} className={`card ${course===c.id?'sel':''}`} onClick={()=>{setCourse(c.id);setLoaner(null);setDate(null);}}>
+            <div key={c.id} className={`card ${course===c.id?'sel':''}`} onClick={()=>{setCourse(c.id);setLoaner(null);setDate(null);setTime(null);}}>
               <div className="t"><span style={{display:'inline-flex',width:22,height:22,borderRadius:'50%',background:c.color,color:'#fff',alignItems:'center',justifyContent:'center',fontSize:12,marginRight:6,verticalAlign:'middle'}}>{c.initial}</span>{c.name}</div>
               <div className="d">{c.desc}</div>
             </div>))}
@@ -257,9 +257,9 @@ function App(){
         </>}
 
         {step===4&&<>
-          <h2>入庫時間を選択</h2><div className="sub">{dateLabel}</div>
-          <div className="grid3">
-            {TIMES.map(t=><div key={t} className={`pill ${time===t?'sel':''}`} onClick={()=>setTime(t)}>{t}</div>)}
+          <h2>入庫時間を選択</h2><div className="sub">{dateLabel}／{courseObj.name}</div>
+          <div className="grid3" style={{gridTemplateColumns:`repeat(${TIMES_BY_COURSE[course].length},1fr)`}}>
+            {TIMES_BY_COURSE[course].map(t=><div key={t} className={`pill ${time===t?'sel':''}`} onClick={()=>setTime(t)}>{t}</div>)}
           </div>
           <div className="note">上記以外の時間をご希望の場合は、お手数ですが <b>お電話（◯◯-◯◯◯◯-◯◯◯◯）</b> にてご予約ください。</div>
         </>}
