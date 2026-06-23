@@ -40,7 +40,8 @@
   .cap{font-size:11px;color:#6b7280;margin-top:2px}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{border:1px solid #e5e7eb;padding:9px 6px;text-align:center}
-  th{background:#f8fafc;font-weight:800;font-size:12px}
+  th{background:#f8fafc;font-weight:800;font-size:11px}
+  th:not(:first-child),td:not(.item){padding-left:3px;padding-right:3px}
   td.item{text-align:left;font-weight:700;cursor:pointer;color:#1f2937}
   td.item .i{display:inline-flex;width:16px;height:16px;border-radius:50%;background:var(--pri);color:#fff;font-size:11px;align-items:center;justify-content:center;margin-left:5px;vertical-align:middle}
   .mk-ex{color:#16a34a;font-weight:800}.mk-ok{color:#0891b2;font-weight:800}.mk-fe{color:#ea580c;font-weight:800}.mk-no{color:#cbd5e1}
@@ -78,8 +79,8 @@ const fmt=n=>'¥'+n.toLocaleString();
 const COURSES=[
   {id:1,nm:'マッハ車検',ini:'マ',col:'#b91c1c',cc:'最短45分・当日仕上げ',tags:['所要 最短45分','当日お返し','代車なし'],
    detail:'法定56項目の点検をスピーディに行い、最短45分・当日仕上げ。「とにかく早く・安く済ませたい」方向け。お預かりが短いため代車のご用意はありません。※完成時間は整備の内容により前後します。'},
-  {id:2,nm:'クイック車検',ini:'ク',col:'#1d4ed8',cc:'朝入庫で当日18時頃お返し',tags:['当日18時頃','光軸/試運転/洗車','代車 1日1,000円'],
-   detail:'朝のご入庫で当日18時頃のお返し。光軸調整・試運転・洗車込みで、気になる箇所も一緒に確認できます。代車はご希望で1日1,000円（税別）。※完成時間は整備の内容により前後します。'},
+  {id:2,nm:'クイック車検',ini:'ク',col:'#1d4ed8',cc:'朝入庫で夕方17時前後お返し',tags:['夕方17時前後','光軸/試運転/洗車','代車 1日1,000円'],
+   detail:'朝のご入庫で夕方17時前後のお返し。光軸調整・試運転・洗車込みで、気になる箇所も一緒に確認できます。代車はご希望で1日1,000円（税別）。※完成時間は整備の内容により前後します。'},
   {id:3,nm:'レギュラー車検',ini:'レ',col:'#d97706',cc:'じっくり整備で翌日夕方お返し',tags:['翌日夕方','下回り錆止め','超はっすい洗車','代車サービス'],
    detail:'下回り洗浄・錆止め、ブレーキ分解清掃までしっかり整備。超はっすい洗車＆代車サービス付きで、走行距離の多いお車も安心。お返しは翌日夕方頃。※完成時間は整備の内容により前後します。'},
 ];
@@ -166,24 +167,25 @@ function App(){
         <h2>各コースでできる作業</h2>
         <div className="lead">項目名（ⓘ）をタップすると、やさしい解説が出ます</div>
         <table>
-          <thead><tr><th style={{textAlign:'left'}}>作業・点検</th><th>マ</th><th>ク</th><th>レ</th></tr></thead>
+          <thead><tr><th style={{textAlign:'left'}}>作業・点検</th><th>マッハ</th><th>クイック</th><th>レギュラー</th></tr></thead>
           <tbody>
             {ROWS.map(r=>(
               <tr key={r.k}>
-                <td className="item" onClick={()=>setPop({title:r.k,body:r.tip})}>{r.k}<span className="i">i</span></td>
-                <td>{mark(r.m)}{r.mstar&&<sup style={{color:'#ea580c'}}>※</sup>}</td>
+                <td className="item" onClick={()=>setPop({title:r.k,body:r.tip})}>{r.k}<span className="i">i</span>{r.mstar&&<sup style={{color:'#ea580c'}}>※</sup>}</td>
+                <td>{mark(r.m)}</td>
                 <td>{mark(r.c)}</td><td>{mark(r.r)}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="legend">◎ 手厚く実施／○ 実施／× なし／－ 点検中心（※印タップで詳細）<br/>マ＝マッハ・ク＝クイック・レ＝レギュラー</div>
+        <div className="legend">◎ 手厚く実施／○ 実施／× なし／－ 点検中心（項目名のⓘ・※をタップで解説）</div>
       </div>
 
       {/* 料金表（タップ式） */}
       <div className="sec" style={{paddingTop:0}}>
         <h2>料金表</h2>
         <div className="lead">① お車の区分を選ぶ → ② 各コースの総額が出ます（タップで内訳）</div>
+        <div className="cap" style={{marginBottom:12}}>📋 区分は車検証・車両重量をご確認ください。</div>
         <div className="wsel">
           {WEIGHTS.map(w=>(
             <span key={w.k} className={`wbtn ${wk===w.k?'on':''}`} onClick={()=>setWk(w.k)}>{w.label}</span>
