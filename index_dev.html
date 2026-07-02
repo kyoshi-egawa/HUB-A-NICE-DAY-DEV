@@ -1568,11 +1568,29 @@ function useShared(key, def, pollMs=60000) {
   const writeTimer   = useRef(null);
   const pollTimer    = useRef(null);
 
+  // ★形チェック: defと同種（配列/オブジェクト）でない応答は反映せず記録して無視する。
+  //   GASの同時アクセス混線で異形のJSONが返るとタイムスケジュール等の表示が丸ごと消えるため
+  //   （2026-07-02 表示消失インシデント対策。Kyoshi承認のBLOCK-B変更）
+  const isPlainObj = x => x!==null && typeof x==='object' && !Array.isArray(x);
+  const shapeOk = v => Array.isArray(def) ? Array.isArray(v) : (isPlainObj(def) ? isPlainObj(v) : true);
+  const logShapeAnomaly = v => {
+    try{
+      const lk=STOR+'poll-anomaly';
+      const arr=JSON.parse(localStorage.getItem(lk)||'[]');
+      arr.push({ts:new Date().toLocaleString('ja-JP'),key,got:Array.isArray(v)?'array':typeof v,sample:JSON.stringify(v).slice(0,300)});
+      localStorage.setItem(lk,JSON.stringify(arr.slice(-20)));
+    }catch{}
+    console.warn('[useShared] 期待と異なる形の応答を無視しました:',key,v);
+  };
+
   useEffect(() => {
     mounted.current = true;
     sGet(key).then(v => {
       if (!mounted.current) return;
-      if (v !== null) { localRef.current = v; setVal(v); } // 初期ロードは常に反映
+      if (v !== null) {
+        if (shapeOk(v)) { localRef.current = v; setVal(v); } // 初期ロードは形が正しければ反映
+        else logShapeAnomaly(v); // 異形はdefのまま起動し次のポーリングで追いつく
+      }
       initialized.current = true;
     }).catch(() => { initialized.current = true; });
     return () => {
@@ -1591,6 +1609,7 @@ function useShared(key, def, pollMs=60000) {
       if (document.visibilityState === 'hidden') return;
       sGet(key).then(v => {
         if (!mounted.current || v === null || writeCount.current > 0) return;
+        if (!shapeOk(v)) { logShapeAnomaly(v); return; } // 異形の応答は表示に反映しない
         const cur  = JSON.stringify(localRef.current);
         const next = JSON.stringify(v);
         if (cur !== next) {
