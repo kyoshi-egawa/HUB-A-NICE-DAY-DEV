@@ -7998,8 +7998,11 @@ function AppInner() {
               {(()=>{
                 const storeHolidayChk=isClosed(new Date(...dk.split('-').map((v,i)=>i===1?Number(v)-1:Number(v))));
                 const offs=storeHolidayChk?currentStaffList.map(s=>s.name):(dayOffData[dk]||[]);
-                const workingCount=storeHolidayChk?0:currentStaffList.filter(s=>!offs.includes(s.name)).length;
-                if(workingCount===0)return null;
+                const workingStaff=storeHolidayChk?[]:currentStaffList.filter(s=>!offs.includes(s.name));
+                if(workingStaff.length===0)return null;
+                // 対応スタッフ＝出勤者のうち対応可能業務で車検/整備いずれかのフロント対応にチェックがある人のみ
+                const capOf=s=>s.capabilities||getDefaultCapabilities(s.badge||'mechanic');
+                const frontCount=workingStaff.filter(s=>{const c=capOf(s);return c.insp_front||c.sched_front;}).length;
 
                 // 入庫時間を分単位に変換するヘルパー
                 const toMin=t=>{
@@ -8033,8 +8036,8 @@ function AppInner() {
                   {label:'9:30枠',total:total930,insp:insp930,sched:sched930},
                 ].forEach(({label,total,insp,sched})=>{
                   if(total===0)return;
-                  const isOver=total>workingCount;
-                  const isEqual=total===workingCount;
+                  const isOver=total>frontCount;
+                  const isEqual=total===frontCount;
                   if(!isOver&&!isEqual)return;
                   alerts.push({label,total,insp,sched,isOver,isEqual});
                 });
@@ -8053,8 +8056,8 @@ function AppInner() {
                             <span>🚗 車検 <strong>{insp}台</strong></span>
                             <span>⏰ 整備 <strong>{sched}件</strong></span>
                             <span>＝ 合計 <strong>{total}件</strong></span>
-                            <span>👤 スタッフ <strong>{workingCount}名</strong></span>
-                            {isOver&&<span style={{color:'#dc2626',fontWeight:800}}>→ {total-workingCount}件オーバー</span>}
+                            <span title="対応可能業務で車検/整備フロント対応にチェックのある出勤スタッフ">👤 フロント対応 <strong>{frontCount}名</strong>{frontCount!==workingStaff.length&&<span style={{fontWeight:400}}>（出勤{workingStaff.length}名）</span>}</span>
+                            {isOver&&<span style={{color:'#dc2626',fontWeight:800}}>→ {total-frontCount}件オーバー</span>}
                           </div>
                         </div>
                       </div>
