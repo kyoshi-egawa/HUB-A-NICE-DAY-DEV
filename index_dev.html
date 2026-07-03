@@ -1565,7 +1565,6 @@ function useShared(key, def, pollMs=60000) {
   const localRef     = useRef(def);
   const initialized  = useRef(false);
   const writeCount   = useRef(0);
-  const writeTimer   = useRef(null);
   const pollTimer    = useRef(null);
 
   // ★形チェック: defと同種（配列/オブジェクト）でない応答は反映せず記録して無視する。
@@ -1596,7 +1595,6 @@ function useShared(key, def, pollMs=60000) {
     return () => {
       mounted.current = false;
       if (pollTimer.current)  clearInterval(pollTimer.current);
-      if (writeTimer.current) clearTimeout(writeTimer.current);
     };
   }, [key]);
 
@@ -1648,12 +1646,14 @@ function useShared(key, def, pollMs=60000) {
     localRef.current = next;
     setVal(next);
     writeCount.current += 1;
-    if (writeTimer.current) clearTimeout(writeTimer.current);
+    // ★保存ごとに独立したタイマーで減算する。以前は直前のタイマーをclearしていたため、
+    //   70秒以内に2回以上保存すると writeCount が減りきらず、そのキーのポーリング反映が
+    //   リロードまで停止していた（2026-07-02 Kyoshi承認のBLOCK-B変更）
     sSet(key, next).then(() => {
-      writeTimer.current = setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 70000);
+      setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 70000);
     }).catch(() => {
       setTimeout(() => sSet(key, localRef.current).catch(() => {}), 1500);
-      writeTimer.current = setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 72000);
+      setTimeout(() => { writeCount.current = Math.max(0, writeCount.current - 1); }, 72000);
     });
   }, [key]);
 
@@ -7079,7 +7079,8 @@ function AppInner() {
         next[_scOrigDk]=oldDay;
         // 新日付の空きサブ枠へ配置（同日移動時は上で削除済みの oldDay を引き継ぐ）
         const tgtDay={...(next[_scTgtDk]||{})};
-        tgtDay[_scFinalSlot]=cleanData;
+        // idを付与: useSharedのidベースマージで「新しい保存が勝つ」判定を可能にする
+        tgtDay[_scFinalSlot]={...cleanData,id:Date.now()};
         next[_scTgtDk]=tgtDay;
         return next;
       });
