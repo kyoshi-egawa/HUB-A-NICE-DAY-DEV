@@ -871,12 +871,15 @@ const App=()=>{
   const [inspLimits,setInspLimits]=useState({});
   const [editMode,setEditMode]=useState(null); // {type,dk,idx?,slot?,isNew,initial,lockedBy}
   const writeGuardRef=useRef(0);   // 書き込み後70秒はポーリング反映を止める（PC版useSharedと同じ考え方）
+  const fetchBusyRef=useRef(false); // 前回の取得が未完了なら次を撃たない（GAS同時実行の積み上がり防止）
   const lockHeartbeatRef=useRef(null);
   const curLockKeyRef=useRef(null);
   const vsId=user?.store||'honten';
   const cDays=vsId==='honten'?closedDaysH:closedDaysS;
   const fetchAll=useCallback(async(force)=>{
     if(!force&&writeGuardRef.current>0)return; // 保存直後の古いスナップショットで上書きしない
+    if(fetchBusyRef.current)return;
+    fetchBusyRef.current=true;
     setLoading(true);
     try{
       const [insp,sh,ss,mh,ms,lh,ls,cdh,cds,cdate,ov,rcars,rres,carsH,carsS,limits]=await Promise.all([
@@ -908,6 +911,7 @@ const App=()=>{
       if(isPlainObj(limits))setInspLimits(limits);
       setGasOk(true);
     }catch{setGasOk(false);}
+    finally{fetchBusyRef.current=false;}
     setLoading(false);
   },[]);
   useEffect(()=>{

@@ -1566,6 +1566,7 @@ function useShared(key, def, pollMs=60000) {
   const initialized  = useRef(false);
   const writeCount   = useRef(0);
   const pollTimer    = useRef(null);
+  const inFlight     = useRef(false); // ポーリングの多重発射防止
 
   // ★形チェック: defと同種（配列/オブジェクト）でない応答は反映せず記録して無視する。
   //   GASの同時アクセス混線で異形のJSONが返るとタイムスケジュール等の表示が丸ごと消えるため
@@ -1605,6 +1606,10 @@ function useShared(key, def, pollMs=60000) {
       // ★非表示タブはポーリング停止（GAS同時実行数の負荷軽減。2026-06-13 Kyoshi承認のBLOCK-B変更）
       //   画面復帰時はvisibilitychangeハンドラがinspを即時再取得し、他キーも次のポーリングで追いつく
       if (document.visibilityState === 'hidden') return;
+      // ★前回の取得が未完了なら今回はスキップ。GASが遅い時にリクエストが積み上がって
+      //   同時実行数が雪だるま式に膨らむのを防ぐ（2026-07-03 Kyoshi承認のBLOCK-B変更）
+      if (inFlight.current) return;
+      inFlight.current = true;
       sGet(key).then(v => {
         if (!mounted.current || v === null || writeCount.current > 0) return;
         if (!shapeOk(v)) { logShapeAnomaly(v); return; } // 異形の応答は表示に反映しない
@@ -1636,7 +1641,7 @@ function useShared(key, def, pollMs=60000) {
             localRef.current = v; setVal(v);
           }
         }
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => { inFlight.current = false; });
     }, pollMs);
     return () => { if (pollTimer.current) clearInterval(pollTimer.current); };
   }, [key, pollMs]);
@@ -5895,10 +5900,10 @@ function AppInner() {
   const [schedCollapsed,setSchedCollapsed]=useState(false); // スケジュール畳む/開く（デフォルト：開く）
 
   // 車検は両店舗共通
-  const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},6000);
+  const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},15000);
   // 顧客リストからの仮予約（スケジュール未登録）専用ストレージ
   // キー: "名前::YYYY-M-D"  値: {status:'provisional', formData:{...}, custMonth, custRowIdx, savedAt}
-  const [custBookings, setCustBookings]=useShared(STOR+'custbk',{},6000);
+  const [custBookings, setCustBookings]=useShared(STOR+'custbk',{},15000);
   // 表示中の店舗（ログイン後に切り替え可能）
   const [viewStore,  setViewStore] =useState(()=>{
     // 初期値：ログイン済みユーザーの店舗を復元
@@ -5906,16 +5911,16 @@ function AppInner() {
   }); // 'honten' | 'sanda'
   const vsId = viewStore||'honten';
   // 店舗別データ（本店）
-  const [schedDataH, setSchedDataH]=useShared(storKey('sched','honten'),{},6000);
+  const [schedDataH, setSchedDataH, updateLocalSchedH]=useShared(storKey('sched','honten'),{},15000);
   const [memoDataH,  setMemoDataH] =useShared(storKey('memo', 'honten'),{});
-  const [loanerResH, setLoanerResH]=useShared(storKey('lres', 'honten'),{});
+  const [loanerResH, setLoanerResH, updateLocalLresH]=useShared(storKey('lres', 'honten'),{});
   const [closedDaysH,setClosedDaysH]=useShared(storKey('cdow', 'honten'),[],60000);
   const [closedDatesH,setClosedDatesH]=useShared(storKey('cdate','honten'),[],60000);
   const [dayOffDataH, setDayOffDataH] =useShared(storKey('dayoff','honten'),{},60000);
   // 店舗別データ（三田店）
-  const [schedDataS, setSchedDataS]=useShared(storKey('sched','sanda'),{},6000);
+  const [schedDataS, setSchedDataS, updateLocalSchedS]=useShared(storKey('sched','sanda'),{},15000);
   const [memoDataS,  setMemoDataS] =useShared(storKey('memo', 'sanda'),{});
-  const [loanerResS, setLoanerResS]=useShared(storKey('lres', 'sanda'),{});
+  const [loanerResS, setLoanerResS, updateLocalLresS]=useShared(storKey('lres', 'sanda'),{});
   // 三田店：水曜(3)をデフォルト定休 ※-v2でリセット
   const [closedDaysS,setClosedDaysS]=useShared(storKey('cdow-v2','sanda'),[3],60000);
   const [closedDatesS,setClosedDatesS]=useShared(storKey('cdate','sanda'),[],60000);
@@ -5950,7 +5955,7 @@ function AppInner() {
   const [loanerListH,  setLoanerListH]  = useShared(storKey('cars','honten'),DEFAULT_LOANERS_HONTEN,60000);
   const [loanerListS,  setLoanerListS]  = useShared(storKey('cars','sanda'),DEFAULT_LOANERS_SANDA,60000);
   const [rentalCars,   setRentalCars]   = useShared(STOR+'rentalcars',DEFAULT_RENTAL_CARS,60000);
-  const [rentalResData,setRentalResData]= useShared(STOR+'rres',              {});
+  const [rentalResData,setRentalResData,updateLocalRres]= useShared(STOR+'rres',              {});
   const [carTireData,  setCarTireData]  = useShared(STOR+'tiredata',{},60000); // {carId: 'summer'|'winter'|'all'}
   const [rentalLocData,setRentalLocData]= useShared(STOR+'rentaloc',          {}); // {carId: 'honten'|'sanda'|'out'}
   const [vehicleData,  setVehicleData]  = useShared(STOR+'vehicles', []);          // 車両管理（車検証＋点検）
@@ -5962,7 +5967,7 @@ function AppInner() {
   const dynRentalCars  = (rentalCars &&rentalCars.length >0) ? rentalCars  : DEFAULT_RENTAL_CARS;
   // 表示中の代車リスト（店舗別）
   const currentLoaners = vsId==='honten' ? dynLoanerListH : dynLoanerListS;
-  const [locks,      setLocks]     =useShared(STOR+'locks',{},6000);
+  const [locks,      setLocks,      updateLocalLocks]=useShared(STOR+'locks',{},15000);
   const addRentalRes    = useCallback((carId,rec) => setRentalResData(p=>{const days={...(p[carId]||{})};days[String(rec.id)]={...rec};return{...p,[carId]:days};}),[setRentalResData]);
   const deleteRentalRes = useCallback((carId,resId) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)delete days[d];});return{...p,[carId]:days};}),[setRentalResData]);
   const replaceRentalRes = useCallback((carId,resId,newRec) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)days[d]={...days[d],...newRec};});return{...p,[carId]:days};}),[setRentalResData]);
@@ -6105,10 +6110,17 @@ function AppInner() {
   useEffect(()=>{
     const onVisible=()=>{
       if(document.visibilityState==='visible'){
-        // inspDataを即再取得
-        // updateLocalInspData: GAS書き戻しなし・writeCount操作なし
-        // setInspData(v)を使うとGASへ書き戻してcustomers.htmlの最新予約を消す恐れがある
-        sGet(STOR+'insp').then(v=>{if(v&&typeof v==='object')updateLocalInspData(v);});
+        // 主要データを即再取得（updateLocal＝GAS書き戻しなし・writeCount操作なし。
+        // setXxx(v)を使うとGASへ書き戻して他端末の最新データを消す恐れがある）
+        // ★2026-07-03 ポーリング間隔を15秒に伸ばした代わりに、タブ復帰時は主要キーを全て即時更新する
+        const applyIfObj=(fn)=>(v)=>{if(v&&typeof v==='object'&&!Array.isArray(v))fn(v);};
+        sGet(STOR+'insp').then(applyIfObj(updateLocalInspData));
+        sGet(storKey('sched','honten')).then(applyIfObj(updateLocalSchedH));
+        sGet(storKey('sched','sanda')).then(applyIfObj(updateLocalSchedS));
+        sGet(storKey('lres','honten')).then(applyIfObj(updateLocalLresH));
+        sGet(storKey('lres','sanda')).then(applyIfObj(updateLocalLresS));
+        sGet(STOR+'rres').then(applyIfObj(updateLocalRres));
+        sGet(STOR+'locks').then(applyIfObj(updateLocalLocks));
         // customers.htmlから戻ったとき店舗をログインユーザーに合わせて復元
         try{
           const saved=sessionStorage.getItem('hub_currentUser');

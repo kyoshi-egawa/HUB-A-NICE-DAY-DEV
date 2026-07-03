@@ -1461,7 +1461,7 @@ const App=()=>{
     };
     pollUpdatesRef.current=pollUpdates;
     pollUpdates(); // 開いた瞬間に即時適用
-    const pollTimer=setInterval(pollUpdates,3000);
+    const pollTimer=setInterval(pollUpdates,15000);
     return()=>clearInterval(pollTimer);
   },[]);
 
