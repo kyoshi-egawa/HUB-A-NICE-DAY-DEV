@@ -1848,39 +1848,27 @@ const App=()=>{
           const _dKey=String(s.getDate());
           loanerRes[selCarId]={...loanerRes[selCarId],[_dKey]:newRes};
 
-          // prev ベースでマージして保存（他の予約を消さない）
-          if(carStore==='honten'){
-            setLoanerResH(prev=>{
-              const merged=JSON.parse(JSON.stringify(prev||{}));
-              // 同顧客の古いエントリをクリア
-              for(const k of Object.keys(merged)){
-                const days={...(merged[k]||{})};
-                Object.keys(days).forEach(d=>{if(days[d]?.custId===customer.custId)delete days[d];});
-                merged[k]=days;
-              }
-              // 新しいエントリを追加
-              if(!merged[selCarId])merged[selCarId]={};
-              // custIdのハッシュで色を決定（loanerResHの件数に依存しない）
-              const _ci=customer.custId?[...String(customer.custId)].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length:0;
-              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
-              sSet(resKey,merged);
-              return merged;
-            });
-          }else{
-            setLoanerResS(prev=>{
-              const merged=JSON.parse(JSON.stringify(prev||{}));
-              for(const k of Object.keys(merged)){
-                const days={...(merged[k]||{})};
-                Object.keys(days).forEach(d=>{if(days[d]?.custId===customer.custId)delete days[d];});
-                merged[k]=days;
-              }
-              if(!merged[selCarId])merged[selCarId]={};
-              const _ci=customer.custId?[...String(customer.custId)].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length:0;
-              merged[selCarId]={...merged[selCarId],[String(s.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
-              sSet(resKey,merged);
-              return merged;
-            });
-          }
+          // ★サーバー最新のlresを取得してからマージして保存（2026-07-03修正）。
+          // 以前はローカルstateベースで丸ごと上書きしていたため、このタブを開いてから
+          // 他端末（モバイル等）が入れた代車予約を巻き添えで消す事故があり得た。
+          (async()=>{
+            const _sD=new Date(sorted[0]);
+            const _ci=customer.custId?[...String(customer.custId)].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length:0;
+            const _localBase=carStore==='honten'?loanerResH:loanerResS;
+            const _fresh=await sGet(resKey);
+            const _base=(_fresh&&typeof _fresh==='object'&&!Array.isArray(_fresh))?_fresh:(_localBase||{});
+            const merged=JSON.parse(JSON.stringify(_base));
+            // 同顧客の古いエントリをクリア
+            for(const k of Object.keys(merged)){
+              const days={...(merged[k]||{})};
+              Object.keys(days).forEach(d=>{if(days[d]?.custId===customer.custId)delete days[d];});
+              merged[k]=days;
+            }
+            if(!merged[selCarId])merged[selCarId]={};
+            merged[selCarId]={...merged[selCarId],[String(_sD.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
+            sSet(resKey,merged);
+            if(carStore==='honten')setLoanerResH(merged);else setLoanerResS(merged);
+          })();
         }
       }
     }

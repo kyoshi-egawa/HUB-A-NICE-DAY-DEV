@@ -925,21 +925,34 @@ const App=()=>{
   },[user]);
 
   // ── 書き込みレイヤ ──
-  // 保存はサーバーの最新値を読み直してから差分適用（read-modify-write）。
-  // GAS側はdoPost毎にキャッシュを無効化するので、直前のsGetで十分新しい値が取れる。
+  // 保存はサーバーの最新値を読み直してから差分適用（read-modify-write）＋読み返し検証。
+  // GAS混雑時は書き込みがロック待ちタイムアウト等で「静かに失敗」することがある
+  // （no-corsのため失敗を検知できない）。verifyが渡された場合は、書き込み後に
+  // サーバーから読み返して自分の変更が反映されたか確認し、未反映なら最新値から
+  // 作り直して再送する（最大3回）。それでも確認できなければエラーにして呼び出し側で警告。
+  // （2026-07-03 代車予約の無音消失インシデント対策。PC版の読み返し検証と同じ考え方）
   const guardWrite=()=>{
     writeGuardRef.current++;
     setTimeout(()=>{writeGuardRef.current=Math.max(0,writeGuardRef.current-1);},70000);
   };
-  const writeShared=async(key,fallbackLocal,mutator,applyLocal)=>{
+  const writeShared=async(key,fallbackLocal,mutator,applyLocal,verify)=>{
     guardWrite();
-    let base=await sGet(key);
-    if(!isPlainObj(base))base=isPlainObj(fallbackLocal)?fallbackLocal:{};
-    const next=mutator(base);
-    applyLocal(next);
-    await sSet(key,next);
-    return next;
+    let next=null;
+    for(let attempt=0;attempt<3;attempt++){
+      let base=await sGet(key);
+      if(!isPlainObj(base))base=isPlainObj(fallbackLocal)?fallbackLocal:{};
+      next=mutator(base);
+      applyLocal(next);
+      await sSet(key,next);
+      if(!verify)return next;
+      await new Promise(r=>setTimeout(r,1300));
+      const echo=await sGet(key);
+      if(isPlainObj(echo)&&verify(echo)){applyLocal(echo);return echo;} // 反映確認OK（他端末の変更も取り込む）
+    }
+    throw new Error('サーバーへの保存を確認できませんでした（通信または混雑）。もう一度お試しください');
   };
+  // 検証ヘルパ: lres/rres に指定bookingKeyの予約が「ある」「ない」を確認
+  const hasBk=(res,bk)=>Object.values(res||{}).some(days=>Object.values(days||{}).some(r=>r&&r.bookingKey===bk));
 
   // ── 編集ロック（PC版と同じ locksキー・TTL30秒。モーダル表示中は20秒毎に延長）──
   const acquireLock=async(key,userName)=>{
@@ -1005,8 +1018,8 @@ const App=()=>{
     };
     const colorOf=name=>RES_COLORS[[...String(name||'')].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length];
     if(action.kind==='none'){
-      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres);
-      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData);
+      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal));
+      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal));
       return {...entry,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null};
     }
     if(action.kind==='loaner'){
@@ -1027,8 +1040,8 @@ const App=()=>{
         if(days[k])k=`${action.from.d}_${rec.id}`;
         days[k]=rec;
         return{...cleaned,[action.carId]:days};
-      },setMyLres);
-      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData);
+      },setMyLres,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal));
+      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal));
       return {...entry,loaner:car?`${car.name} (${car.num})`:'',loanerId:action.carId,rentalLabel:'',rentalCarId:null};
     }
     if(action.kind==='rental'){
@@ -1044,8 +1057,8 @@ const App=()=>{
         const days={...(cleaned[action.carId]||{})};
         days[String(rec.id)]=rec; // PC版addRentalResと同じくidをキーにする
         return{...cleaned,[action.carId]:days};
-      },setRentalResData);
-      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres);
+      },setRentalResData,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal));
+      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal));
       return {...entry,loaner:'',loanerId:null,rentalLabel:`🔑 ${rcar?rcar.name:'レンタカー'}${rcar?.num?` (${rcar.num})`:''}`,rentalCarId:action.carId};
     }
     return entry;
@@ -1058,21 +1071,26 @@ const App=()=>{
     if(req.type==='insp'){
       const bkFinal=`insp-${req.dk}-${req.idx}`;
       const entry=await applyLoanerAction({...form},loanerAction,bkFinal,userName);
-      let placedPending=false;
+      let placedPending=false,placedSeq=null;
       await writeShared(STOR+'insp',inspData,base=>{
         const rows=((base[req.dk]||[]).map(r=>r||blankInsp()));
         while(rows.length<=req.idx)rows.push(blankInsp());
         const prevRow=rows[req.idx];
         // PC版と同じseq規則: アクティブ予約の編集はseq維持、新規/キャンセル枠への予約は新seq
+        // （再試行時に自分の行が既に書けていた場合はseqが引き継がれるので二重にならない）
         const editingActive=!!(prevRow&&prevRow.name&&prevRow.bookingStatus!=='cancelled');
         const seq=editingActive?(prevRow.seq!=null?prevRow.seq:Date.now()):Date.now();
+        placedSeq=seq;
         rows[req.idx]={...entry,store:normStore(prevRow?.store)||vsId,seq,bookingStatus:'confirmed'};
         const dayLimit=inspLimits[req.dk]??6;
         const wasPending=editingActive&&!!prevRow.pendingApproval;
         const recomputed=recomputeInspApproval(rows,dayLimit);
         placedPending=!!(recomputed[req.idx]&&recomputed[req.idx].pendingApproval&&!wasPending);
         return{...base,[req.dk]:recomputed};
-      },setInspData);
+      },setInspData,echo=>{
+        const r=(echo[req.dk]||[])[req.idx];
+        return !!r&&r.name===entry.name&&r.seq===placedSeq;
+      });
       if(placedPending)alert('⚠️ 1日の上限を超えたため、本店承認が必要です（通常6台／レギュラー車検3台）。この予約は承認待ちになります。');
     }else{
       const sdKey=storKey('sched',vsId);
@@ -1090,18 +1108,23 @@ const App=()=>{
       }
       const bkFinal=`sched-${req.dk}-${slotFinal}`;
       const entry=await applyLoanerAction({...form},loanerAction,bkFinal,userName);
+      const placedId=Date.now();
       await writeShared(sdKey,sd,base=>{
         const day={...(base[req.dk]||{})};
-        if(req.isNew&&day[slotFinal]&&day[slotFinal].name){
-          // 直前に他端末で埋まった場合はさらに次の空きへ（代車のbkとずれるがデータは壊さない。表示は氏名フォールバックで追従）
+        // 直前に他端末で埋まった場合はさらに次の空きへ（自分の書き込み済みエントリ=placedIdは除外し、
+        // 再試行時に二重登録しない。代車のbkとずれた場合もデータは壊れず表示は氏名フォールバックで追従）
+        if(req.isNew&&day[slotFinal]&&day[slotFinal].name&&day[slotFinal].id!==placedId){
           const baseSlot=getBaseSlot(slotFinal);
           let sub=0,k=baseSlot;
-          while(day[k]&&day[k].name){sub++;k=makeSlotKey(baseSlot,sub);}
+          while(day[k]&&day[k].name&&day[k].id!==placedId){sub++;k=makeSlotKey(baseSlot,sub);}
           slotFinal=k;
         }
-        day[slotFinal]={...entry,id:Date.now()};
+        day[slotFinal]={...entry,id:placedId};
         return{...base,[req.dk]:day};
-      },setSd);
+      },setSd,echo=>{
+        const r=(echo[req.dk]||{})[slotFinal];
+        return !!r&&r.id===placedId;
+      });
     }
     setEditMode(null);
     releaseLock();
@@ -1111,6 +1134,8 @@ const App=()=>{
     const req=editMode;
     if(!req)return;
     const bk=req.type==='insp'?`insp-${req.dk}-${req.idx}`:`sched-${req.dk}-${req.slot}`;
+    const deletedSeq=req.initial?.seq;
+    const deletedName=req.initial?.name;
     if(req.type==='insp'){
       await writeShared(STOR+'insp',inspData,base=>{
         const rows=((base[req.dk]||[]).map(r=>r||blankInsp()));
@@ -1118,16 +1143,23 @@ const App=()=>{
         while(rows.length>0&&!rows[rows.length-1]?.name)rows.pop();
         const recomputed=recomputeInspApproval(rows,inspLimits[req.dk]??6);
         return{...base,[req.dk]:recomputed.length>0?recomputed:[]};
-      },setInspData);
+      },setInspData,echo=>{
+        const r=(echo[req.dk]||[])[req.idx];
+        return !r||!r.name||(deletedSeq!=null?r.seq!==deletedSeq:r.name!==deletedName);
+      });
     }else{
       const sdKey=storKey('sched',vsId);
       const sd=vsId==='honten'?schedDataH:schedDataS;
       const setSd=vsId==='honten'?setSchedDataH:setSchedDataS;
+      const deletedId=req.initial?.id;
       await writeShared(sdKey,sd,base=>{
         const day={...(base[req.dk]||{})};
         delete day[req.slot];
         return{...base,[req.dk]:day};
-      },setSd);
+      },setSd,echo=>{
+        const r=(echo[req.dk]||{})[req.slot];
+        return !r||!r.name||(deletedId!=null?r.id!==deletedId:r.name!==deletedName);
+      });
     }
     // bookingKeyに紐づく代車・レンタカー予約を連動削除（PC版handleDeleteModalと同じ）
     const lresKey=storKey('lres',vsId);
@@ -1142,8 +1174,8 @@ const App=()=>{
       }
       return out;
     };
-    await writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres);
-    await writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData);
+    await writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres,echo=>!hasBk(echo,bk));
+    await writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData,echo=>!hasBk(echo,bk));
     setEditMode(null);
     releaseLock();
   },[editMode,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,inspLimits]);
