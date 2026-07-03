@@ -1,1 +1,1205 @@
-<!DOCTYPE html> <html lang="ja"> <head> <meta charset="UTF-8"/> <meta name="viewport" content="width=device-width, initial-scale=1.0"/> <meta name="apple-mobile-web-app-capable" content="yes"/> <meta name="apple-mobile-web-app-status-bar-style" content="default"/> <title>Hub a Nice Day</title> <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script> <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script> <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script> <style> *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;} html,body,#root{height:100%;width:100%;} @keyframes loginFadeIn{0%{opacity:1}100%{opacity:0}} body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;background:#f1f5f9;color:#1e293b;overflow:hidden;} ::-webkit-scrollbar{width:3px;height:3px;}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;} button{cursor:pointer;font-family:inherit;} input,select{font-family:inherit;font-size:16px;} </style> </head> <body> <div id="root"></div> <script type="text/babel" data-presets="react"> const {useState,useEffect,useCallback,useMemo,useRef,memo}=React; const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec'; const GAS_API_KEY='hub2026SandaHonten!9xKy'; const STOR='hub-v8-dev-'; const storKey=(base,sid)=>`${STOR}${sid}-${base}`; const COURSES=[ {id:1,name:'マッハ車検', short:'マ',color:'#b91c1c',bg:'#fca5a5'}, {id:2,name:'クイック車検',short:'ク',color:'#1d4ed8',bg:'#bfdbfe'}, {id:3,name:'レギュラー', short:'レ',color:'#d97706',bg:'#fde68a'}, ]; const HOLIDAYS_2026=new Set(['2026-1-1','2026-1-12','2026-2-11','2026-2-23','2026-3-20','2026-4-29','2026-5-3','2026-5-4','2026-5-5','2026-7-20','2026-8-11','2026-9-21','2026-9-22','2026-9-23','2026-10-12','2026-11-3','2026-11-23','2026-12-23']); const isHoliday=(y,m,d)=>HOLIDAYS_2026.has(`${y}-${m+1}-${d}`); const DOW=['日','月','火','水','木','金','土']; const TIME_SLOTS=(()=>{const s=[];for(let h=9;h<=18;h++)for(let m=0;m<60;m+=30)s.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);return s;})(); const DEFAULT_STAFF=[ {uid:'h1',name:'見取大介', myNumber:1, store:'honten'}, {uid:'h2',name:'岡上秀一', myNumber:2, store:'honten'}, {uid:'h3',name:'竹林直行', myNumber:3, store:'honten'}, {uid:'h4',name:'幸田かつのり',myNumber:4, store:'honten'}, {uid:'h5',name:'魚住圭', myNumber:5, store:'honten'}, {uid:'h6',name:'舟田祥子', myNumber:6, store:'honten'}, {uid:'h7',name:'江川京志', myNumber:7, store:'honten'}, {uid:'h8',name:'ダク', myNumber:8, store:'honten'}, {uid:'h9',name:'カビン', myNumber:9, store:'honten'}, {uid:'s10',name:'藤原昭人', myNumber:10,store:'sanda'}, {uid:'s11',name:'中井啓介', myNumber:11,store:'sanda'}, {uid:'s12',name:'宮原てるま', myNumber:12,store:'sanda'}, {uid:'s13',name:'芦田', myNumber:13,store:'sanda'}, {uid:'s14',name:'長谷川', myNumber:14,store:'sanda'}, {uid:'s15',name:'石井', myNumber:15,store:'sanda'}, {uid:'s16',name:'両澤ちよう', myNumber:16,store:'sanda'}, {uid:'s17',name:'野呂遥奈', myNumber:17,store:'sanda'}, {uid:'s18',name:'河合', myNumber:18,store:'sanda'}, ]; const LOANERS_H=[ {id:1,name:'ワゴンR', num:'1234',store:'honten'},{id:2,name:'ムーヴ', num:'5678',store:'honten'}, {id:3,name:'N-BOX', num:'9012',store:'honten'},{id:4,name:'タント', num:'3456',store:'honten'}, {id:5,name:'スペーシア',num:'0001',store:'honten'},{id:6,name:'アルト', num:'0002',store:'honten'}, ]; const LOANERS_S=[ {id:7, name:'スペーシア',num:'7890',store:'sanda'},{id:8, name:'アルト', num:'2468',store:'sanda'}, {id:9, name:'ミライース',num:'1357',store:'sanda'},{id:10,name:'デイズ', num:'8024',store:'sanda'}, {id:11,name:'ワゴンR', num:'0003',store:'sanda'},{id:12,name:'N-BOX', num:'0004',store:'sanda'}, ]; const RES_COLORS=['#fca5a5','#86efac','#93c5fd','#fde68a','#c4b5fd','#f9a8d4']; const sGet=async k=>{ try{ const r=await fetch(`${GAS_URL}?key=${encodeURIComponent(k)}&apiKey=${encodeURIComponent(GAS_API_KEY)}`,{cache:'no-store'}); const t=await r.text(); if(!t||t==='null'||t.startsWith('error')||t==='unauthorized')return null; try{return JSON.parse(t);}catch{return null;} }catch{return null;} }; const normStore=s=>{if(!s)return'';if(s==='honten'||s==='本店')return'honten';if(s==='sanda'||s==='三田店')return'sanda';return s;}; const getSecondTuesday=(y,m)=>{let c=0;for(let d=1;d<=31;d++){const dt=new Date(y,m,d);if(dt.getMonth()!==m)break;if(dt.getDay()===2){c++;if(c===2)return d;}}return null;}; const calIsClosed=(date,cDays=[],cDates=[],ovOpen=[],vsId='honten')=>{ if(!date||isNaN(date))return false; if(cDays.includes(date.getDay()))return true; const ds=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; if(cDates.includes(ds))return true; if(vsId==='sanda'){ const d2=getSecondTuesday(date.getFullYear(),date.getMonth()); if(d2===date.getDate()&&!ovOpen.includes(`${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`))return true; } return false; }; const LoginScreen=({onLogin})=>{ const [code,setCode]=useState(''); const [err,setErr]=useState(''); const [success,setSuccess]=useState(null); const [staffList,setStaffList]=useState(DEFAULT_STAFF); const [staffLoading,setStaffLoading]=useState(true); useEffect(()=>{ (async()=>{ try{ const [h,s]=await Promise.all([sGet(STOR+'honten-staff-v2'),sGet(STOR+'sanda-staff-v2')]); const all=[...(h||[]).map(st=>({...st,store:'honten'})),...(s||[]).map(st=>({...st,store:'sanda'}))].filter(st=>st.name&&st.myNumber!=null); if(all.length>0)setStaffList(all); }catch(e){} setStaffLoading(false); })(); },[]); const doLogin=()=>{ const n=parseInt(code,10); const s=staffList.find(s=>s.myNumber===n); if(!s){setErr('コードが正しくありません');setCode('');return;} setErr(''); setSuccess(s); setTimeout(()=>onLogin(s),8000); }; if(success){ const storeColor=success.store==='honten'?'#1d4ed8':'#dc2626'; const storeName=success.store==='honten'?'本店':'三田店'; return( <div style={{height:'100%',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center', background:'white',position:'relative',overflow:'hidden'}}> <div style={{position:'absolute',top:0,left:0,right:0,height:4,background:`linear-gradient(90deg,${storeColor},#6d28d9)`}}/> <div style={{position:'absolute',inset:0,background:storeColor,opacity:0,animation:'flash .4s ease .4s forwards',pointerEvents:'none',zIndex:0}}/> <div style={{position:'relative',marginBottom:24,display:'flex',alignItems:'center',justifyContent:'center'}}> <div style={{ position:'absolute',width:80,height:80,borderRadius:'50%', background:storeColor,opacity:0, animation:'rippleOut .8s ease .4s forwards', }}/> <div style={{ width:80,height:80,borderRadius:'50%', background:'white', border:`3px solid ${storeColor}`, display:'flex',alignItems:'center',justifyContent:'center', position:'relative',zIndex:1, animation:'pop .8s cubic-bezier(0.34,1.56,0.64,1) .2s both, haloSettle 3.5s ease 1.5s both', '--hc':storeColor, }}> <svg width="38" height="38" viewBox="0 0 38 38" fill="none" style={{overflow:'visible'}}> <polyline points="8,20 16,28 30,11" stroke={storeColor} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" style={{ strokeDasharray:38, strokeDashoffset:38, animation:'draw .7s ease .9s forwards', }}/> </svg> </div> </div> <div style={{color:'#0f172a',fontSize:28,fontWeight:900,letterSpacing:1,marginBottom:6, animation:'fadeUp .8s ease 3.5s both'}}> {success.name} </div> <div style={{ display:'inline-flex',alignItems:'center',gap:6, padding:'5px 18px',borderRadius:20, background:`${storeColor}14`,border:`1.5px solid ${storeColor}`, marginBottom:32,animation:'fadeUp .8s ease 3.8s both'}}> <div style={{width:7,height:7,borderRadius:'50%',background:storeColor}}/> <span style={{color:storeColor,fontSize:13,fontWeight:800}}>{storeName}</span> </div> <div style={{color:'#94a3b8',fontSize:11,letterSpacing:2, animation:'fadeUp .8s ease 4.0s both'}}> AUTHENTICATED </div> <div style={{position:'absolute',inset:0,background:'white',opacity:0, animation:'whiteFadeOut 2.5s ease 5.2s forwards',pointerEvents:'none',zIndex:10}}/> <style dangerouslySetInnerHTML={{__html:` @keyframes pop{ 0%{transform:scale(0) rotate(-6deg);opacity:0} 60%{transform:scale(1.1)} 100%{transform:scale(1) rotate(0deg);opacity:1} } @keyframes draw{from{stroke-dashoffset:38}to{stroke-dashoffset:0}} @keyframes rippleOut{ 0%{transform:scale(1);opacity:.5} 100%{transform:scale(3.5);opacity:0} } @keyframes flash{ 0%{opacity:0;filter:blur(12px)} 20%{opacity:.25;filter:blur(6px)} 100%{opacity:0;filter:blur(0px)} } @keyframes haloSettle{ 0%{box-shadow:0 0px 0px rgba(0,0,0,0)} 25%{box-shadow:0 0 44px 16px var(--hc,#1d4ed8)} 60%{box-shadow:0 0 30px 10px var(--hc,#1d4ed8)} 100%{box-shadow:0 0 18px 5px var(--hc,#1d4ed8)} } @keyframes fadeUp{ from{transform:translateY(14px);opacity:0} to{transform:translateY(0);opacity:1} } @keyframes whiteFadeOut{ 0%{opacity:0} 40%{opacity:0} 100%{opacity:1} } `}}/> </div> ); } return( <div style={{height:'100%',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24,background:'linear-gradient(160deg,#1e1b4b,#3730a3 60%,#6d28d9)'}}> <div style={{marginBottom:32,textAlign:'center'}}> <div style={{fontSize:48,marginBottom:10}}>🚗</div> <div style={{color:'white',fontSize:22,fontWeight:900,letterSpacing:1}}>Hub a Nice Day</div> <div style={{color:'rgba(255,255,255,.4)',fontSize:11,marginTop:4,letterSpacing:2}}>STAFF ACCESS</div> </div> <div style={{width:'100%',maxWidth:300,background:'rgba(255,255,255,.07)',borderRadius:20,padding:28, border:'1px solid rgba(255,255,255,.15)',backdropFilter:'blur(10px)'}}> <div style={{fontSize:11,fontWeight:700,color:'rgba(255,255,255,.5)',marginBottom:14,textAlign:'center',letterSpacing:2}}> LOGIN CODE </div> {staffLoading&&<div style={{textAlign:'center',color:'rgba(255,255,255,.4)',fontSize:10,marginBottom:8}}>⏳ 読込中...</div>} <input type="tel" inputMode="numeric" pattern="[0-9]*" value={code} onChange={e=>setCode(e.target.value.replace(/[^0-9]/g,''))} onKeyDown={e=>e.key==='Enter'&&doLogin()} placeholder="" autoFocus style={{width:'100%',padding:'16px 0',fontSize:32,border:'none', borderBottom:`2px solid ${err?'#ef4444':'rgba(255,255,255,.3)'}`, outline:'none',textAlign:'center',fontWeight:800,letterSpacing:10, background:'transparent',color:'white',caretColor:'white', WebkitAppearance:'none',MozAppearance:'textfield'}}/> {err&&<div style={{color:'#f87171',fontSize:11,marginTop:8,textAlign:'center',letterSpacing:1}}>{err}</div>} <button onClick={doLogin} style={{width:'100%',marginTop:24,padding:'14px 0', background:'linear-gradient(135deg,#4338ca,#6d28d9)', color:'white',border:'none',borderRadius:12,fontSize:14,fontWeight:800, letterSpacing:2,boxShadow:'0 4px 20px rgba(99,102,241,.4)'}}> SIGN IN </button> </div> </div> ); }; const CalendarView=({inspData,closedDays,closedDates,overrideOpen,vsId,onSelectDate})=>{ const today=new Date(); const [cur,setCur]=useState(new Date(today.getFullYear(),today.getMonth(),1)); const cy=cur.getFullYear(),cm=cur.getMonth(); const storeColor=vsId==='honten'?'#1d4ed8':'#dc2626'; const dim=new Date(cy,cm+1,0).getDate(); const fdow=new Date(cy,cm,1).getDay(); const dayCnt=useMemo(()=>{const res={};for(let d=1;d<=dim;d++){const dk=`${cy}-${cm+1}-${d}`;const rows=(inspData[dk]||[]).filter(r=>r&&r.name&&!r.pendingApproval&&r.bookingStatus!=='cancelled');if(rows.length)res[d]={total:rows.length,courses:rows.reduce((a,r)=>{if(r.course)a[r.course]=(a[r.course]||0)+1;return a;},{})};} return res;},[inspData,cy,cm]); const weeks=[];let wk=Array(7).fill(null); for(let d=1;d<=dim;d++){const dow=(fdow+d-1)%7;wk[dow]=d;if(dow===6||d===dim){weeks.push([...wk]);wk=Array(7).fill(null);}} return( <div style={{flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch'}}> <div style={{padding:'10px 14px',background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #1d4ed8',display:'flex',alignItems:'center',gap:8}} onTouchStart={e=>{e.currentTarget._sx=e.touches[0].clientX;e.currentTarget._sy=e.touches[0].clientY;}} onTouchEnd={e=>{ const dx=e.changedTouches[0].clientX-(e.currentTarget._sx||0); const dy=e.changedTouches[0].clientY-(e.currentTarget._sy||0); e.currentTarget._sx=null; if(Math.abs(dx)<30||Math.abs(dy)>Math.abs(dx))return; setCur(new Date(cy,cm+(dx<0?1:-1),1)); }}> <button onClick={()=>setCur(new Date(cy,cm-1,1))} style={{width:36,height:36,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button> <div style={{flex:1,textAlign:'center'}}> <div style={{fontWeight:900,fontSize:18}}>{cy}年 {cm+1}月</div> <div style={{fontSize:10,color:'#94a3b8'}}>← スワイプで月移動 / タップで詳細 →</div> </div> <button onClick={()=>setCur(new Date(cy,cm+1,1))} style={{width:36,height:36,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button> </div> <div style={{padding:'8px 8px 16px'}}> <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,marginBottom:4}}> {DOW.map((d,i)=><div key={d} style={{textAlign:'center',fontSize:11,fontWeight:700,color:i===0?'#ef4444':i===6?'#3b82f6':'#64748b',padding:'4px 0'}}>{d}</div>)} </div> {weeks.map((wk,wi)=>( <div key={wi} style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,marginBottom:2}}> {wk.map((d,di)=>{ if(!d)return <div key={di}/>; const date=new Date(cy,cm,d); const closed=calIsClosed(date,closedDays,closedDates,overrideOpen,vsId); const isToday=d===today.getDate()&&cm===today.getMonth()&&cy===today.getFullYear(); const isSun=di===0,isSat=di===6,isHol=isHoliday(cy,cm,d); const info=dayCnt[d]; return( <div key={di} onClick={()=>!closed&&onSelectDate(`${cy}-${cm+1}-${d}`,cy,cm,d)} style={{borderRadius:10,background:closed?'#f8fafc':isToday?'#dbeafe':'white',border:isToday?'2px solid #3b82f6':'2px solid #f1f5f9',minHeight:58,padding:'5px 3px',cursor:closed?'default':'pointer',opacity:closed?0.4:1,boxShadow:info&&!closed?'0 2px 6px rgba(0,0,0,.08)':'none'}}> <div style={{textAlign:'center',fontWeight:800,fontSize:14,color:isToday?'#1e40af':closed?'#94a3b8':isSun||isHol?'#ef4444':isSat?'#3b82f6':'#1e293b'}}>{d}</div> {info&&!closed&&( <div style={{marginTop:2}}> <div style={{textAlign:'center',fontSize:9,fontWeight:800,color:isToday?'#1e40af':'#374151',marginBottom:1}}>{info.total}台</div> <div style={{display:'flex',gap:1,justifyContent:'center',flexWrap:'wrap'}}> {Object.entries(info.courses).map(([cid,cnt])=>{const c=COURSES.find(co=>co.id===Number(cid));return c?<span key={cid} style={{fontSize:8,fontWeight:700,padding:'0 3px',borderRadius:3,background:c.bg,color:c.color}}>{c.short}{cnt}</span>:null;})} </div> </div> )} {closed&&<div style={{textAlign:'center',fontSize:8,color:'#94a3b8',marginTop:2}}>休</div>} </div> ); })} </div> ))} <div style={{marginTop:10,padding:'10px 12px',background:'white',borderRadius:12,border:'1px solid #f1f5f9',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}> {COURSES.map(c=><span key={c.id} style={{display:'flex',alignItems:'center',gap:3,fontSize:11}}><span style={{width:12,height:12,borderRadius:2,background:c.bg,display:'inline-block'}}/><span style={{color:c.color,fontWeight:700}}>{c.name}</span></span>)} </div> </div> </div> ); }; const DayDetailModal=({dk,y,m,d,inspData,schedDataH,schedDataS,memoDataH,memoDataS,vsId,onClose,onGoSchedule})=>{ const sc=vsId==='honten'?'#1d4ed8':'#dc2626'; const normSt=s=>{if(!s)return'';if(s==='honten'||s==='本店')return'honten';if(s==='sanda'||s==='三田店')return'sanda';return s;}; const irows=(inspData[dk]||[]).filter(r=>r&&r.name&&!r.pendingApproval&&r.bookingStatus!=='cancelled'); const sorted=[...irows.filter(r=>normSt(r.store)===vsId),...irows.filter(r=>!normSt(r.store)),...irows.filter(r=>normSt(r.store)&&normSt(r.store)!==vsId)]; const sd=vsId==='honten'?schedDataH:schedDataS; const sched=Object.entries(sd[dk]||{}).filter(([,r])=>r&&r.name).sort(([a],[b])=>a.localeCompare(b)); const memos=((vsId==='honten'?memoDataH:memoDataS)[dk]||[]); const dow=new Date(y,m,d).getDay(); return( <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:200,display:'flex',flexDirection:'column',justifyContent:'flex-end'}} onClick={onClose}> <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:'20px 20px 0 0',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 -8px 40px rgba(0,0,0,.25)'}}> <div style={{padding:'14px 18px 10px',borderBottom:'1px solid #f1f5f9',display:'flex',alignItems:'center',gap:8}}> <div style={{flex:1}}> <div style={{fontWeight:900,fontSize:18,color:dow===0?'#ef4444':dow===6?'#3b82f6':'#1e293b'}}>{m+1}月{d}日（{DOW[dow]}）</div> <div style={{fontSize:11,color:'#94a3b8',marginTop:1}}>車検 {irows.length}台 / 整備 {sched.length}件</div> </div> <button onClick={()=>onGoSchedule(y,m,d)} style={{padding:'6px 12px',borderRadius:8,background:sc,border:'none',color:'white',fontSize:11,fontWeight:800,flexShrink:0}}> ⏰ スケジュール </button> <button onClick={onClose} style={{width:32,height:32,borderRadius:'50%',background:'#f1f5f9',border:'none',fontSize:16,color:'#64748b',flexShrink:0}}>✕</button> </div> <div style={{overflowY:'auto',WebkitOverflowScrolling:'touch',flex:1,padding:'12px 16px'}}> {sorted.length>0&&( <div style={{marginBottom:14}}> <div style={{fontWeight:800,fontSize:12,color:'#3730a3',marginBottom:8}}>🚗 車検</div> {sorted.map((r,i)=>{const c=COURSES.find(co=>co.id===Number(r.course));const isOther=normSt(r.store)&&normSt(r.store)!==vsId;return( <div key={i} style={{padding:'9px 11px',marginBottom:5,borderRadius:10,background:isOther?'#f8fafc':'white',border:`1.5px solid ${isOther?'#e2e8f0':sc+'33'}`,borderLeft:`4px solid ${isOther?'#94a3b8':sc}`,opacity:isOther?0.75:1}}> <div style={{display:'flex',alignItems:'center',gap:6}}> <span style={{fontWeight:800,fontSize:14}}>{r.name}</span> {c&&<span style={{padding:'2px 7px',borderRadius:10,background:c.bg,color:c.color,fontSize:10,fontWeight:700}}>{c.name}</span>} {isOther&&<span style={{fontSize:10,color:'#94a3b8',marginLeft:'auto'}}>{normSt(r.store)==='honten'?'本店':'三田店'}</span>} </div> <div style={{marginTop:3,fontSize:11,color:'#64748b',display:'flex',gap:6,flexWrap:'wrap'}}> {r.carType&&<span>{r.carType}</span>}{r.tokuten&&r.tokuten!=='-'&&<span style={{color:'#7c3aed'}}>特典{r.tokuten}</span>}{r.staff&&<span>{r.staff}</span>} </div> {r.note&&<div style={{marginTop:3,fontSize:11,background:'#f8fafc',borderRadius:6,padding:'3px 7px',color:'#374151'}}>{r.note}</div>} </div> );})} </div> )} {sched.length>0&&( <div style={{marginBottom:14}}> <div style={{fontWeight:800,fontSize:12,color:'#0e7490',marginBottom:8}}>⏰ タイムスケジュール</div> {sched.map(([key,r],i)=>( <div key={i} style={{display:'flex',gap:8,padding:'7px 10px',marginBottom:4,background:'white',borderRadius:10,border:'1.5px solid #e0f2fe',borderLeft:'4px solid #0e7490'}}> <span style={{fontWeight:700,fontSize:11,color:'#0e7490',width:34,flexShrink:0}}>{key.split('-')[0]}</span> <div><span style={{fontWeight:700,fontSize:13}}>{r.name}</span>{r.carType&&<span style={{fontSize:11,color:'#64748b',marginLeft:5}}>{r.carType}</span>}{r.workType&&<span style={{marginLeft:5,padding:'1px 5px',background:'#ccfbf1',color:'#0f766e',borderRadius:6,fontSize:10,fontWeight:700}}>{r.workType}</span>}{r.content&&<div style={{fontSize:11,color:'#64748b',marginTop:1}}>{r.content}</div>}</div> </div> ))} </div> )} {memos.length>0&&( <div style={{marginBottom:14}}> <div style={{fontWeight:800,fontSize:12,color:'#7c3aed',marginBottom:8}}>📝 備考・メモ</div> {memos.map((m,i)=><div key={i} style={{padding:'8px 10px',marginBottom:4,background:'#faf5ff',borderRadius:10,border:'1px solid #e9d5ff',fontSize:12}}>{m.content||m.text||''}</div>)} </div> )} {sorted.length===0&&sched.length===0&&<div style={{textAlign:'center',color:'#94a3b8',padding:32,fontSize:13}}>この日の予約はありません</div>} </div> </div> </div> ); }; const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerResH,loanerResS,vsId,initDate})=>{ const today=new Date(); const [ds,setDs]=useState({y:today.getFullYear(),m:today.getMonth(),d:today.getDate()}); useEffect(()=>{if(initDate)setDs(initDate);},[initDate]); const {y,m,d}=ds; const dk=`${y}-${m+1}-${d}`; const sc=vsId==='honten'?'#1d4ed8':'#dc2626'; const normSt=s=>{if(!s)return'';if(s==='honten'||s==='本店')return'honten';if(s==='sanda'||s==='三田店')return'sanda';return s;}; const moveDate=dir=>{const dt=new Date(y,m,d+dir);setDs({y:dt.getFullYear(),m:dt.getMonth(),d:dt.getDate()});}; const isToday_=y===today.getFullYear()&&m===today.getMonth()&&d===today.getDate(); const dow=new Date(y,m,d).getDay(); const irows=(inspData[dk]||[]).filter(r=>r&&r.name&&!r.pendingApproval&&r.bookingStatus!=='cancelled'); const sorted=[...irows.filter(r=>normSt(r.store)===vsId),...irows.filter(r=>!normSt(r.store)),...irows.filter(r=>normSt(r.store)&&normSt(r.store)!==vsId)]; const sd=vsId==='honten'?schedDataH:schedDataS; const memos=((vsId==='honten'?memoDataH:memoDataS)[dk]||[]); const getLoanerLabel=name=>{ for(const res of [loanerResH,loanerResS]){ for(const cid of Object.keys(res||{})){ const entries=Array.isArray(res[cid])?res[cid]:[]; for(const r of entries){if(r.user===name){const car=[...LOANERS_H,...LOANERS_S].find(c=>String(c.id)===String(cid));return car?car.name:'代車';}} } } return ''; }; return( <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}> <div style={{flexShrink:0,background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #1d4ed8',padding:'10px 14px'}} onTouchStart={e=>{e.currentTarget._sx=e.touches[0].clientX;e.currentTarget._sy=e.touches[0].clientY;}} onTouchEnd={e=>{ const dx=e.changedTouches[0].clientX-(e.currentTarget._sx||0); const dy=e.changedTouches[0].clientY-(e.currentTarget._sy||0); e.currentTarget._sx=null; if(Math.abs(dx)<30||Math.abs(dy)>Math.abs(dx))return; moveDate(dx<0?1:-1); }}> <div style={{display:'flex',alignItems:'center',gap:8}}> <button onClick={()=>moveDate(-1)} style={{width:38,height:38,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:20,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button> <div style={{flex:1,textAlign:'center'}}> <div style={{fontWeight:900,fontSize:18,color:dow===0?'#ef4444':dow===6?'#3b82f6':'#1e293b'}}>{m+1}月{d}日（{DOW[dow]}）</div> <div style={{fontSize:10,color:'#94a3b8'}}>↕ スワイプで日付移動</div> </div> <button onClick={()=>moveDate(1)} style={{width:38,height:38,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:20,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button> </div> {!isToday_&&<button onClick={()=>setDs({y:today.getFullYear(),m:today.getMonth(),d:today.getDate()})} style={{width:'100%',marginTop:6,padding:'5px 0',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:11,color:'#64748b',fontWeight:600}}>今日に戻る</button>} </div> <div style={{flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch'}}> <div style={{margin:'10px 12px 0'}}> <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}> <span style={{fontWeight:900,fontSize:13,color:'#3730a3'}}>🚗 車検</span> <span style={{background:'#e0e7ff',color:'#3730a3',borderRadius:10,padding:'1px 8px',fontSize:11,fontWeight:700}}>{sorted.length}台</span> </div> {sorted.length===0?<div style={{background:'white',borderRadius:12,padding:14,textAlign:'center',color:'#94a3b8',fontSize:12,border:'1px solid #f1f5f9'}}>予約なし</div>: sorted.map((r,i)=>{const c=COURSES.find(co=>co.id===Number(r.course));const isOther=normSt(r.store)&&normSt(r.store)!==vsId;const loaner=getLoanerLabel(r.name);return( <div key={i} style={{background:'white',borderRadius:12,padding:'10px 12px',marginBottom:5,borderLeft:`4px solid ${isOther?'#94a3b8':sc}`,boxShadow:'0 1px 4px rgba(0,0,0,.06)',opacity:isOther?0.72:1}}> <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}> <span style={{fontWeight:900,fontSize:14,color:isOther?'#64748b':sc}}>{i+1}.</span> <span style={{fontWeight:800,fontSize:15,flex:1}}>{r.name}</span> {c&&<span style={{padding:'2px 8px',borderRadius:10,background:c.bg,color:c.color,fontSize:10,fontWeight:700}}>{c.name}</span>} {isOther&&<span style={{fontSize:10,color:'#94a3b8',padding:'1px 5px',background:'#f1f5f9',borderRadius:6}}>{normSt(r.store)==='honten'?'本店':'三田店'}</span>} </div> <div style={{marginTop:3,fontSize:11,color:'#64748b',display:'flex',gap:7,flexWrap:'wrap'}}> {r.carType&&<span>🚗 {r.carType}</span>}{loaner&&<span style={{color:'#0284c7'}}>🔑 {loaner}</span>}{r.tokuten&&r.tokuten!=='-'&&<span style={{color:'#7c3aed'}}>🎁 {r.tokuten}</span>}{r.staff&&<span>👤 {r.staff}</span>} </div> {r.note&&<div style={{marginTop:4,fontSize:11,color:'#374151',background:'#f8fafc',borderRadius:7,padding:'3px 7px'}}>{r.note}</div>} </div> );})} </div> <div style={{margin:'12px 12px 0'}}> <div style={{fontWeight:900,fontSize:13,color:'#0e7490',marginBottom:6}}>⏰ タイムスケジュール</div> <div style={{background:'white',borderRadius:12,overflow:'hidden',border:'1px solid #e0f2fe'}}> {TIME_SLOTS.map(slot=>{ const subKeys=Object.keys(sd[dk]||{}).filter(k=>k===slot||k.startsWith(slot+'-')); const dks=subKeys.filter(k=>{const r=sd[dk][k];return r&&r.name;}); const isEmpty=dks.length===0; return( <div key={slot} style={{display:'flex',borderBottom:'1px solid #f0fdfa',background:isEmpty?'white':'#f0fdfa'}}> <div style={{width:44,flexShrink:0,padding:'8px 4px',fontSize:11,fontWeight:700,color:isEmpty?'#cbd5e1':'#0e7490',textAlign:'center',borderRight:`2px solid ${isEmpty?'#f0f9ff':'#99f6e4'}`}}>{slot}</div> <div style={{flex:1,padding:'5px 9px'}}> {isEmpty?<span style={{color:'#e2e8f0',fontSize:11}}>—</span>: dks.map((key,ki)=>{const r=sd[dk][key];return( <div key={ki} style={{marginBottom:ki<dks.length-1?5:0}}> <span style={{fontWeight:800,fontSize:13}}>{r.name}</span> {r.carType&&<span style={{fontSize:11,color:'#64748b',marginLeft:5}}>{r.carType}</span>} {r.workType&&<span style={{marginLeft:5,padding:'1px 5px',background:'#ccfbf1',color:'#0f766e',borderRadius:6,fontSize:10,fontWeight:700}}>{r.workType}</span>} {r.loanerLabel&&<span style={{marginLeft:5,fontSize:10,color:'#0284c7'}}>🔑{r.loanerLabel}</span>} {r.content&&<div style={{fontSize:11,color:'#64748b',marginTop:1}}>{r.content}</div>} </div> );})} </div> </div> ); })} </div> </div> <div style={{margin:'12px 12px 20px'}}> <div style={{fontWeight:900,fontSize:13,color:'#7c3aed',marginBottom:6}}>📝 備考・メモ</div> {memos.length===0?<div style={{background:'white',borderRadius:12,padding:12,textAlign:'center',color:'#94a3b8',fontSize:12,border:'1px solid #f1f5f9'}}>なし</div>: memos.map((m,i)=><div key={i} style={{background:'#faf5ff',borderRadius:10,padding:'8px 11px',marginBottom:4,border:'1px solid #e9d5ff',fontSize:12,color:'#374151'}}>{m.content||m.text||''}</div>)} </div> </div> </div> ); }; const DEFAULT_RENTAL_CARS=[ {id:'r1',name:'レンタカーA',num:'R001'},{id:'r2',name:'レンタカーB',num:'R002'}, {id:'r3',name:'レンタカーC',num:'R003'},{id:'r4',name:'レンタカーD',num:'R004'}, {id:'r5',name:'レンタカーE',num:'R005'},{id:'r6',name:'レンタカーF',num:'R006'}, ]; const LOANER_SECTION_COLORS={ honten:'#1d4ed8', sanda:'#dc2626', rental:'#7c3aed' }; const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,vsId})=>{ const today=new Date(); const [lm,setLm]=useState(new Date(today.getFullYear(),today.getMonth(),1)); const ly=lm.getFullYear(),lmo=lm.getMonth(); const dim=new Date(ly,lmo+1,0).getDate(); const sc=vsId==='honten'?'#1d4ed8':'#dc2626'; const myLoaners=vsId==='honten'?LOANERS_H:LOANERS_S; const myLoanerRes=vsId==='honten'?loanerResH:loanerResS; const rentals=Array.isArray(rentalCars)&&rentalCars.length>0?rentalCars:DEFAULT_RENTAL_CARS; const rentalRes=rentalResData||{}; const toNum=(y,m,d)=>y*10000+m*100+d; const dates=useMemo(()=>Array.from({length:dim},(_,i)=>{ const dt=new Date(ly,lmo,i+1); return{d:i+1,dow:dt.getDay(),num:toNum(ly,lmo,i+1)}; }),[ly,lmo,dim]); const getRes=(res,cid,num)=>(res[cid]||[]).find(r=>{ const s=toNum(r.fy,r.fm,r.fd); const e=toNum(r.ty,r.tm,r.td); return num>=s&&num<=e; }); const LCAR_COLORS=['#fca5a5','#86efac','#93c5fd','#fde68a','#c4b5fd','#f9a8d4','#6ee7b7','#fbbf24']; const RCAR_COLORS=['#d8b4fe','#a5b4fc','#6ee7b7','#fde68a','#fca5a5','#93c5fd']; const renderGrid=(cars,res,sectionColor,label)=>( <div style={{marginBottom:0}}> <div style={{background:sectionColor,padding:'5px 10px',display:'flex',alignItems:'center',gap:6}}> <span style={{color:'white',fontWeight:800,fontSize:11}}>{label}</span> <span style={{color:'rgba(255,255,255,.7)',fontSize:10}}>{cars.length}台</span> </div> {cars.map((car,ci)=>( <div key={car.id} style={{display:'flex',borderBottom:'1px solid #f1f5f9'}}> <div style={{width:80,minWidth:80,padding:'6px 7px',background:'#f8fafc',borderRight:'2px solid #e5e7eb',display:'flex',flexDirection:'column',justifyContent:'center',position:'sticky',left:0,zIndex:2}}> <div style={{fontWeight:700,fontSize:10,color:'#1e293b',lineHeight:1.3}}>{car.name}</div> <div style={{fontSize:9,color:'#94a3b8'}}>{car.num}</div> </div> {dates.map(({d,num})=>{ const r=getRes(res,car.id,num); const colors=label.includes('レンタカー')?RCAR_COLORS:LCAR_COLORS; const color=r?colors[ci%colors.length]:'white'; const isTd=ly===today.getFullYear()&&lmo===today.getMonth()&&d===today.getDate(); const isStart=r&&r.fd===d&&r.fm===lmo; return( <div key={d} style={{ width:32,minWidth:32,height:36,background:color, borderRight:'1px solid #f1f5f9', borderLeft:isTd?`2px solid ${sc}`:'none', position:'relative',overflow:'hidden', }}> {isStart&&r&&( <div style={{position:'absolute',left:1,top:'50%',transform:'translateY(-50%)', fontSize:7,fontWeight:800,color:'white',textShadow:'0 1px 2px rgba(0,0,0,.7)', whiteSpace:'nowrap',overflow:'hidden',maxWidth:28,lineHeight:1}}> {(r.user||'').slice(0,4)} </div> )} </div> ); })} </div> ))} </div> ); return( <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}> <div style={{flexShrink:0,background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #7c3aed',padding:'10px 14px'}}> <div style={{display:'flex',alignItems:'center',gap:8}}> <button onClick={()=>setLm(new Date(ly,lmo-1,1))} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button> <div style={{flex:1,textAlign:'center'}}> <div style={{fontWeight:900,fontSize:17}}>{ly}年 {lmo+1}月</div> <div style={{fontSize:9,color:'#94a3b8'}}>← スワイプで月移動 / 横スクロール可</div> </div> <button onClick={()=>setLm(new Date(ly,lmo+1,1))} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button> </div> </div> <div style={{flex:1,overflow:'auto',WebkitOverflowScrolling:'touch'}}> <div style={{minWidth:`${82+dim*32}px`}}> <div style={{display:'flex',position:'sticky',top:0,zIndex:10,background:'white',borderBottom:'2px solid #e5e7eb'}}> <div style={{width:80,minWidth:80,padding:'6px 7px',fontWeight:700,fontSize:9,color:'#64748b',background:'#f8fafc',borderRight:'2px solid #e5e7eb',position:'sticky',left:0,zIndex:3}}>代車 / レンタ</div> {dates.map(({d,dow})=>{ const isTd=ly===today.getFullYear()&&lmo===today.getMonth()&&d===today.getDate(); const isHol=isHoliday(ly,lmo,d); return( <div key={d} style={{width:32,minWidth:32,textAlign:'center',padding:'3px 1px',background:isTd?'#dbeafe':'white',borderRight:'1px solid #f1f5f9'}}> <div style={{fontSize:8,color:isTd?'#1e40af':dow===0||isHol?'#ef4444':dow===6?'#3b82f6':'#94a3b8',fontWeight:600}}>{DOW[dow]}</div> <div style={{fontSize:11,fontWeight:isTd?800:500,color:isTd?'#1e40af':dow===0||isHol?'#ef4444':dow===6?'#3b82f6':'#1e293b'}}>{d}</div> </div> ); })} </div> {renderGrid(myLoaners, myLoanerRes, vsId==='honten'?'#1d4ed8':'#dc2626', vsId==='honten'?'本店 代車':'三田店 代車')} <div style={{height:3,background:'#e5e7eb'}}/> {renderGrid(rentals, rentalRes, '#7c3aed', 'レンタカー（共通）')} </div> <div style={{padding:'10px 12px 20px',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',minWidth:`${82+dim*32}px`}}> <span style={{display:'flex',alignItems:'center',gap:3,fontSize:10}}><span style={{width:12,height:12,background:'#fca5a5',borderRadius:2,display:'inline-block'}}/>使用中</span> <span style={{display:'flex',alignItems:'center',gap:3,fontSize:10}}><span style={{width:12,height:12,background:'white',border:'1px solid #e2e8f0',borderRadius:2,display:'inline-block'}}/>空き</span> <span style={{fontSize:10,color:'#94a3b8'}}>開始日に名前が表示されます</span> </div> </div> </div> ); }; const App=()=>{ const [user,setUser]=useState(null); const [fadeIn,setFadeIn]=useState(false); const [tab,setTab]=useState('cal'); const [loading,setLoading]=useState(false); const [gasOk,setGasOk]=useState(null); const [dayDetail,setDayDetail]=useState(null); const [schedInitDate,setSchedInitDate]=useState(null); const [inspData,setInspData]=useState({}); const [schedDataH,setSchedDataH]=useState({}); const [schedDataS,setSchedDataS]=useState({}); const [memoDataH,setMemoDataH]=useState({}); const [memoDataS,setMemoDataS]=useState({}); const [loanerResH,setLoanerResH]=useState({}); const [rentalCars,setRentalCars]=useState([]); const [rentalResData,setRentalResData]=useState({}); const [loanerResS,setLoanerResS]=useState({}); const [closedDaysH,setClosedDaysH]=useState([]); const [closedDaysS,setClosedDaysS]=useState([3]); const [closedDates,setClosedDates]=useState([]); const [overrideOpen,setOverrideOpen]=useState([]); const vsId=user?.store||'honten'; const sc=vsId==='honten'?'#1d4ed8':'#dc2626'; const sName=vsId==='honten'?'本店':'三田店'; const cDays=vsId==='honten'?closedDaysH:closedDaysS; const fetchAll=useCallback(async()=>{ setLoading(true); try{ const [insp,sh,ss,mh,ms,lh,ls,cdh,cds,cdate,ov,rcars,rres]=await Promise.all([ sGet(STOR+'insp'),sGet(storKey('sched','honten')),sGet(storKey('sched','sanda')), sGet(storKey('memo','honten')),sGet(storKey('memo','sanda')), sGet(storKey('lres','honten')),sGet(storKey('lres','sanda')), sGet(storKey('cdow','honten')),sGet(storKey('cdow-v2','sanda')), sGet(storKey('cdate','honten')),sGet(storKey('overrideOpen','honten')), sGet(STOR+'rentalcars'),sGet(STOR+'rres'), ]); if(insp)setInspData(insp);if(sh)setSchedDataH(sh);if(ss)setSchedDataS(ss); if(mh)setMemoDataH(mh);if(ms)setMemoDataS(ms); if(lh)setLoanerResH(lh);if(ls)setLoanerResS(ls); if(Array.isArray(cdh))setClosedDaysH(cdh);if(Array.isArray(cds))setClosedDaysS(cds); if(Array.isArray(cdate))setClosedDates(cdate);if(Array.isArray(ov))setOverrideOpen(ov); if(Array.isArray(rcars)&&rcars.length>0)setRentalCars(rcars); if(rres)setRentalResData(rres); setGasOk(true); }catch{setGasOk(false);} setLoading(false); },[]); useEffect(()=>{ if(!user)return; fetchAll(); const timer=setInterval(fetchAll,15000); return ()=>clearInterval(timer); },[user]); if(!user)return <LoginScreen onLogin={u=>{setUser(u);setFadeIn(true);}}/>; const TABS=[{id:'cal',label:'カレンダー',icon:'📅'},{id:'sched',label:'スケジュール',icon:'⏰'},{id:'loaner',label:'代車',icon:'🚙'}]; return( <div style={{height:'100%',display:'flex',flexDirection:'column',position:'relative'}}> {fadeIn&&<div style={{position:'absolute',inset:0,background:'white',zIndex:999, animation:'loginFadeIn 2.5s ease forwards',pointerEvents:'none'}} onAnimationEnd={()=>setFadeIn(false)}/>} <div style={{flexShrink:0,background:'linear-gradient(135deg,#1e1b4b,#1d4ed8)',paddingTop:'env(safe-area-inset-top,0px)'}}> <div style={{padding:'7px 12px',display:'flex',alignItems:'center',gap:6}}> <span style={{color:'white',fontSize:12,fontWeight:900,letterSpacing:'.5px'}}>🚗 Hub</span> <div style={{width:6,height:6,borderRadius:'50%',background:gasOk===true?'#4ade80':gasOk===false?'#f87171':'#fbbf24',marginLeft:2}}/> <div style={{marginLeft:'auto',display:'flex',gap:6}}> <button onClick={fetchAll} disabled={loading} style={{padding:'3px 10px',background:'rgba(255,255,255,.15)',border:'none',borderRadius:6,color:'white',fontSize:10,fontWeight:700,cursor:'pointer'}}> {loading?'⏳':'🔄'} </button> <button onClick={()=>setUser(null)} style={{padding:'3px 8px',background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,color:'rgba(255,255,255,.7)',fontSize:10,cursor:'pointer'}}> ↩ </button> </div> </div> <div style={{display:'flex',alignItems:'flex-end',gap:2,padding:'0 8px',background:'linear-gradient(180deg,#1e1b4b,#1e293b)'}}> {TABS.map(t=>{ const isActive=tab===t.id; return( <div key={t.id} onClick={()=>setTab(t.id)} style={{background:isActive?'white':'rgba(255,255,255,.12)', borderRadius:'10px 10px 0 0', padding:isActive?'8px 10px':'6px 8px', display:'flex',flexDirection:'column',alignItems:'center',gap:2, minWidth:isActive?58:54,cursor:'pointer', boxShadow:isActive?'0 -3px 10px rgba(0,0,0,.2)':'none', marginTop:isActive?0:4,transition:'all .15s'}}> <div style={{fontSize:isActive?16:13,opacity:isActive?1:.8}}>{t.icon}</div> <div style={{fontSize:isActive?7.5:7,fontWeight:isActive?800:400, color:isActive?'#1d4ed8':'rgba(255,255,255,.65)',letterSpacing:'.3px'}}> {t.label} </div> </div> ); })} </div> </div> <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0}}> {tab==='sched'&&<ScheduleView inspData={inspData} schedDataH={schedDataH} schedDataS={schedDataS} memoDataH={memoDataH} memoDataS={memoDataS} loanerResH={loanerResH} loanerResS={loanerResS} vsId={vsId} initDate={schedInitDate}/>} {tab==='cal'&&<CalendarView inspData={inspData} closedDays={cDays} closedDates={closedDates} overrideOpen={overrideOpen} vsId={vsId} onSelectDate={(dk,y,m,d)=>setDayDetail({dk,y,m,d})}/>} {tab==='loaner'&&<LoanerView loanerResH={loanerResH} loanerResS={loanerResS} rentalResData={rentalResData} rentalCars={rentalCars} vsId={vsId}/>} </div> {dayDetail&&<DayDetailModal {...dayDetail} inspData={inspData} schedDataH={schedDataH} schedDataS={schedDataS} memoDataH={memoDataH} memoDataS={memoDataS} vsId={vsId} onClose={()=>setDayDetail(null)} onGoSchedule={(y,m,d)=>{setSchedInitDate({y,m,d});setTab('sched');setDayDetail(null);}}/>} </div> ); }; ReactDOM.createRoot(document.getElementById('root')).render(<App/>); </script> </body> </html>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+<title>Hub a Nice Day</title>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.9/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body,#root{height:100%;width:100%;}
+@keyframes loginFadeIn{0%{opacity:1}100%{opacity:0}}
+@keyframes sheetUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Yu Gothic",sans-serif;background:#f1f5f9;color:#1e293b;overflow:hidden;}
+::-webkit-scrollbar{width:3px;height:3px;}::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px;}
+button{cursor:pointer;font-family:inherit;}
+input,select,textarea{font-family:inherit;font-size:16px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
+const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
+const GAS_API_KEY='hub2026SandaHonten!9xKy';
+const STOR='hub-v8-dev-';
+const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
+const COURSES=[
+  {id:1,name:'マッハ車検',  short:'マ',color:'#b91c1c',bg:'#fca5a5'},
+  {id:2,name:'クイック車検',short:'ク',color:'#1d4ed8',bg:'#bfdbfe'},
+  {id:3,name:'レギュラー',  short:'レ',color:'#d97706',bg:'#fde68a'},
+];
+// PC版（index_dev.html）と同一の選択肢定義
+const WORKS=[
+  {id:'Q',name:'クイック整備・修理'},{id:'⑫',name:'12ヶ月点検'},{id:'M12',name:'メンパ12'},
+  {id:'M6',name:'メンパ6ヶ月点検'},{id:'N1',name:'新車1ヶ月点検'},{id:'N6',name:'新車6ヶ月点検'},
+  {id:'B',name:'鈑金塗装'},{id:'商',name:'商談'},{id:'保',name:'保険'},{id:'試',name:'試乗'},{id:'納',name:'納車'},{id:'他',name:'その他'}
+];
+const SHIMIS=[{id:'',name:'なし'},{id:'指',name:'指示書'},{id:'見',name:'見積'},{id:'両',name:'両方'}];
+const TOKUENS=[{id:'①',name:'1ヶ月前予約'},{id:'②',name:'2ヶ月前予約'},{id:'-',name:'なし'}];
+const HOLIDAYS_2026=new Set(['2026-1-1','2026-1-12','2026-2-11','2026-2-23','2026-3-20','2026-4-29','2026-5-3','2026-5-4','2026-5-5','2026-7-20','2026-8-11','2026-9-21','2026-9-22','2026-9-23','2026-10-12','2026-11-3','2026-11-23','2026-12-23']);
+const isHoliday=(y,m,d)=>HOLIDAYS_2026.has(`${y}-${m+1}-${d}`);
+const DOW=['日','月','火','水','木','金','土'];
+const TIME_SLOTS=(()=>{const s=[];for(let h=9;h<=18;h++)for(let m=0;m<60;m+=30)s.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);return s;})();
+const TIME_VALS=Array.from({length:19},(_,i)=>{const h=Math.floor(i/2)+9,m=i%2===0?'00':'30';return`${String(h).padStart(2,'0')}:${m}`;});
+const DEFAULT_STAFF=[
+  {uid:'h1',name:'見取大介',    myNumber:1, store:'honten'},
+  {uid:'h2',name:'岡上秀一',    myNumber:2, store:'honten'},
+  {uid:'h3',name:'竹林直行',    myNumber:3, store:'honten'},
+  {uid:'h4',name:'幸田かつのり',myNumber:4, store:'honten'},
+  {uid:'h5',name:'魚住圭',      myNumber:5, store:'honten'},
+  {uid:'h6',name:'舟田祥子',    myNumber:6, store:'honten'},
+  {uid:'h7',name:'江川京志',    myNumber:7, store:'honten'},
+  {uid:'h8',name:'ダク',        myNumber:8, store:'honten'},
+  {uid:'h9',name:'カビン',      myNumber:9, store:'honten'},
+  {uid:'s10',name:'藤原昭人',   myNumber:10,store:'sanda'},
+  {uid:'s11',name:'中井啓介',   myNumber:11,store:'sanda'},
+  {uid:'s12',name:'宮原てるま', myNumber:12,store:'sanda'},
+  {uid:'s13',name:'芦田',       myNumber:13,store:'sanda'},
+  {uid:'s14',name:'長谷川',     myNumber:14,store:'sanda'},
+  {uid:'s15',name:'石井',       myNumber:15,store:'sanda'},
+  {uid:'s16',name:'両澤ちよう', myNumber:16,store:'sanda'},
+  {uid:'s17',name:'野呂遥奈',   myNumber:17,store:'sanda'},
+  {uid:'s18',name:'河合',       myNumber:18,store:'sanda'},
+];
+// 静的代車リストは動的マスタ（{store}-cars）が読めない時のフォールバック専用。
+// 本番の実代車とは別物なので、ここから車名を逆引きしないこと。
+const LOANERS_H=[
+  {id:1,name:'ワゴンR',  num:'1234',store:'honten'},{id:2,name:'ムーヴ',  num:'5678',store:'honten'},
+  {id:3,name:'N-BOX',    num:'9012',store:'honten'},{id:4,name:'タント',  num:'3456',store:'honten'},
+  {id:5,name:'スペーシア',num:'0001',store:'honten'},{id:6,name:'アルト', num:'0002',store:'honten'},
+];
+const LOANERS_S=[
+  {id:7, name:'スペーシア',num:'7890',store:'sanda'},{id:8, name:'アルト',   num:'2468',store:'sanda'},
+  {id:9, name:'ミライース',num:'1357',store:'sanda'},{id:10,name:'デイズ',   num:'8024',store:'sanda'},
+  {id:11,name:'ワゴンR',  num:'0003',store:'sanda'},{id:12,name:'N-BOX',    num:'0004',store:'sanda'},
+];
+const DEFAULT_RENTAL_CARS=[
+  {id:'r1',name:'レンタカーA',num:'R001'},{id:'r2',name:'レンタカーB',num:'R002'},
+  {id:'r3',name:'レンタカーC',num:'R003'},{id:'r4',name:'レンタカーD',num:'R004'},
+  {id:'r5',name:'レンタカーE',num:'R005'},{id:'r6',name:'レンタカーF',num:'R006'},
+];
+const RES_COLORS=['#fca5a5','#86efac','#93c5fd','#fde68a','#c4b5fd','#f9a8d4'];
+const toNum=(y,m,d)=>y*10000+(m+1)*100+d;
+const normStore=s=>{if(!s)return'';if(s==='honten'||s==='本店')return'honten';if(s==='sanda'||s==='三田店')return'sanda';return s;};
+const getSecondTuesday=(y,m)=>{let c=0;for(let d=1;d<=31;d++){const dt=new Date(y,m,d);if(dt.getMonth()!==m)break;if(dt.getDay()===2){c++;if(c===2)return d;}}return null;};
+const calIsClosed=(date,cDays=[],cDates=[],ovOpen=[],vsId='honten')=>{
+  if(!date||isNaN(date))return false;
+  if(cDays.includes(date.getDay()))return true;
+  const ds=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  if(cDates.includes(ds))return true;
+  if(vsId==='sanda'){
+    const d2=getSecondTuesday(date.getFullYear(),date.getMonth());
+    if(d2===date.getDate()&&!ovOpen.includes(`${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`))return true;
+  }
+  return false;
+};
+
+// ══ データ層（PC版 index_dev.html と互換の読み書きプロトコル）══
+const sGet=async k=>{
+  try{
+    const r=await fetch(`${GAS_URL}?key=${encodeURIComponent(k)}&apiKey=${encodeURIComponent(GAS_API_KEY)}`,{cache:'no-store'});
+    const t=await r.text();
+    if(!t||t==='null'||t.startsWith('error')||t==='unauthorized')return null;
+    try{return JSON.parse(t);}catch{return null;}
+  }catch{return null;}
+};
+const sSet=async(k,v)=>{
+  const body=JSON.stringify({key:k,value:JSON.stringify(v),apiKey:GAS_API_KEY});
+  try{
+    await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body});
+  }catch{
+    await new Promise(r=>setTimeout(r,1500));
+    try{await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body});}catch{}
+  }
+};
+const isPlainObj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
+
+// ══ 予約データのコアロジック（PC版と同一。挙動を変えないこと）══
+const blankInsp=()=>({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional'});
+const recomputeInspApproval=(rows,limit)=>{
+  const lim=(limit!=null)?limit:6;
+  const out=rows.map(r=>(r?{...r}:r));
+  const active=out
+    .map((r,i)=>({r,i}))
+    .filter(x=>x.r&&x.r.name&&x.r.course&&x.r.bookingStatus!=='cancelled');
+  active.sort((a,b)=>{
+    const sa=(a.r.seq!=null)?a.r.seq:a.i;
+    const sb=(b.r.seq!=null)?b.r.seq:b.i;
+    return sa-sb;
+  });
+  let conf=0,reg=0;
+  for(const {r} of active){
+    const isReg=Number(r.course)===3;
+    const eligible=(conf<lim)&&(!isReg||reg<3);
+    if(eligible){
+      delete r.pendingApproval;
+      delete r.approved;
+      conf++;if(isReg)reg++;
+    }else if(r.approved){
+      delete r.pendingApproval;
+      conf++;if(isReg)reg++;
+    }else{
+      r.pendingApproval=true;
+    }
+  }
+  return out;
+};
+const makeSlotKey=(base,sub)=>sub===0?base:`${base}__${sub}`;
+const getBaseSlot=k=>String(k).split('__')[0];
+const lockKeyOf=(type,dk,idx,slot)=>type==='insp'?`lock-insp-${dk}-${idx}`:`lock-sched-${dk}-${slot}`;
+const LOCK_TTL=30*1000;
+// 代車ラベル解決（PC版と同じ優先順位: bookingKey一致 → 日付範囲×氏名一致。
+// 予約レコード自身の carName/carNum を最優先し、動的リスト→静的の順にフォールバック）
+const getLoanerLabel=(loanerRes,dk,rowName,bookingKey,carsList)=>{
+  if(!dk)return'';
+  const carLabel=(r,cid)=>{
+    if(r.carName)return `${r.carName}${r.carNum?` (${r.carNum})`:''}`;
+    const car=(carsList||[]).find(c=>String(c.id)===String(cid));
+    return car?`${car.name} (${car.num})`:'代車';
+  };
+  if(bookingKey){
+    for(const cid of Object.keys(loanerRes||{})){
+      for(const r of Object.values(loanerRes[cid]||{})){
+        if(r&&r.bookingKey===bookingKey)return carLabel(r,cid);
+      }
+    }
+  }
+  if(!rowName)return'';
+  const parts=dk.split('-').map(Number);
+  const dateNum=toNum(parts[0],parts[1]-1,parts[2]);
+  for(const cid of Object.keys(loanerRes||{})){
+    for(const r of Object.values(loanerRes[cid]||{})){
+      if(r&&dateNum>=toNum(r.fy,r.fm,r.fd)&&dateNum<=toNum(r.ty,r.tm,r.td)&&r.user===rowName)return carLabel(r,cid);
+    }
+  }
+  return'';
+};
+// 期間の重なり判定（fy/fm/fd〜ty/tm/td、fm/tmは0始まり月）
+const rangesOverlap=(r,fromN,toN)=>{
+  const s=toNum(r.fy,r.fm,r.fd),e=toNum(r.ty,r.tm,r.td);
+  return !(toN<s||fromN>e);
+};
+
+const LoginScreen=({onLogin})=>{
+  const [code,setCode]=useState('');
+  const [err,setErr]=useState('');
+  const [success,setSuccess]=useState(null);
+  const [staffList,setStaffList]=useState(DEFAULT_STAFF);
+  const [staffLoading,setStaffLoading]=useState(true);
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const [h,s]=await Promise.all([sGet(STOR+'honten-staff-v2'),sGet(STOR+'sanda-staff-v2')]);
+        const all=[...(h||[]).map(st=>({...st,store:'honten'})),...(s||[]).map(st=>({...st,store:'sanda'}))].filter(st=>st.name&&st.myNumber!=null);
+        if(all.length>0)setStaffList(all);
+      }catch(e){}
+      setStaffLoading(false);
+    })();
+  },[]);
+  const doLogin=()=>{
+    const n=parseInt(code,10);
+    const s=staffList.find(s=>s.myNumber===n);
+    if(!s){setErr('コードが正しくありません');setCode('');return;}
+    setErr('');
+    setSuccess(s);
+    setTimeout(()=>onLogin(s),8000);
+  };
+  if(success){
+    const storeColor=success.store==='honten'?'#1d4ed8':'#dc2626';
+    const storeName=success.store==='honten'?'本店':'三田店';
+    return(
+      <div style={{height:'100%',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:'white',position:'relative',overflow:'hidden'}}>
+        <div style={{position:'absolute',top:0,left:0,right:0,height:4,background:`linear-gradient(90deg,${storeColor},#6d28d9)`}}/>
+        <div style={{position:'absolute',inset:0,background:storeColor,opacity:0,animation:'flash .4s ease .4s forwards',pointerEvents:'none',zIndex:0}}/>
+        <div style={{position:'relative',marginBottom:24,display:'flex',alignItems:'center',justifyContent:'center'}}>
+          <div style={{position:'absolute',width:80,height:80,borderRadius:'50%',background:storeColor,opacity:0,animation:'rippleOut .8s ease .4s forwards'}}/>
+          <div style={{width:80,height:80,borderRadius:'50%',background:'white',border:`3px solid ${storeColor}`,display:'flex',alignItems:'center',justifyContent:'center',position:'relative',zIndex:1,animation:'pop .8s cubic-bezier(0.34,1.56,0.64,1) .2s both, haloSettle 3.5s ease 1.5s both','--hc':storeColor}}>
+            <svg width="38" height="38" viewBox="0 0 38 38" fill="none" style={{overflow:'visible'}}>
+              <polyline points="8,20 16,28 30,11" stroke={storeColor} strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" fill="none" style={{strokeDasharray:38,strokeDashoffset:38,animation:'draw .7s ease .9s forwards'}}/>
+            </svg>
+          </div>
+        </div>
+        <div style={{color:'#0f172a',fontSize:28,fontWeight:900,letterSpacing:1,marginBottom:6,animation:'fadeUp .8s ease 3.5s both'}}>{success.name}</div>
+        <div style={{display:'inline-flex',alignItems:'center',gap:6,padding:'5px 18px',borderRadius:20,background:`${storeColor}14`,border:`1.5px solid ${storeColor}`,marginBottom:32,animation:'fadeUp .8s ease 3.8s both'}}>
+          <div style={{width:7,height:7,borderRadius:'50%',background:storeColor}}/>
+          <span style={{color:storeColor,fontSize:13,fontWeight:800}}>{storeName}</span>
+        </div>
+        <div style={{color:'#94a3b8',fontSize:11,letterSpacing:2,animation:'fadeUp .8s ease 4.0s both'}}> AUTHENTICATED </div>
+        <div style={{position:'absolute',inset:0,background:'white',opacity:0,animation:'whiteFadeOut 2.5s ease 5.2s forwards',pointerEvents:'none',zIndex:10}}/>
+        <style dangerouslySetInnerHTML={{__html:`
+          @keyframes pop{0%{transform:scale(0) rotate(-6deg);opacity:0}60%{transform:scale(1.1)}100%{transform:scale(1) rotate(0deg);opacity:1}}
+          @keyframes draw{from{stroke-dashoffset:38}to{stroke-dashoffset:0}}
+          @keyframes rippleOut{0%{transform:scale(1);opacity:.5}100%{transform:scale(3.5);opacity:0}}
+          @keyframes flash{0%{opacity:0;filter:blur(12px)}20%{opacity:.25;filter:blur(6px)}100%{opacity:0;filter:blur(0px)}}
+          @keyframes haloSettle{0%{box-shadow:0 0px 0px rgba(0,0,0,0)}25%{box-shadow:0 0 44px 16px var(--hc,#1d4ed8)}60%{box-shadow:0 0 30px 10px var(--hc,#1d4ed8)}100%{box-shadow:0 0 18px 5px var(--hc,#1d4ed8)}}
+          @keyframes fadeUp{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+          @keyframes whiteFadeOut{0%{opacity:0}40%{opacity:0}100%{opacity:1}}
+        `}}/>
+      </div>
+    );
+  }
+  return(
+    <div style={{height:'100%',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:24,background:'linear-gradient(160deg,#1e1b4b,#3730a3 60%,#6d28d9)'}}>
+      <div style={{marginBottom:32,textAlign:'center'}}>
+        <div style={{fontSize:48,marginBottom:10}}>🚗</div>
+        <div style={{color:'white',fontSize:22,fontWeight:900,letterSpacing:1}}>Hub a Nice Day</div>
+        <div style={{color:'rgba(255,255,255,.4)',fontSize:11,marginTop:4,letterSpacing:2}}>STAFF ACCESS</div>
+      </div>
+      <div style={{width:'100%',maxWidth:300,background:'rgba(255,255,255,.07)',borderRadius:20,padding:28,border:'1px solid rgba(255,255,255,.15)',backdropFilter:'blur(10px)'}}>
+        <div style={{fontSize:11,fontWeight:700,color:'rgba(255,255,255,.5)',marginBottom:14,textAlign:'center',letterSpacing:2}}> LOGIN CODE </div>
+        {staffLoading&&<div style={{textAlign:'center',color:'rgba(255,255,255,.4)',fontSize:10,marginBottom:8}}>⏳ 読込中...</div>}
+        <input type="tel" inputMode="numeric" pattern="[0-9]*" value={code}
+          onChange={e=>setCode(e.target.value.replace(/[^0-9]/g,''))}
+          onKeyDown={e=>e.key==='Enter'&&doLogin()}
+          placeholder="" autoFocus
+          style={{width:'100%',padding:'16px 0',fontSize:32,border:'none',borderBottom:`2px solid ${err?'#ef4444':'rgba(255,255,255,.3)'}`,outline:'none',textAlign:'center',fontWeight:800,letterSpacing:10,background:'transparent',color:'white',caretColor:'white',WebkitAppearance:'none',MozAppearance:'textfield'}}/>
+        {err&&<div style={{color:'#f87171',fontSize:11,marginTop:8,textAlign:'center',letterSpacing:1}}>{err}</div>}
+        <button onClick={doLogin}
+          style={{width:'100%',marginTop:24,padding:'14px 0',background:'linear-gradient(135deg,#4338ca,#6d28d9)',color:'white',border:'none',borderRadius:12,fontSize:14,fontWeight:800,letterSpacing:2,boxShadow:'0 4px 20px rgba(99,102,241,.4)'}}> SIGN IN </button>
+      </div>
+    </div>
+  );
+};
+
+const CalendarView=({inspData,closedDays,closedDates,overrideOpen,vsId,onSelectDate})=>{
+  const today=new Date();
+  const [cur,setCur]=useState(new Date(today.getFullYear(),today.getMonth(),1));
+  const cy=cur.getFullYear(),cm=cur.getMonth();
+  const dim=new Date(cy,cm+1,0).getDate();
+  const fdow=new Date(cy,cm,1).getDay();
+  const dayCnt=useMemo(()=>{
+    const res={};
+    for(let d=1;d<=dim;d++){
+      const dk=`${cy}-${cm+1}-${d}`;
+      const rows=(inspData[dk]||[]).filter(r=>r&&r.name&&!r.pendingApproval&&r.bookingStatus!=='cancelled');
+      if(rows.length)res[d]={total:rows.length,courses:rows.reduce((a,r)=>{if(r.course)a[r.course]=(a[r.course]||0)+1;return a;},{})};
+    }
+    return res;
+  },[inspData,cy,cm]);
+  const weeks=[];let wk=Array(7).fill(null);
+  for(let d=1;d<=dim;d++){const dow=(fdow+d-1)%7;wk[dow]=d;if(dow===6||d===dim){weeks.push([...wk]);wk=Array(7).fill(null);}}
+  return(
+    <div style={{flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
+      <div style={{padding:'10px 14px',background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #1d4ed8',display:'flex',alignItems:'center',gap:8}}
+        onTouchStart={e=>{e.currentTarget._sx=e.touches[0].clientX;e.currentTarget._sy=e.touches[0].clientY;}}
+        onTouchEnd={e=>{
+          const dx=e.changedTouches[0].clientX-(e.currentTarget._sx||0);
+          const dy=e.changedTouches[0].clientY-(e.currentTarget._sy||0);
+          e.currentTarget._sx=null;
+          if(Math.abs(dx)<30||Math.abs(dy)>Math.abs(dx))return;
+          setCur(new Date(cy,cm+(dx<0?1:-1),1));
+        }}>
+        <button onClick={()=>setCur(new Date(cy,cm-1,1))} style={{width:36,height:36,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button>
+        <div style={{flex:1,textAlign:'center'}}>
+          <div style={{fontWeight:900,fontSize:18}}>{cy}年 {cm+1}月</div>
+          <div style={{fontSize:10,color:'#94a3b8'}}>← スワイプで月移動 / タップで詳細 →</div>
+        </div>
+        <button onClick={()=>setCur(new Date(cy,cm+1,1))} style={{width:36,height:36,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button>
+      </div>
+      <div style={{padding:'8px 8px 16px'}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,marginBottom:4}}>
+          {DOW.map((d,i)=><div key={d} style={{textAlign:'center',fontSize:11,fontWeight:700,color:i===0?'#ef4444':i===6?'#3b82f6':'#64748b',padding:'4px 0'}}>{d}</div>)}
+        </div>
+        {weeks.map((wk,wi)=>(
+          <div key={wi} style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:2,marginBottom:2}}>
+            {wk.map((d,di)=>{
+              if(!d)return <div key={di}/>;
+              const date=new Date(cy,cm,d);
+              const closed=calIsClosed(date,closedDays,closedDates,overrideOpen,vsId);
+              const isToday=d===today.getDate()&&cm===today.getMonth()&&cy===today.getFullYear();
+              const isSun=di===0,isSat=di===6,isHol=isHoliday(cy,cm,d);
+              const info=dayCnt[d];
+              return(
+                <div key={di} onClick={()=>!closed&&onSelectDate(`${cy}-${cm+1}-${d}`,cy,cm,d)}
+                  style={{borderRadius:10,background:closed?'#f8fafc':isToday?'#dbeafe':'white',border:isToday?'2px solid #3b82f6':'2px solid #f1f5f9',minHeight:58,padding:'5px 3px',cursor:closed?'default':'pointer',opacity:closed?0.4:1,boxShadow:info&&!closed?'0 2px 6px rgba(0,0,0,.08)':'none'}}>
+                  <div style={{textAlign:'center',fontWeight:800,fontSize:14,color:isToday?'#1e40af':closed?'#94a3b8':isSun||isHol?'#ef4444':isSat?'#3b82f6':'#1e293b'}}>{d}</div>
+                  {info&&!closed&&(
+                    <div style={{marginTop:2}}>
+                      <div style={{textAlign:'center',fontSize:9,fontWeight:800,color:isToday?'#1e40af':'#374151',marginBottom:1}}>{info.total}台</div>
+                      <div style={{display:'flex',gap:1,justifyContent:'center',flexWrap:'wrap'}}>
+                        {Object.entries(info.courses).map(([cid,cnt])=>{const c=COURSES.find(co=>co.id===Number(cid));return c?<span key={cid} style={{fontSize:8,fontWeight:700,padding:'0 3px',borderRadius:3,background:c.bg,color:c.color}}>{c.short}{cnt}</span>:null;})}
+                      </div>
+                    </div>
+                  )}
+                  {closed&&<div style={{textAlign:'center',fontSize:8,color:'#94a3b8',marginTop:2}}>休</div>}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        <div style={{marginTop:10,padding:'10px 12px',background:'white',borderRadius:12,border:'1px solid #f1f5f9',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+          {COURSES.map(c=><span key={c.id} style={{display:'flex',alignItems:'center',gap:3,fontSize:11}}><span style={{width:12,height:12,borderRadius:2,background:c.bg,display:'inline-block'}}/><span style={{color:c.color,fontWeight:700}}>{c.name}</span></span>)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DayDetailModal=({dk,y,m,d,inspData,schedDataH,schedDataS,memoDataH,memoDataS,vsId,onClose,onGoSchedule})=>{
+  const sc=vsId==='honten'?'#1d4ed8':'#dc2626';
+  const irows=(inspData[dk]||[]).filter(r=>r&&r.name&&!r.pendingApproval&&r.bookingStatus!=='cancelled');
+  const sorted=[...irows.filter(r=>normStore(r.store)===vsId),...irows.filter(r=>!normStore(r.store)),...irows.filter(r=>normStore(r.store)&&normStore(r.store)!==vsId)];
+  const sd=vsId==='honten'?schedDataH:schedDataS;
+  const sched=Object.entries(sd[dk]||{}).filter(([,r])=>r&&r.name).sort(([a],[b])=>a.localeCompare(b));
+  const memos=((vsId==='honten'?memoDataH:memoDataS)[dk]||[]);
+  const dow=new Date(y,m,d).getDay();
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:200,display:'flex',flexDirection:'column',justifyContent:'flex-end'}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:'20px 20px 0 0',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 -8px 40px rgba(0,0,0,.25)'}}>
+        <div style={{padding:'14px 18px 10px',borderBottom:'1px solid #f1f5f9',display:'flex',alignItems:'center',gap:8}}>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:900,fontSize:18,color:dow===0?'#ef4444':dow===6?'#3b82f6':'#1e293b'}}>{m+1}月{d}日（{DOW[dow]}）</div>
+            <div style={{fontSize:11,color:'#94a3b8',marginTop:1}}>車検 {irows.length}台 / 整備 {sched.length}件</div>
+          </div>
+          <button onClick={()=>onGoSchedule(y,m,d)} style={{padding:'6px 12px',borderRadius:8,background:sc,border:'none',color:'white',fontSize:11,fontWeight:800,flexShrink:0}}> ✎ 予約・編集 </button>
+          <button onClick={onClose} style={{width:32,height:32,borderRadius:'50%',background:'#f1f5f9',border:'none',fontSize:16,color:'#64748b',flexShrink:0}}>✕</button>
+        </div>
+        <div style={{overflowY:'auto',WebkitOverflowScrolling:'touch',flex:1,padding:'12px 16px'}}>
+          {sorted.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontWeight:800,fontSize:12,color:'#3730a3',marginBottom:8}}>🚗 車検</div>
+              {sorted.map((r,i)=>{
+                const c=COURSES.find(co=>co.id===Number(r.course));
+                const isOther=normStore(r.store)&&normStore(r.store)!==vsId;
+                return(
+                  <div key={i} style={{padding:'9px 11px',marginBottom:5,borderRadius:10,background:isOther?'#f8fafc':'white',border:`1.5px solid ${isOther?'#e2e8f0':sc+'33'}`,borderLeft:`4px solid ${isOther?'#94a3b8':sc}`,opacity:isOther?0.75:1}}>
+                    <div style={{display:'flex',alignItems:'center',gap:6}}>
+                      <span style={{fontWeight:800,fontSize:14}}>{r.name}</span>
+                      {c&&<span style={{padding:'2px 7px',borderRadius:10,background:c.bg,color:c.color,fontSize:10,fontWeight:700}}>{c.name}</span>}
+                      {isOther&&<span style={{fontSize:10,color:'#94a3b8',marginLeft:'auto'}}>{normStore(r.store)==='honten'?'本店':'三田店'}</span>}
+                    </div>
+                    <div style={{marginTop:3,fontSize:11,color:'#64748b',display:'flex',gap:6,flexWrap:'wrap'}}>
+                      {r.carType&&<span>{r.carType}</span>}{r.tokuten&&r.tokuten!=='-'&&<span style={{color:'#7c3aed'}}>特典{r.tokuten}</span>}{r.staff&&<span>{r.staff}</span>}
+                    </div>
+                    {r.note&&<div style={{marginTop:3,fontSize:11,background:'#f8fafc',borderRadius:6,padding:'3px 7px',color:'#374151'}}>{r.note}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {sched.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontWeight:800,fontSize:12,color:'#0e7490',marginBottom:8}}>⏰ タイムスケジュール</div>
+              {sched.map(([key,r],i)=>{
+                const w=WORKS.find(x=>x.id===r.work);
+                return(
+                  <div key={i} style={{display:'flex',gap:8,padding:'7px 10px',marginBottom:4,background:'white',borderRadius:10,border:'1.5px solid #e0f2fe',borderLeft:'4px solid #0e7490'}}>
+                    <span style={{fontWeight:700,fontSize:11,color:'#0e7490',width:40,flexShrink:0}}>{getBaseSlot(key)}</span>
+                    <div>
+                      <span style={{fontWeight:700,fontSize:13}}>{r.name}</span>
+                      {r.carType&&<span style={{fontSize:11,color:'#64748b',marginLeft:5}}>{r.carType}</span>}
+                      {(w||r.workType)&&<span style={{marginLeft:5,padding:'1px 5px',background:'#ccfbf1',color:'#0f766e',borderRadius:6,fontSize:10,fontWeight:700}}>{w?w.name:r.workType}</span>}
+                      {r.content&&<div style={{fontSize:11,color:'#64748b',marginTop:1}}>{r.content}</div>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {memos.length>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontWeight:800,fontSize:12,color:'#7c3aed',marginBottom:8}}>📝 備考・メモ</div>
+              {memos.map((m,i)=><div key={i} style={{padding:'8px 10px',marginBottom:4,background:'#faf5ff',borderRadius:10,border:'1px solid #e9d5ff',fontSize:12}}>{m.content||m.text||''}</div>)}
+            </div>
+          )}
+          {sorted.length===0&&sched.length===0&&<div style={{textAlign:'center',color:'#94a3b8',padding:32,fontSize:13}}>この日の予約はありません</div>}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ══ 予約入力モーダル（新規/編集/削除 + 代車・レンタカー紐付け）══
+const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,loanerRes,rentalRes,lockedBy,onSave,onDelete,onClose})=>{
+  const isInsp=mode.type==='insp';
+  const sc=isInsp?'#3730a3':'#0e7490';
+  const [form,setForm]=useState(()=>({
+    ...(isInsp?blankInsp():{name:'',staff:'',carType:'',work:'',loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,shimi:'',content:''}),
+    staff:currentUser?.name||'',
+    ...(initial||{}),
+  }));
+  const [saving,setSaving]=useState(false);
+  const [err,setErr]=useState('');
+  const dkParts=mode.dk.split('-').map(Number);
+  const defDate=`${dkParts[0]}-${String(dkParts[1]).padStart(2,'0')}-${String(dkParts[2]).padStart(2,'0')}`;
+  // 代車選択: 'keep'=変更なし / 'none'=なし / 'loaner' / 'rental'
+  const [carKind,setCarKind]=useState('keep');
+  const [carSel,setCarSel]=useState('');
+  const [carFrom,setCarFrom]=useState(defDate);
+  const [carTo,setCarTo]=useState(defDate);
+  const bk=isInsp?`insp-${mode.dk}-${mode.idx}`:`sched-${mode.dk}-${mode.slot}`;
+  const currentLoanerLbl=getLoanerLabel(loanerRes,mode.dk,initial?.name,initial?.bookingKey||bk,loanerCars);
+  const currentBinding=currentLoanerLbl?`🚗 ${currentLoanerLbl}`:(initial?.rentalLabel||initial?.loaner||'');
+  const parseD=s=>{const [y,m,d]=String(s).split('-').map(Number);return{y,m0:m-1,d};};
+  const availabilityOf=(kind,carId)=>{
+    const from=parseD(carFrom),to=parseD(carTo);
+    const fromN=toNum(from.y,from.m0,from.d),toN=toNum(to.y,to.m0,to.d);
+    const res=kind==='loaner'?loanerRes:rentalRes;
+    for(const r of Object.values(res?.[carId]||{})){
+      if(r&&r.bookingKey!==bk&&rangesOverlap(r,fromN,toN))return r.user||'使用中';
+    }
+    return null;
+  };
+  const doSave=async()=>{
+    if(!form.name){setErr('氏名を入力してください');return;}
+    if(!form.carType){setErr('車種を入力してください');return;}
+    if(isInsp){
+      if(!Number(form.course)){setErr('コースを選択してください');return;}
+      if(!form.time){setErr('入庫時間を選択してください');return;}
+    }else{
+      if(!form.work){setErr('作業内容を選択してください');return;}
+    }
+    let loanerAction=null;
+    if(carKind==='none')loanerAction={kind:'none'};
+    if(carKind==='loaner'||carKind==='rental'){
+      if(!carSel){setErr(carKind==='loaner'?'代車を選択してください':'レンタカーを選択してください');return;}
+      const from=parseD(carFrom),to=parseD(carTo);
+      if(toNum(from.y,from.m0,from.d)>toNum(to.y,to.m0,to.d)){setErr('代車の期間（開始日と返却日）が逆です');return;}
+      const busy=availabilityOf(carKind,carSel);
+      if(busy){setErr(`その期間は使用中です（${busy}）`);return;}
+      loanerAction={kind:carKind,carId:carSel,from,to};
+    }
+    setErr('');setSaving(true);
+    try{await onSave(form,loanerAction);}
+    catch(e){setErr('保存に失敗しました: '+(e?.message||e));setSaving(false);return;}
+  };
+  const doDelete=async()=>{
+    if(!window.confirm(`「${initial?.name||'この予約'}」を削除しますか？\n（紐付いた代車予約も削除されます）`))return;
+    setSaving(true);
+    try{await onDelete();}
+    catch(e){setErr('削除に失敗しました: '+(e?.message||e));setSaving(false);}
+  };
+  const LBL={fontSize:11,fontWeight:800,color:'#475569',display:'block',marginBottom:4};
+  const INP={width:'100%',padding:'10px 12px',border:'2px solid #e2e8f0',borderRadius:10,outline:'none',background:'white'};
+  const staffNames=[...new Set([...(staffList||[]).map(s=>s.name),currentUser?.name].filter(Boolean))];
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:300,display:'flex',flexDirection:'column',justifyContent:'flex-end'}} onClick={saving?undefined:onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:'20px 20px 0 0',maxHeight:'92vh',display:'flex',flexDirection:'column',boxShadow:'0 -8px 40px rgba(0,0,0,.25)',animation:'sheetUp .22s ease'}}>
+        <div style={{padding:'13px 18px 10px',borderBottom:`3px solid ${sc}`,display:'flex',alignItems:'center',gap:8}}>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:900,fontSize:16,color:sc}}>{isInsp?'🚗 車検':'⏰ 整備'}{mode.isNew?'の新規予約':'の編集'}</div>
+            <div style={{fontSize:11,color:'#94a3b8'}}>{dkParts[1]}月{dkParts[2]}日{!isInsp&&mode.slot?` ${getBaseSlot(mode.slot)}〜`:''}（{vsId==='honten'?'本店':'三田店'}）</div>
+          </div>
+          <button onClick={onClose} disabled={saving} style={{width:32,height:32,borderRadius:'50%',background:'#f1f5f9',border:'none',fontSize:16,color:'#64748b'}}>✕</button>
+        </div>
+        {lockedBy&&<div style={{margin:'10px 16px 0',padding:'8px 12px',background:'#fff7ed',border:'1.5px solid #fed7aa',borderRadius:10,fontSize:12,color:'#92400e',fontWeight:700}}>🔒 {lockedBy}さんが編集中の可能性があります。保存は慎重に。</div>}
+        <div style={{overflowY:'auto',WebkitOverflowScrolling:'touch',flex:1,padding:'12px 16px 4px',display:'flex',flexDirection:'column',gap:12}}>
+          <div>
+            <label style={LBL}>氏名 *</label>
+            <input value={form.name||''} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="お客様名" style={INP}/>
+          </div>
+          <div style={{display:'flex',gap:10}}>
+            <div style={{flex:1}}>
+              <label style={LBL}>車種 *</label>
+              <input value={form.carType||''} onChange={e=>setForm(p=>({...p,carType:e.target.value}))} placeholder="例：プリウス" style={INP}/>
+            </div>
+            <div style={{flex:1}}>
+              <label style={LBL}>担当</label>
+              <select value={form.staff||''} onChange={e=>setForm(p=>({...p,staff:e.target.value}))} style={INP}>
+                <option value="">（なし）</option>
+                {staffNames.map(n=><option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>
+          </div>
+          {isInsp?(
+            <React.Fragment>
+              <div>
+                <label style={LBL}>コース *</label>
+                <div style={{display:'flex',gap:6}}>
+                  {COURSES.map(c=>(
+                    <button key={c.id} onClick={()=>setForm(p=>({...p,course:c.id}))}
+                      style={{flex:1,padding:'10px 4px',borderRadius:10,fontWeight:800,fontSize:12,border:`2px solid ${Number(form.course)===c.id?c.color:'#e2e8f0'}`,background:Number(form.course)===c.id?c.bg:'white',color:Number(form.course)===c.id?c.color:'#64748b'}}>
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:'flex',gap:10}}>
+                <div style={{flex:1}}>
+                  <label style={LBL}>入庫時間 *</label>
+                  <select value={form.time||''} onChange={e=>setForm(p=>({...p,time:e.target.value}))} style={INP}>
+                    <option value="">選択</option>
+                    {TIME_VALS.map(t=><option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div style={{flex:1}}>
+                  <label style={LBL}>特典</label>
+                  <div style={{display:'flex',gap:5}}>
+                    {TOKUENS.map(t=>(
+                      <button key={t.id} onClick={()=>setForm(p=>({...p,tokuten:t.id}))} title={t.name}
+                        style={{flex:1,padding:'10px 2px',borderRadius:10,fontWeight:800,fontSize:12,border:`2px solid ${form.tokuten===t.id?'#7c3aed':'#e2e8f0'}`,background:form.tokuten===t.id?'#ede9fe':'white',color:form.tokuten===t.id?'#7c3aed':'#64748b'}}>
+                        {t.id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label style={LBL}>備考</label>
+                <textarea value={form.note||''} onChange={e=>setForm(p=>({...p,note:e.target.value}))} rows={2} style={{...INP,resize:'none'}}/>
+              </div>
+            </React.Fragment>
+          ):(
+            <React.Fragment>
+              <div style={{display:'flex',gap:10}}>
+                <div style={{flex:1.4}}>
+                  <label style={LBL}>作業内容 *</label>
+                  <select value={form.work||''} onChange={e=>setForm(p=>({...p,work:e.target.value}))} style={INP}>
+                    <option value="">選択</option>
+                    {WORKS.map(w=><option key={w.id} value={w.id}>{w.id} {w.name}</option>)}
+                  </select>
+                </div>
+                <div style={{flex:1}}>
+                  <label style={LBL}>指・見</label>
+                  <select value={form.shimi||''} onChange={e=>setForm(p=>({...p,shimi:e.target.value}))} style={INP}>
+                    {SHIMIS.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={LBL}>内容</label>
+                <textarea value={form.content||''} onChange={e=>setForm(p=>({...p,content:e.target.value}))} rows={2} style={{...INP,resize:'none'}}/>
+              </div>
+            </React.Fragment>
+          )}
+          <div style={{border:'2px solid #e0f2fe',borderRadius:12,padding:'10px 12px',background:'#f8fdff'}}>
+            <div style={{fontSize:12,fontWeight:800,color:'#0369a1',marginBottom:6}}>🔑 代車・レンタカー</div>
+            {currentBinding&&carKind==='keep'&&<div style={{fontSize:12,color:'#0c4a6e',marginBottom:6,fontWeight:700}}>現在: {currentBinding}</div>}
+            <div style={{display:'flex',gap:5,marginBottom:8}}>
+              {[['keep','変更なし'],['none','なし'],['loaner','代車'],['rental','レンタカー']].map(([k,label])=>(
+                <button key={k} onClick={()=>{setCarKind(k);setCarSel('');}}
+                  style={{flex:1,padding:'8px 2px',borderRadius:8,fontWeight:700,fontSize:11,border:`2px solid ${carKind===k?'#0284c7':'#e2e8f0'}`,background:carKind===k?'#e0f2fe':'white',color:carKind===k?'#0369a1':'#64748b'}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {(carKind==='loaner'||carKind==='rental')&&(
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                <div style={{display:'flex',gap:8}}>
+                  <div style={{flex:1}}>
+                    <label style={LBL}>貸出日</label>
+                    <input type="date" value={carFrom} onChange={e=>setCarFrom(e.target.value)} style={{...INP,padding:'8px 10px'}}/>
+                  </div>
+                  <div style={{flex:1}}>
+                    <label style={LBL}>返却日</label>
+                    <input type="date" value={carTo} onChange={e=>setCarTo(e.target.value)} style={{...INP,padding:'8px 10px'}}/>
+                  </div>
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:4}}>
+                  {(carKind==='loaner'?loanerCars:rentalCars).map(car=>{
+                    const busy=availabilityOf(carKind,car.id);
+                    const sel=String(carSel)===String(car.id);
+                    return(
+                      <button key={car.id} disabled={!!busy} onClick={()=>setCarSel(car.id)}
+                        style={{display:'flex',alignItems:'center',gap:8,padding:'9px 11px',borderRadius:10,textAlign:'left',border:`2px solid ${sel?'#0284c7':busy?'#f1f5f9':'#e2e8f0'}`,background:sel?'#e0f2fe':busy?'#f8fafc':'white',opacity:busy?0.55:1}}>
+                        <span style={{fontWeight:800,fontSize:13,color:sel?'#0369a1':'#1e293b',flex:1}}>{car.name}<span style={{fontSize:11,color:'#94a3b8',marginLeft:6}}>{car.num}</span></span>
+                        {busy?<span style={{fontSize:10,color:'#dc2626',fontWeight:700}}>使用中: {busy}</span>:sel?<span style={{fontSize:12,color:'#0284c7',fontWeight:900}}>✓</span>:<span style={{fontSize:10,color:'#16a34a',fontWeight:700}}>空き</span>}
+                      </button>
+                    );
+                  })}
+                  {(carKind==='loaner'?loanerCars:rentalCars).length===0&&<div style={{fontSize:11,color:'#94a3b8'}}>車両リストが読み込めていません</div>}
+                </div>
+              </div>
+            )}
+          </div>
+          {err&&<div style={{padding:'9px 12px',background:'#fef2f2',border:'1.5px solid #fca5a5',borderRadius:10,color:'#dc2626',fontSize:12,fontWeight:700}}>⚠ {err}</div>}
+        </div>
+        <div style={{padding:'10px 16px calc(14px + env(safe-area-inset-bottom,0px))',borderTop:'1px solid #f1f5f9',display:'flex',gap:8}}>
+          {!mode.isNew&&onDelete&&(
+            <button onClick={doDelete} disabled={saving} style={{padding:'13px 14px',borderRadius:12,border:'2px solid #fca5a5',background:'white',color:'#dc2626',fontWeight:800,fontSize:13}}>🗑 削除</button>
+          )}
+          <button onClick={doSave} disabled={saving}
+            style={{flex:1,padding:'13px 0',borderRadius:12,border:'none',background:saving?'#94a3b8':sc,color:'white',fontWeight:900,fontSize:14,letterSpacing:1}}>
+            {saving?'⏳ 保存中...':'✅ 予約確定'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerResH,loanerResS,loanerCarsH,loanerCarsS,vsId,initDate,onOpenEdit})=>{
+  const today=new Date();
+  const [ds,setDs]=useState({y:today.getFullYear(),m:today.getMonth(),d:today.getDate()});
+  useEffect(()=>{if(initDate)setDs(initDate);},[initDate]);
+  const {y,m,d}=ds;
+  const dk=`${y}-${m+1}-${d}`;
+  const sc=vsId==='honten'?'#1d4ed8':'#dc2626';
+  const moveDate=dir=>{const dt=new Date(y,m,d+dir);setDs({y:dt.getFullYear(),m:dt.getMonth(),d:dt.getDate()});};
+  const isToday_=y===today.getFullYear()&&m===today.getMonth()&&d===today.getDate();
+  const dow=new Date(y,m,d).getDay();
+  // 元配列のindexを保持したまま表示用に絞り込む（編集・代車紐付けにindexが必須）
+  const allRows=(inspData[dk]||[]);
+  const irows=allRows.map((r,idx)=>({r,idx})).filter(({r})=>r&&r.name&&r.bookingStatus!=='cancelled');
+  const own=irows.filter(({r})=>!normStore(r.store)||normStore(r.store)===vsId);
+  const other=irows.filter(({r})=>normStore(r.store)&&normStore(r.store)!==vsId);
+  const sorted=[...own,...other];
+  const sd=vsId==='honten'?schedDataH:schedDataS;
+  const memos=((vsId==='honten'?memoDataH:memoDataS)[dk]||[]);
+  const myLoanerRes=vsId==='honten'?loanerResH:loanerResS;
+  const myCars=vsId==='honten'?loanerCarsH:loanerCarsS;
+  const newInspIdx=(()=>{let i=0;while(i<allRows.length&&allRows[i]&&allRows[i].name)i++;return i;})();
+  return(
+    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div style={{flexShrink:0,background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #1d4ed8',padding:'10px 14px'}}
+        onTouchStart={e=>{e.currentTarget._sx=e.touches[0].clientX;e.currentTarget._sy=e.touches[0].clientY;}}
+        onTouchEnd={e=>{
+          const dx=e.changedTouches[0].clientX-(e.currentTarget._sx||0);
+          const dy=e.changedTouches[0].clientY-(e.currentTarget._sy||0);
+          e.currentTarget._sx=null;
+          if(Math.abs(dx)<30||Math.abs(dy)>Math.abs(dx))return;
+          moveDate(dx<0?1:-1);
+        }}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <button onClick={()=>moveDate(-1)} style={{width:38,height:38,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:20,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button>
+          <div style={{flex:1,textAlign:'center'}}>
+            <div style={{fontWeight:900,fontSize:18,color:dow===0?'#ef4444':dow===6?'#3b82f6':'#1e293b'}}>{m+1}月{d}日（{DOW[dow]}）</div>
+            <div style={{fontSize:10,color:'#94a3b8'}}>↕ スワイプで日付移動 / カードをタップで編集</div>
+          </div>
+          <button onClick={()=>moveDate(1)} style={{width:38,height:38,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:20,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button>
+        </div>
+        {!isToday_&&<button onClick={()=>setDs({y:today.getFullYear(),m:today.getMonth(),d:today.getDate()})} style={{width:'100%',marginTop:6,padding:'5px 0',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:11,color:'#64748b',fontWeight:600}}>今日に戻る</button>}
+      </div>
+      <div style={{flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
+        <div style={{margin:'10px 12px 0'}}>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+            <span style={{fontWeight:900,fontSize:13,color:'#3730a3'}}>🚗 車検</span>
+            <span style={{background:'#e0e7ff',color:'#3730a3',borderRadius:10,padding:'1px 8px',fontSize:11,fontWeight:700}}>{own.filter(({r})=>!r.pendingApproval).length}台</span>
+            <button onClick={()=>onOpenEdit({type:'insp',dk,idx:newInspIdx,isNew:true})}
+              style={{marginLeft:'auto',padding:'5px 12px',borderRadius:8,border:'none',background:'#3730a3',color:'white',fontSize:11,fontWeight:800}}>＋ 追加</button>
+          </div>
+          {sorted.length===0?<div style={{background:'white',borderRadius:12,padding:14,textAlign:'center',color:'#94a3b8',fontSize:12,border:'1px solid #f1f5f9'}}>予約なし</div>:
+            sorted.map(({r,idx},i)=>{
+              const c=COURSES.find(co=>co.id===Number(r.course));
+              const isOther=normStore(r.store)&&normStore(r.store)!==vsId;
+              const loaner=getLoanerLabel(myLoanerRes,dk,r.name,r.bookingKey||`insp-${dk}-${idx}`,myCars);
+              return(
+                <div key={idx} onClick={()=>!isOther&&onOpenEdit({type:'insp',dk,idx,isNew:false})}
+                  style={{background:'white',borderRadius:12,padding:'10px 12px',marginBottom:5,borderLeft:`4px solid ${isOther?'#94a3b8':r.pendingApproval?'#f59e0b':sc}`,boxShadow:'0 1px 4px rgba(0,0,0,.06)',opacity:isOther?0.72:1,cursor:isOther?'default':'pointer'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                    <span style={{fontWeight:900,fontSize:14,color:isOther?'#64748b':sc}}>{i+1}.</span>
+                    <span style={{fontWeight:800,fontSize:15,flex:1}}>{r.name}</span>
+                    {r.pendingApproval&&<span style={{padding:'2px 7px',borderRadius:10,background:'#fef3c7',color:'#b45309',fontSize:10,fontWeight:800}}>⏳ 承認待ち</span>}
+                    {c&&<span style={{padding:'2px 8px',borderRadius:10,background:c.bg,color:c.color,fontSize:10,fontWeight:700}}>{c.name}</span>}
+                    {isOther&&<span style={{fontSize:10,color:'#94a3b8',padding:'1px 5px',background:'#f1f5f9',borderRadius:6}}>{normStore(r.store)==='honten'?'本店':'三田店'}</span>}
+                    {!isOther&&<span style={{fontSize:13,color:'#cbd5e1'}}>›</span>}
+                  </div>
+                  <div style={{marginTop:3,fontSize:11,color:'#64748b',display:'flex',gap:7,flexWrap:'wrap'}}>
+                    {r.time&&<span>⏰ {r.time}</span>}{r.carType&&<span>🚗 {r.carType}</span>}{loaner&&<span style={{color:'#0284c7'}}>🔑 {loaner}</span>}{!loaner&&r.rentalLabel&&<span style={{color:'#7c3aed'}}>{r.rentalLabel}</span>}{r.tokuten&&r.tokuten!=='-'&&<span style={{color:'#7c3aed'}}>🎁 {r.tokuten}</span>}{r.staff&&<span>👤 {r.staff}</span>}
+                  </div>
+                  {r.note&&<div style={{marginTop:4,fontSize:11,color:'#374151',background:'#f8fafc',borderRadius:7,padding:'3px 7px'}}>{r.note}</div>}
+                </div>
+              );
+            })}
+        </div>
+        <div style={{margin:'12px 12px 0'}}>
+          <div style={{fontWeight:900,fontSize:13,color:'#0e7490',marginBottom:6}}>⏰ タイムスケジュール <span style={{fontSize:10,fontWeight:600,color:'#94a3b8'}}>空き枠タップで追加</span></div>
+          <div style={{background:'white',borderRadius:12,overflow:'hidden',border:'1px solid #e0f2fe'}}>
+            {TIME_SLOTS.map(slot=>{
+              const day=sd[dk]||{};
+              const subKeys=[slot,...Object.keys(day).filter(k=>k.startsWith(slot+'__'))];
+              const dks=subKeys.filter(k=>{const r=day[k];return r&&r.name;});
+              const isEmpty=dks.length===0;
+              return(
+                <div key={slot} style={{display:'flex',borderBottom:'1px solid #f0fdfa',background:isEmpty?'white':'#f0fdfa'}}>
+                  <div style={{width:44,flexShrink:0,padding:'8px 4px',fontSize:11,fontWeight:700,color:isEmpty?'#cbd5e1':'#0e7490',textAlign:'center',borderRight:`2px solid ${isEmpty?'#f0f9ff':'#99f6e4'}`}}>{slot}</div>
+                  <div style={{flex:1,padding:'5px 9px'}}>
+                    {dks.map((key,ki)=>{
+                      const r=day[key];
+                      const w=WORKS.find(x=>x.id===r.work);
+                      const loanerTxt=r.loaner||r.rentalLabel||'';
+                      return(
+                        <div key={ki} onClick={()=>onOpenEdit({type:'sched',dk,slot:key,isNew:false})}
+                          style={{marginBottom:4,cursor:'pointer'}}>
+                          <span style={{fontWeight:800,fontSize:13}}>{r.name}</span>
+                          {r.carType&&<span style={{fontSize:11,color:'#64748b',marginLeft:5}}>{r.carType}</span>}
+                          {(w||r.workType)&&<span style={{marginLeft:5,padding:'1px 5px',background:'#ccfbf1',color:'#0f766e',borderRadius:6,fontSize:10,fontWeight:700}}>{w?w.name:r.workType}</span>}
+                          {loanerTxt&&<span style={{marginLeft:5,fontSize:10,color:'#0284c7'}}>🔑{loanerTxt}</span>}
+                          <span style={{fontSize:12,color:'#cbd5e1',marginLeft:4}}>›</span>
+                          {r.content&&<div style={{fontSize:11,color:'#64748b',marginTop:1}}>{r.content}</div>}
+                        </div>
+                      );
+                    })}
+                    <div onClick={()=>{
+                        const free=subKeys.find(k=>!day[k]||!day[k].name)||makeSlotKey(slot,subKeys.length);
+                        onOpenEdit({type:'sched',dk,slot:free,isNew:true});
+                      }}
+                      style={{color:isEmpty?'#cbd5e1':'#67e8f9',fontSize:11,cursor:'pointer',padding:'2px 0'}}>
+                      {isEmpty?'＋ タップで追加':'＋ 同時刻に追加'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{margin:'12px 12px 20px'}}>
+          <div style={{fontWeight:900,fontSize:13,color:'#7c3aed',marginBottom:6}}>📝 備考・メモ</div>
+          {memos.length===0?<div style={{background:'white',borderRadius:12,padding:12,textAlign:'center',color:'#94a3b8',fontSize:12,border:'1px solid #f1f5f9'}}>なし</div>:
+            memos.map((m,i)=><div key={i} style={{background:'#faf5ff',borderRadius:10,padding:'8px 11px',marginBottom:4,border:'1px solid #e9d5ff',fontSize:12,color:'#374151'}}>{m.content||m.text||''}</div>)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const LOANER_SECTION_COLORS={honten:'#1d4ed8',sanda:'#dc2626',rental:'#7c3aed'};
+const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,loanerCarsS,vsId})=>{
+  const today=new Date();
+  const [lm,setLm]=useState(new Date(today.getFullYear(),today.getMonth(),1));
+  const ly=lm.getFullYear(),lmo=lm.getMonth();
+  const dim=new Date(ly,lmo+1,0).getDate();
+  const sc=vsId==='honten'?'#1d4ed8':'#dc2626';
+  const myLoaners=vsId==='honten'?loanerCarsH:loanerCarsS;
+  const myLoanerRes=vsId==='honten'?loanerResH:loanerResS;
+  const rentals=Array.isArray(rentalCars)&&rentalCars.length>0?rentalCars:DEFAULT_RENTAL_CARS;
+  const rentalRes=rentalResData||{};
+  const toNumL=(y,m,d)=>y*10000+m*100+d;
+  const dates=useMemo(()=>Array.from({length:dim},(_,i)=>{
+    const dt=new Date(ly,lmo,i+1);
+    return{d:i+1,dow:dt.getDay(),num:toNumL(ly,lmo,i+1)};
+  }),[ly,lmo,dim]);
+  // lres/rres は {carId: {key: 予約}} のオブジェクト構造（配列ではない）
+  const getRes=(res,cid,num)=>Object.values(res[cid]||{}).find(r=>{
+    const s=toNumL(r.fy,r.fm,r.fd);
+    const e=toNumL(r.ty,r.tm,r.td);
+    return num>=s&&num<=e;
+  });
+  const LCAR_COLORS=['#fca5a5','#86efac','#93c5fd','#fde68a','#c4b5fd','#f9a8d4','#6ee7b7','#fbbf24'];
+  const RCAR_COLORS=['#d8b4fe','#a5b4fc','#6ee7b7','#fde68a','#fca5a5','#93c5fd'];
+  const renderGrid=(cars,res,sectionColor,label)=>(
+    <div style={{marginBottom:0}}>
+      <div style={{background:sectionColor,padding:'5px 10px',display:'flex',alignItems:'center',gap:6}}>
+        <span style={{color:'white',fontWeight:800,fontSize:11}}>{label}</span>
+        <span style={{color:'rgba(255,255,255,.7)',fontSize:10}}>{cars.length}台</span>
+      </div>
+      {cars.map((car,ci)=>(
+        <div key={car.id} style={{display:'flex',borderBottom:'1px solid #f1f5f9'}}>
+          <div style={{width:80,minWidth:80,padding:'6px 7px',background:'#f8fafc',borderRight:'2px solid #e5e7eb',display:'flex',flexDirection:'column',justifyContent:'center',position:'sticky',left:0,zIndex:2}}>
+            <div style={{fontWeight:700,fontSize:10,color:'#1e293b',lineHeight:1.3}}>{car.name}</div>
+            <div style={{fontSize:9,color:'#94a3b8'}}>{car.num}</div>
+          </div>
+          {dates.map(({d,num})=>{
+            const r=getRes(res,car.id,num);
+            const colors=label.includes('レンタカー')?RCAR_COLORS:LCAR_COLORS;
+            const color=r?colors[ci%colors.length]:'white';
+            const isTd=ly===today.getFullYear()&&lmo===today.getMonth()&&d===today.getDate();
+            const isStart=r&&r.fd===d&&r.fm===lmo;
+            return(
+              <div key={d} style={{width:32,minWidth:32,height:36,background:color,borderRight:'1px solid #f1f5f9',borderLeft:isTd?`2px solid ${sc}`:'none',position:'relative',overflow:'hidden'}}>
+                {isStart&&r&&(
+                  <div style={{position:'absolute',left:1,top:'50%',transform:'translateY(-50%)',fontSize:7,fontWeight:800,color:'white',textShadow:'0 1px 2px rgba(0,0,0,.7)',whiteSpace:'nowrap',overflow:'hidden',maxWidth:28,lineHeight:1}}>
+                    {(r.user||'').slice(0,4)}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+  return(
+    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div style={{flexShrink:0,background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #7c3aed',padding:'10px 14px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <button onClick={()=>setLm(new Date(ly,lmo-1,1))} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button>
+          <div style={{flex:1,textAlign:'center'}}>
+            <div style={{fontWeight:900,fontSize:17}}>{ly}年 {lmo+1}月</div>
+            <div style={{fontSize:9,color:'#94a3b8'}}>← スワイプで月移動 / 横スクロール可</div>
+          </div>
+          <button onClick={()=>setLm(new Date(ly,lmo+1,1))} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button>
+        </div>
+      </div>
+      <div style={{flex:1,overflow:'auto',WebkitOverflowScrolling:'touch'}}>
+        <div style={{minWidth:`${82+dim*32}px`}}>
+          <div style={{display:'flex',position:'sticky',top:0,zIndex:10,background:'white',borderBottom:'2px solid #e5e7eb'}}>
+            <div style={{width:80,minWidth:80,padding:'6px 7px',fontWeight:700,fontSize:9,color:'#64748b',background:'#f8fafc',borderRight:'2px solid #e5e7eb',position:'sticky',left:0,zIndex:3}}>代車 / レンタ</div>
+            {dates.map(({d,dow})=>{
+              const isTd=ly===today.getFullYear()&&lmo===today.getMonth()&&d===today.getDate();
+              const isHol=isHoliday(ly,lmo,d);
+              return(
+                <div key={d} style={{width:32,minWidth:32,textAlign:'center',padding:'3px 1px',background:isTd?'#dbeafe':'white',borderRight:'1px solid #f1f5f9'}}>
+                  <div style={{fontSize:8,color:isTd?'#1e40af':dow===0||isHol?'#ef4444':dow===6?'#3b82f6':'#94a3b8',fontWeight:600}}>{DOW[dow]}</div>
+                  <div style={{fontSize:11,fontWeight:isTd?800:500,color:isTd?'#1e40af':dow===0||isHol?'#ef4444':dow===6?'#3b82f6':'#1e293b'}}>{d}</div>
+                </div>
+              );
+            })}
+          </div>
+          {renderGrid(myLoaners,myLoanerRes,vsId==='honten'?'#1d4ed8':'#dc2626',vsId==='honten'?'本店 代車':'三田店 代車')}
+          <div style={{height:3,background:'#e5e7eb'}}/>
+          {renderGrid(rentals,rentalRes,'#7c3aed','レンタカー（共通）')}
+        </div>
+        <div style={{padding:'10px 12px 20px',display:'flex',gap:10,flexWrap:'wrap',alignItems:'center',minWidth:`${82+dim*32}px`}}>
+          <span style={{display:'flex',alignItems:'center',gap:3,fontSize:10}}><span style={{width:12,height:12,background:'#fca5a5',borderRadius:2,display:'inline-block'}}/>使用中</span>
+          <span style={{display:'flex',alignItems:'center',gap:3,fontSize:10}}><span style={{width:12,height:12,background:'white',border:'1px solid #e2e8f0',borderRadius:2,display:'inline-block'}}/>空き</span>
+          <span style={{fontSize:10,color:'#94a3b8'}}>開始日に名前が表示されます</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const App=()=>{
+  const [user,setUser]=useState(null);
+  const [fadeIn,setFadeIn]=useState(false);
+  const [tab,setTab]=useState('cal');
+  const [loading,setLoading]=useState(false);
+  const [gasOk,setGasOk]=useState(null);
+  const [dayDetail,setDayDetail]=useState(null);
+  const [schedInitDate,setSchedInitDate]=useState(null);
+  const [inspData,setInspData]=useState({});
+  const [schedDataH,setSchedDataH]=useState({});
+  const [schedDataS,setSchedDataS]=useState({});
+  const [memoDataH,setMemoDataH]=useState({});
+  const [memoDataS,setMemoDataS]=useState({});
+  const [loanerResH,setLoanerResH]=useState({});
+  const [rentalCars,setRentalCars]=useState([]);
+  const [rentalResData,setRentalResData]=useState({});
+  const [loanerResS,setLoanerResS]=useState({});
+  const [closedDaysH,setClosedDaysH]=useState([]);
+  const [closedDaysS,setClosedDaysS]=useState([3]);
+  const [closedDates,setClosedDates]=useState([]);
+  const [overrideOpen,setOverrideOpen]=useState([]);
+  const [loanerCarsH,setLoanerCarsH]=useState(LOANERS_H);
+  const [loanerCarsS,setLoanerCarsS]=useState(LOANERS_S);
+  const [inspLimits,setInspLimits]=useState({});
+  const [editMode,setEditMode]=useState(null); // {type,dk,idx?,slot?,isNew,initial,lockedBy}
+  const writeGuardRef=useRef(0);   // 書き込み後70秒はポーリング反映を止める（PC版useSharedと同じ考え方）
+  const lockHeartbeatRef=useRef(null);
+  const curLockKeyRef=useRef(null);
+  const vsId=user?.store||'honten';
+  const cDays=vsId==='honten'?closedDaysH:closedDaysS;
+  const fetchAll=useCallback(async(force)=>{
+    if(!force&&writeGuardRef.current>0)return; // 保存直後の古いスナップショットで上書きしない
+    setLoading(true);
+    try{
+      const [insp,sh,ss,mh,ms,lh,ls,cdh,cds,cdate,ov,rcars,rres,carsH,carsS,limits]=await Promise.all([
+        sGet(STOR+'insp'),sGet(storKey('sched','honten')),sGet(storKey('sched','sanda')),
+        sGet(storKey('memo','honten')),sGet(storKey('memo','sanda')),
+        sGet(storKey('lres','honten')),sGet(storKey('lres','sanda')),
+        sGet(storKey('cdow','honten')),sGet(storKey('cdow-v2','sanda')),
+        sGet(storKey('cdate','honten')),sGet(storKey('overrideOpen','honten')),
+        sGet(STOR+'rentalcars'),sGet(STOR+'rres'),
+        sGet(storKey('cars','honten')),sGet(storKey('cars','sanda')),
+        sGet(STOR+'inspLimits'),
+      ]);
+      if(writeGuardRef.current>0&&!force){setLoading(false);return;} // 取得中に保存が始まった場合も反映しない
+      if(isPlainObj(insp))setInspData(insp);
+      if(isPlainObj(sh))setSchedDataH(sh);
+      if(isPlainObj(ss))setSchedDataS(ss);
+      if(isPlainObj(mh))setMemoDataH(mh);
+      if(isPlainObj(ms))setMemoDataS(ms);
+      if(isPlainObj(lh))setLoanerResH(lh);
+      if(isPlainObj(ls))setLoanerResS(ls);
+      if(Array.isArray(cdh))setClosedDaysH(cdh);
+      if(Array.isArray(cds))setClosedDaysS(cds);
+      if(Array.isArray(cdate))setClosedDates(cdate);
+      if(Array.isArray(ov))setOverrideOpen(ov);
+      if(Array.isArray(rcars)&&rcars.length>0)setRentalCars(rcars);
+      if(isPlainObj(rres))setRentalResData(rres);
+      if(Array.isArray(carsH)&&carsH.length>0)setLoanerCarsH(carsH);
+      if(Array.isArray(carsS)&&carsS.length>0)setLoanerCarsS(carsS);
+      if(isPlainObj(limits))setInspLimits(limits);
+      setGasOk(true);
+    }catch{setGasOk(false);}
+    setLoading(false);
+  },[]);
+  useEffect(()=>{
+    if(!user)return;
+    fetchAll(true);
+    const timer=setInterval(()=>fetchAll(false),15000);
+    return ()=>clearInterval(timer);
+  },[user]);
+
+  // ── 書き込みレイヤ ──
+  // 保存はサーバーの最新値を読み直してから差分適用（read-modify-write）。
+  // GAS側はdoPost毎にキャッシュを無効化するので、直前のsGetで十分新しい値が取れる。
+  const guardWrite=()=>{
+    writeGuardRef.current++;
+    setTimeout(()=>{writeGuardRef.current=Math.max(0,writeGuardRef.current-1);},70000);
+  };
+  const writeShared=async(key,fallbackLocal,mutator,applyLocal)=>{
+    guardWrite();
+    let base=await sGet(key);
+    if(!isPlainObj(base))base=isPlainObj(fallbackLocal)?fallbackLocal:{};
+    const next=mutator(base);
+    applyLocal(next);
+    await sSet(key,next);
+    return next;
+  };
+
+  // ── 編集ロック（PC版と同じ locksキー・TTL30秒。モーダル表示中は20秒毎に延長）──
+  const acquireLock=async(key,userName)=>{
+    const locks=await sGet(STOR+'locks');
+    const cur=isPlainObj(locks)?locks:{};
+    const lk=cur[key];
+    let lockedBy=null;
+    if(lk&&Date.now()-lk.lockedAt<LOCK_TTL&&lk.lockedBy!==userName)lockedBy=lk.lockedBy;
+    sSet(STOR+'locks',{...cur,[key]:{lockedBy:userName,lockedAt:Date.now()}});
+    curLockKeyRef.current=key;
+    if(lockHeartbeatRef.current)clearInterval(lockHeartbeatRef.current);
+    lockHeartbeatRef.current=setInterval(async()=>{
+      const l=await sGet(STOR+'locks');
+      const c=isPlainObj(l)?l:{};
+      sSet(STOR+'locks',{...c,[key]:{lockedBy:userName,lockedAt:Date.now()}});
+    },20000);
+    return lockedBy;
+  };
+  const releaseLock=async()=>{
+    const key=curLockKeyRef.current;
+    curLockKeyRef.current=null;
+    if(lockHeartbeatRef.current){clearInterval(lockHeartbeatRef.current);lockHeartbeatRef.current=null;}
+    if(!key)return;
+    const l=await sGet(STOR+'locks');
+    if(isPlainObj(l)&&l[key]){const c={...l};delete c[key];sSet(STOR+'locks',c);}
+  };
+  useEffect(()=>()=>{if(lockHeartbeatRef.current)clearInterval(lockHeartbeatRef.current);},[]);
+
+  const openEdit=useCallback(async(req)=>{
+    // req: {type:'insp'|'sched', dk, idx?, slot?, isNew}
+    const key=req.type==='insp'?lockKeyOf('insp',req.dk,req.idx):lockKeyOf('sched',req.dk,null,req.slot);
+    const lockedBy=await acquireLock(key,user?.name||'モバイル');
+    let initial;
+    if(req.type==='insp'){
+      initial=req.isNew?{}:{...((inspData[req.dk]||[])[req.idx]||{})};
+    }else{
+      const sd=vsId==='honten'?schedDataH:schedDataS;
+      initial=req.isNew?{}:{...((sd[req.dk]||{})[req.slot]||{})};
+    }
+    setEditMode({...req,initial,lockedBy});
+  },[user,inspData,schedDataH,schedDataS,vsId]);
+
+  const closeEdit=useCallback(()=>{
+    setEditMode(null);
+    releaseLock();
+  },[]);
+
+  // 代車/レンタカーの紐付け反映。entryへのラベル書き込みと lres/rres の予約更新を行い、
+  // 更新後のentryを返す（PC版 handleSaveModal の pendingLoanerData / pendingRental 処理と同じ結果になる）
+  const applyLoanerAction=async(entry,action,bkFinal,userName)=>{
+    if(!action)return entry; // 変更なし
+    const lresKey=storKey('lres',vsId);
+    const myLres=vsId==='honten'?loanerResH:loanerResS;
+    const setMyLres=vsId==='honten'?setLoanerResH:setLoanerResS;
+    const cleanOwn=res=>{
+      const out={};
+      for(const cid of Object.keys(res||{})){
+        const days={...(res[cid]||{})};
+        Object.keys(days).forEach(k=>{if(days[k]?.bookingKey===bkFinal)delete days[k];});
+        out[cid]=days;
+      }
+      return out;
+    };
+    const colorOf=name=>RES_COLORS[[...String(name||'')].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length];
+    if(action.kind==='none'){
+      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres);
+      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData);
+      return {...entry,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null};
+    }
+    if(action.kind==='loaner'){
+      const cars=vsId==='honten'?loanerCarsH:loanerCarsS;
+      const car=cars.find(c=>String(c.id)===String(action.carId));
+      const rec={
+        id:Date.now(),
+        fy:action.from.y,fm:action.from.m0,fd:action.from.d,
+        ty:action.to.y,tm:action.to.m0,td:action.to.d,
+        user:userName,color:colorOf(userName),bookingKey:bkFinal,
+        carName:car?.name,carNum:car?.num,
+      };
+      await writeShared(lresKey,myLres,base=>{
+        const cleaned=cleanOwn(base);
+        const days={...(cleaned[action.carId]||{})};
+        // PC版は開始日をキーにする。別予約と衝突する場合はサフィックスを付けて上書きを防ぐ
+        let k=String(action.from.d);
+        if(days[k])k=`${action.from.d}_${rec.id}`;
+        days[k]=rec;
+        return{...cleaned,[action.carId]:days};
+      },setMyLres);
+      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData);
+      return {...entry,loaner:car?`${car.name} (${car.num})`:'',loanerId:action.carId,rentalLabel:'',rentalCarId:null};
+    }
+    if(action.kind==='rental'){
+      const rcar=(rentalCars.length?rentalCars:DEFAULT_RENTAL_CARS).find(c=>String(c.id)===String(action.carId));
+      const rec={
+        id:Date.now(),
+        fy:action.from.y,fm:action.from.m0,fd:action.from.d,
+        ty:action.to.y,tm:action.to.m0,td:action.to.d,
+        user:userName,color:colorOf(userName),bookingKey:bkFinal,
+      };
+      await writeShared(STOR+'rres',rentalResData,base=>{
+        const cleaned=cleanOwn(base);
+        const days={...(cleaned[action.carId]||{})};
+        days[String(rec.id)]=rec; // PC版addRentalResと同じくidをキーにする
+        return{...cleaned,[action.carId]:days};
+      },setRentalResData);
+      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres);
+      return {...entry,loaner:'',loanerId:null,rentalLabel:`🔑 ${rcar?rcar.name:'レンタカー'}${rcar?.num?` (${rcar.num})`:''}`,rentalCarId:action.carId};
+    }
+    return entry;
+  };
+
+  const handleSave=useCallback(async(form,loanerAction)=>{
+    const req=editMode;
+    if(!req)return;
+    const userName=form.name||user?.name||'';
+    if(req.type==='insp'){
+      const bkFinal=`insp-${req.dk}-${req.idx}`;
+      const entry=await applyLoanerAction({...form},loanerAction,bkFinal,userName);
+      let placedPending=false;
+      await writeShared(STOR+'insp',inspData,base=>{
+        const rows=((base[req.dk]||[]).map(r=>r||blankInsp()));
+        while(rows.length<=req.idx)rows.push(blankInsp());
+        const prevRow=rows[req.idx];
+        // PC版と同じseq規則: アクティブ予約の編集はseq維持、新規/キャンセル枠への予約は新seq
+        const editingActive=!!(prevRow&&prevRow.name&&prevRow.bookingStatus!=='cancelled');
+        const seq=editingActive?(prevRow.seq!=null?prevRow.seq:Date.now()):Date.now();
+        rows[req.idx]={...entry,store:normStore(prevRow?.store)||vsId,seq,bookingStatus:'confirmed'};
+        const dayLimit=inspLimits[req.dk]??6;
+        const wasPending=editingActive&&!!prevRow.pendingApproval;
+        const recomputed=recomputeInspApproval(rows,dayLimit);
+        placedPending=!!(recomputed[req.idx]&&recomputed[req.idx].pendingApproval&&!wasPending);
+        return{...base,[req.dk]:recomputed};
+      },setInspData);
+      if(placedPending)alert('⚠️ 1日の上限を超えたため、本店承認が必要です（通常6台／レギュラー車検3台）。この予約は承認待ちになります。');
+    }else{
+      const sdKey=storKey('sched',vsId);
+      const sd=vsId==='honten'?schedDataH:schedDataS;
+      const setSd=vsId==='honten'?setSchedDataH:setSchedDataS;
+      // 新規はサーバーの最新値で空きサブ枠を確定してから代車bookingKeyを発行する
+      let slotFinal=req.slot;
+      if(req.isNew){
+        const fresh=await sGet(sdKey);
+        const day=(isPlainObj(fresh)?fresh:sd)[req.dk]||{};
+        const baseSlot=getBaseSlot(req.slot);
+        let sub=0,k=baseSlot;
+        while(day[k]&&day[k].name){sub++;k=makeSlotKey(baseSlot,sub);}
+        slotFinal=k;
+      }
+      const bkFinal=`sched-${req.dk}-${slotFinal}`;
+      const entry=await applyLoanerAction({...form},loanerAction,bkFinal,userName);
+      await writeShared(sdKey,sd,base=>{
+        const day={...(base[req.dk]||{})};
+        if(req.isNew&&day[slotFinal]&&day[slotFinal].name){
+          // 直前に他端末で埋まった場合はさらに次の空きへ（代車のbkとずれるがデータは壊さない。表示は氏名フォールバックで追従）
+          const baseSlot=getBaseSlot(slotFinal);
+          let sub=0,k=baseSlot;
+          while(day[k]&&day[k].name){sub++;k=makeSlotKey(baseSlot,sub);}
+          slotFinal=k;
+        }
+        day[slotFinal]={...entry,id:Date.now()};
+        return{...base,[req.dk]:day};
+      },setSd);
+    }
+    setEditMode(null);
+    releaseLock();
+  },[editMode,user,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,loanerCarsS,inspLimits]);
+
+  const handleDelete=useCallback(async()=>{
+    const req=editMode;
+    if(!req)return;
+    const bk=req.type==='insp'?`insp-${req.dk}-${req.idx}`:`sched-${req.dk}-${req.slot}`;
+    if(req.type==='insp'){
+      await writeShared(STOR+'insp',inspData,base=>{
+        const rows=((base[req.dk]||[]).map(r=>r||blankInsp()));
+        if(req.idx<rows.length)rows[req.idx]=blankInsp();
+        while(rows.length>0&&!rows[rows.length-1]?.name)rows.pop();
+        const recomputed=recomputeInspApproval(rows,inspLimits[req.dk]??6);
+        return{...base,[req.dk]:recomputed.length>0?recomputed:[]};
+      },setInspData);
+    }else{
+      const sdKey=storKey('sched',vsId);
+      const sd=vsId==='honten'?schedDataH:schedDataS;
+      const setSd=vsId==='honten'?setSchedDataH:setSchedDataS;
+      await writeShared(sdKey,sd,base=>{
+        const day={...(base[req.dk]||{})};
+        delete day[req.slot];
+        return{...base,[req.dk]:day};
+      },setSd);
+    }
+    // bookingKeyに紐づく代車・レンタカー予約を連動削除（PC版handleDeleteModalと同じ）
+    const lresKey=storKey('lres',vsId);
+    const myLres=vsId==='honten'?loanerResH:loanerResS;
+    const setMyLres=vsId==='honten'?setLoanerResH:setLoanerResS;
+    const cleanBk=res=>{
+      const out={};
+      for(const cid of Object.keys(res||{})){
+        const days={...(res[cid]||{})};
+        Object.keys(days).forEach(k=>{if(days[k]?.bookingKey===bk)delete days[k];});
+        out[cid]=days;
+      }
+      return out;
+    };
+    await writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres);
+    await writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData);
+    setEditMode(null);
+    releaseLock();
+  },[editMode,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,inspLimits]);
+
+  if(!user)return <LoginScreen onLogin={u=>{setUser(u);setFadeIn(true);}}/>;
+  const TABS=[{id:'cal',label:'カレンダー',icon:'📅'},{id:'sched',label:'スケジュール',icon:'⏰'},{id:'loaner',label:'代車',icon:'🚙'}];
+  return(
+    <div style={{height:'100%',display:'flex',flexDirection:'column',position:'relative'}}>
+      {fadeIn&&<div style={{position:'absolute',inset:0,background:'white',zIndex:999,animation:'loginFadeIn 2.5s ease forwards',pointerEvents:'none'}} onAnimationEnd={()=>setFadeIn(false)}/>}
+      <div style={{flexShrink:0,background:'linear-gradient(135deg,#1e1b4b,#1d4ed8)',paddingTop:'env(safe-area-inset-top,0px)'}}>
+        <div style={{padding:'7px 12px',display:'flex',alignItems:'center',gap:6}}>
+          <span style={{color:'white',fontSize:12,fontWeight:900,letterSpacing:'.5px'}}>🚗 Hub</span>
+          <div style={{width:6,height:6,borderRadius:'50%',background:gasOk===true?'#4ade80':gasOk===false?'#f87171':'#fbbf24',marginLeft:2}}/>
+          <span style={{color:'rgba(255,255,255,.55)',fontSize:10,fontWeight:700}}>{user.name}（{vsId==='honten'?'本店':'三田店'}）</span>
+          <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+            <button onClick={()=>fetchAll(true)} disabled={loading}
+              style={{padding:'3px 10px',background:'rgba(255,255,255,.15)',border:'none',borderRadius:6,color:'white',fontSize:10,fontWeight:700,cursor:'pointer'}}> {loading?'⏳':'🔄'} </button>
+            <button onClick={()=>setUser(null)}
+              style={{padding:'3px 8px',background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,color:'rgba(255,255,255,.7)',fontSize:10,cursor:'pointer'}}> ↩ </button>
+          </div>
+        </div>
+        <div style={{display:'flex',alignItems:'flex-end',gap:2,padding:'0 8px',background:'linear-gradient(180deg,#1e1b4b,#1e293b)'}}>
+          {TABS.map(t=>{
+            const isActive=tab===t.id;
+            return(
+              <div key={t.id} onClick={()=>setTab(t.id)}
+                style={{background:isActive?'white':'rgba(255,255,255,.12)',borderRadius:'10px 10px 0 0',padding:isActive?'8px 10px':'6px 8px',display:'flex',flexDirection:'column',alignItems:'center',gap:2,minWidth:isActive?58:54,cursor:'pointer',boxShadow:isActive?'0 -3px 10px rgba(0,0,0,.2)':'none',marginTop:isActive?0:4,transition:'all .15s'}}>
+                <div style={{fontSize:isActive?16:13,opacity:isActive?1:.8}}>{t.icon}</div>
+                <div style={{fontSize:isActive?7.5:7,fontWeight:isActive?800:400,color:isActive?'#1d4ed8':'rgba(255,255,255,.65)',letterSpacing:'.3px'}}> {t.label} </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0}}>
+        {tab==='sched'&&<ScheduleView inspData={inspData} schedDataH={schedDataH} schedDataS={schedDataS} memoDataH={memoDataH} memoDataS={memoDataS}
+          loanerResH={loanerResH} loanerResS={loanerResS} loanerCarsH={loanerCarsH} loanerCarsS={loanerCarsS} vsId={vsId} initDate={schedInitDate} onOpenEdit={openEdit}/>}
+        {tab==='cal'&&<CalendarView inspData={inspData} closedDays={cDays} closedDates={closedDates} overrideOpen={overrideOpen} vsId={vsId}
+          onSelectDate={(dk,y,m,d)=>setDayDetail({dk,y,m,d})}/>}
+        {tab==='loaner'&&<LoanerView loanerResH={loanerResH} loanerResS={loanerResS} rentalResData={rentalResData} rentalCars={rentalCars}
+          loanerCarsH={loanerCarsH} loanerCarsS={loanerCarsS} vsId={vsId}/>}
+      </div>
+      {dayDetail&&<DayDetailModal {...dayDetail} inspData={inspData} schedDataH={schedDataH} schedDataS={schedDataS} memoDataH={memoDataH} memoDataS={memoDataS} vsId={vsId}
+        onClose={()=>setDayDetail(null)}
+        onGoSchedule={(y,m,d)=>{setSchedInitDate({y,m,d});setTab('sched');setDayDetail(null);}}/>}
+      {editMode&&<EditModal
+        mode={editMode}
+        initial={editMode.initial}
+        vsId={vsId}
+        currentUser={user}
+        staffList={DEFAULT_STAFF.filter(s=>s.store===vsId)}
+        loanerCars={vsId==='honten'?loanerCarsH:loanerCarsS}
+        rentalCars={rentalCars.length?rentalCars:DEFAULT_RENTAL_CARS}
+        loanerRes={vsId==='honten'?loanerResH:loanerResS}
+        rentalRes={rentalResData}
+        lockedBy={editMode.lockedBy}
+        onSave={handleSave}
+        onDelete={editMode.isNew?null:handleDelete}
+        onClose={closeEdit}/>}
+    </div>
+  );
+};
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
