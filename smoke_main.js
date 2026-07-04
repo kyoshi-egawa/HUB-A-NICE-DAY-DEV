@@ -131,6 +131,67 @@ const GAS_HOST = 'https://script.google.com';
   else console.log('  ✔ 顧客リスト表示');
   await page2.close();
 
+  // ── mobile.html: ログイン→3タブ巡回 ──
+  // ログインコードは本番スタッフリスト（読み取りのみ）から実在のmyNumberを取得して使う
+  try {
+    const mobileSrc = fs.readFileSync(path.join(MAIN_DIR, 'mobile.html'), 'utf8');
+    const gasUrl = (mobileSrc.match(/const GAS_URL='([^']+)'/) || [])[1];
+    const gasKey = (mobileSrc.match(/const GAS_API_KEY='([^']+)'/) || [])[1];
+    let loginCode = '1'; // フォールバック（DEFAULT_STAFF先頭）
+    try {
+      const r = await fetch(`${gasUrl}?key=${encodeURIComponent('hub-v8-honten-staff-v2')}&apiKey=${encodeURIComponent(gasKey)}`, { redirect: 'follow' });
+      const staff = JSON.parse(await r.text());
+      const first = (Array.isArray(staff) ? staff : []).find(s => s && s.name && s.myNumber != null);
+      if (first) loginCode = String(first.myNumber);
+    } catch (e) { console.log('  (スタッフリスト取得失敗→コード1でログイン試行)'); }
+    const mctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await mctx.route(GAS_HOST + '/**', async route => {
+      const req = route.request();
+      if (req.method() === 'POST') {
+        gasBlockedWrites++;
+        await route.fulfill({ status: 200, contentType: 'text/plain', headers: { 'Access-Control-Allow-Origin': '*' }, body: 'ok' });
+        return;
+      }
+      try {
+        const r = await fetch(req.url(), { redirect: 'follow' });
+        const body = await r.text();
+        gasReads++;
+        await route.fulfill({ status: 200, contentType: 'text/plain', headers: { 'Access-Control-Allow-Origin': '*' }, body });
+      } catch (e) {
+        await route.fulfill({ status: 200, contentType: 'text/plain', headers: { 'Access-Control-Allow-Origin': '*' }, body: 'null' });
+      }
+    });
+    const page3 = await mctx.newPage();
+    page3.on('pageerror', e => problems.push('mobile JSエラー: ' + String(e).slice(0, 140)));
+    page3.on('dialog', async d => { problems.push('mobile 予期しないダイアログ: ' + d.message().slice(0, 80)); await d.dismiss().catch(() => {}); });
+    console.log('mobile.html を起動中（本番実データ・読み取り専用）...');
+    await page3.goto(`http://127.0.0.1:${PORT}/mobile.html`, { waitUntil: 'domcontentloaded' });
+    await page3.waitForTimeout(8000); // Babel変換＋スタッフリスト読込
+    await page3.fill('input[type="tel"]', loginCode);
+    await page3.evaluate(() => {
+      const b = [...document.querySelectorAll('button')].find(el => el.textContent.includes('SIGN IN'));
+      if (b) b.click();
+    });
+    await page3.waitForTimeout(12000); // ログイン演出8秒＋フェード＋初回fetchAll
+    const mBody = await page3.locator('body').innerText().catch(() => '');
+    if (mBody.includes('レンダリングエラー')) problems.push('mobile 起動直後: レンダリングエラー表示');
+    if (mBody.includes('SIGN IN')) problems.push('mobile: ログインできていない（コード' + loginCode + '）');
+    for (const tab of ['カレンダー', 'スケジュール', '代車']) {
+      const ok = await page3.evaluate((t) => {
+        // タブはbuttonではなく onClick付きdiv。最深のラベルdivをクリックすればReactイベントがバブルする
+        const target = [...document.querySelectorAll('div')].filter(el => el.textContent.includes(t) && el.textContent.replace(/\s/g, '').length < 10).pop();
+        if (target) { target.click(); return true; } return false;
+      }, tab);
+      if (!ok) { problems.push(`mobile ${tab}: タブが見つからない`); continue; }
+      await page3.waitForTimeout(2500);
+      const b = await page3.locator('body').innerText().catch(() => '');
+      if (b.includes('レンダリングエラー')) problems.push(`mobile ${tab}: レンダリングエラー表示`);
+      else console.log(`  ✔ mobile ${tab}`);
+    }
+    await page3.screenshot({ path: path.join(__dirname, 'smoke-main-mobile.png') });
+    await mctx.close();
+  } catch (e) { problems.push('mobile: スモーク実行失敗 ' + String(e).slice(0, 120)); }
+
   await browser.close(); server.close();
   console.log(`\nGAS読み取り ${gasReads}件 / 遮断した書き込み ${gasBlockedWrites}件（本番データへの書き込みゼロ）`);
   if (problems.length) {

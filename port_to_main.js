@@ -3,6 +3,7 @@
 //
 // index_dev.html → ../hub-a-nice-day/index_main.html
 // customers.html → ../hub-a-nice-day/customers.html
+// mobile.html    → ../hub-a-nice-day/mobile.html
 // をコピーし、環境固有の差分（STOR・タイトル・DEVバッジ・配色）を本番用に変換する。
 //
 // ★安全装置: 各置換ルールは「DEV側に必ず存在するはず」のパターン。1件もマッチしない
@@ -46,6 +47,10 @@ const CUST_RULES = [
 const CUST_REGEX_RULES = [
   // 自動アップデート検知のビルド識別子をデプロイ毎に更新
   [/__APP_BUILD='build-\d+'/, "__APP_BUILD='build-" + Date.now() + "'", 1, 'APP_BUILDタイムスタンプ'],
+];
+// mobile.html の環境固有差分は STOR のみ（タイトル[DEV]なし・バッジなし・配色差分なし。2026-07-04時点）
+const MOBILE_RULES = [
+  ["const STOR='hub-v8-dev-';", "const STOR='hub-v8-';", 1],
 ];
 // 変換後にあってはならない文字列（残骸チェック）
 const FORBIDDEN = ['hub-v8-dev', '[DEV]', 'テスト版（DEV）', 'DEV版警告バナー',
@@ -91,6 +96,7 @@ function port(srcName, dstName, rules, regexRules) {
 if (!fs.existsSync(MAIN_DIR)) { console.error('本番リポジトリが見つかりません: ' + MAIN_DIR); process.exit(1); }
 port('index_dev.html', 'index_main.html', INDEX_RULES, INDEX_REGEX_RULES);
 port('customers.html', 'customers.html', CUST_RULES, CUST_REGEX_RULES);
+port('mobile.html', 'mobile.html', MOBILE_RULES, []);
 
 if (failed) {
   console.error('\n★中断: 上記の✖を解消してから再実行してください（本番ファイルは書き込み済みのものだけ更新）。');
