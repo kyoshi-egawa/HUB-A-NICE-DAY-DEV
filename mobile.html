@@ -25,7 +25,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.06';
+const MOBILE_VERSION='1.07';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -127,6 +127,16 @@ const sSet=async(k,v)=>{
   }
 };
 const isPlainObj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
+
+// ── 保存リクエストの永続記録 ──
+// 保存はバックグラウンドで継続するため、確認が取れる前にアプリが閉じられる/スマホがロック
+// されることがある。リクエストをlocalStorageに記録し、次回起動時にサーバーと突き合わせて
+// 「保存されていない予約」を検出する（完了したものはその場で削除される）。
+const PENDING_KEY=STOR+'mob-pending';
+const loadPending=()=>{try{const v=JSON.parse(localStorage.getItem(PENDING_KEY));return Array.isArray(v)?v:[];}catch{return[];}};
+const savePendingStore=list=>{try{localStorage.setItem(PENDING_KEY,JSON.stringify(list.slice(-20)));}catch{}};
+const addPending=p=>savePendingStore([...loadPending(),p]);
+const removePendingStore=pid=>savePendingStore(loadPending().filter(p=>p.pid!==pid));
 
 // ══ 予約データのコアロジック（PC版と同一。挙動を変えないこと）══
 const blankInsp=()=>({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional'});
@@ -474,15 +484,16 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
       if(busy){setErr(`その期間は使用中です（${busy}）`);return;}
       loanerAction={kind:carKind,carId:carSel,from,to};
     }
-    setErr('');setSaving(true);
-    try{await onSave(form,loanerAction);}
-    catch(e){setErr('保存に失敗しました: '+(e?.message||e));setSaving(false);return;}
+    setErr('');
+    // 受付は即時（モーダルはonSave側で閉じる）。サーバー保存はバックグラウンドで継続し、
+    // 結果は画面上部のバナーで通知される。ここで捕まえるのは事前チェック（入庫制限等）のみ。
+    try{onSave(form,loanerAction);}
+    catch(e){setErr(String(e?.message||e));return;}
   };
-  const doDelete=async()=>{
+  const doDelete=()=>{
     if(!window.confirm(`「${initial?.name||'この予約'}」を削除しますか？\n（紐付いた代車予約も削除されます）`))return;
-    setSaving(true);
-    try{await onDelete();}
-    catch(e){setErr('削除に失敗しました: '+(e?.message||e));setSaving(false);}
+    try{onDelete();}
+    catch(e){setErr('削除に失敗しました: '+(e?.message||e));}
   };
   const LBL={fontSize:11,fontWeight:800,color:'#475569',display:'block',marginBottom:4};
   const INP={width:'100%',padding:'10px 12px',border:'2px solid #e2e8f0',borderRadius:10,outline:'none',background:'white'};
@@ -905,6 +916,61 @@ const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,lo
   );
 };
 
+// ── 通知メール設定 ──
+// 保存失敗時の通知メール送信先（ログイン中スタッフごとに1件、通知専用・個人アドレス可）。
+// 登録先は共有キー ${STOR}notify-emails の {スタッフ名: アドレス} マップ。
+const MailModal=({user,onClose,onSaveEmail})=>{
+  const [email,setEmail]=useState('');
+  const [loaded,setLoaded]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const [msg,setMsg]=useState(null); // {ok:bool,text}
+  useEffect(()=>{(async()=>{
+    const m=await sGet(STOR+'notify-emails');
+    setEmail((isPlainObj(m)&&m[user.name])||'');
+    setLoaded(true);
+  })();},[]);
+  const doSave=async(val)=>{
+    if(val&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)){setMsg({ok:false,text:'メールアドレスの形式が正しくありません'});return;}
+    setBusy(true);setMsg(null);
+    try{
+      await onSaveEmail(val);
+      setMsg({ok:true,text:val?'保存しました。予約の保存に失敗した時、このアドレスへ通知が届きます':'登録を削除しました'});
+      setEmail(val);
+    }catch(e){setMsg({ok:false,text:'保存を確認できませんでした。電波の良い場所でもう一度お試しください'});}
+    setBusy(false);
+  };
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:400,display:'flex',flexDirection:'column',justifyContent:'flex-end'}} onClick={busy?undefined:onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:'20px 20px 0 0',padding:'16px 18px calc(18px + env(safe-area-inset-bottom,0px))',boxShadow:'0 -8px 40px rgba(0,0,0,.25)',animation:'sheetUp .22s ease'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:900,fontSize:16,color:'#3730a3'}}>✉ 通知メール設定</div>
+            <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>{user.name}さん宛の通知先（個人のアドレスでOK）</div>
+          </div>
+          <button onClick={onClose} disabled={busy} style={{width:32,height:32,borderRadius:'50%',background:'#f1f5f9',border:'none',fontSize:16,color:'#64748b'}}>✕</button>
+        </div>
+        <div style={{fontSize:12,color:'#475569',lineHeight:1.6,background:'#f8fafc',borderRadius:10,padding:'8px 12px',marginBottom:12}}>
+          予約がサーバーに保存できなかった時、このアドレスへお知らせメールが届きます（通知専用。返信は不要です）。届いたらアプリで該当日を確認して、予約をし直してください。
+        </div>
+        {!loaded?<div style={{textAlign:'center',color:'#94a3b8',fontSize:12,padding:12}}>⏳ 読込中...</div>:(
+          <React.Fragment>
+            <input type="email" inputMode="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value.trim())}
+              placeholder="example@gmail.com"
+              style={{width:'100%',padding:'12px 14px',border:'2px solid #e2e8f0',borderRadius:10,outline:'none',fontSize:16,marginBottom:10}}/>
+            {msg&&<div style={{padding:'8px 12px',borderRadius:10,fontSize:12,fontWeight:700,marginBottom:10,background:msg.ok?'#f0fdf4':'#fef2f2',border:`1.5px solid ${msg.ok?'#86efac':'#fca5a5'}`,color:msg.ok?'#15803d':'#dc2626'}}>{msg.text}</div>}
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>doSave('')} disabled={busy||!email}
+                style={{padding:'12px 14px',borderRadius:12,border:'2px solid #e2e8f0',background:'white',color:'#64748b',fontWeight:700,fontSize:13}}>登録解除</button>
+              <button onClick={()=>doSave(email)} disabled={busy}
+                style={{flex:1,padding:'12px 0',borderRadius:12,border:'none',background:busy?'#94a3b8':'#3730a3',color:'white',fontWeight:900,fontSize:14}}>{busy?'⏳ 保存中...':'保存'}</button>
+            </div>
+          </React.Fragment>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const App=()=>{
   const [user,setUser]=useState(null);
   const [fadeIn,setFadeIn]=useState(false);
@@ -935,10 +1001,15 @@ const App=()=>{
   const [staffH,setStaffH]=useState([]);
   const [staffS,setStaffS]=useState([]);
   const [editMode,setEditMode]=useState(null); // {type,dk,idx?,slot?,isNew,initial,lockedBy}
+  const [saveBanners,setSaveBanners]=useState([]); // 保存状況バナー [{pid,phase:'saving'|'done'|'fail',label,detail,ts}]
+  const [mailModal,setMailModal]=useState(false);
+  const inflightRef=useRef(new Set()); // このセッションで進行中の保存pid（起動時チェックの誤検出防止）
   const writeGuardRef=useRef(0);   // 書き込み後70秒はポーリング反映を止める（PC版useSharedと同じ考え方）
   const fetchBusyRef=useRef(false); // 前回の取得が未完了なら次を撃たない（GAS同時実行の積み上がり防止）
   const lockHeartbeatRef=useRef(null);
   const curLockKeyRef=useRef(null);
+  const upsertBanner=b=>setSaveBanners(list=>{const i=list.findIndex(x=>x.pid===b.pid);if(i<0)return[...list,{ts:Date.now(),...b}].slice(-4);const n=[...list];n[i]={...n[i],...b};return n;});
+  const removeBanner=pid=>setSaveBanners(list=>list.filter(x=>x.pid!==pid));
   const vsId=user?.store||'honten';
   const cDays=vsId==='honten'?closedDaysH:closedDaysS;
   const fetchAll=useCallback(async(force)=>{
@@ -994,6 +1065,42 @@ const App=()=>{
     return ()=>clearInterval(timer);
   },[user]);
 
+  // 起動時チェック: 保存確認が取れる前にアプリが閉じられた予約が残っていないか、サーバーと突き合わせる。
+  // 見つからなければ赤バナー＋通知メール（楽観的受付の取りこぼし防止の最後の網）。
+  useEffect(()=>{
+    if(!user)return;
+    (async()=>{
+      const stale=loadPending().filter(p=>!inflightRef.current.has(p.pid));
+      if(stale.length===0)return;
+      savePendingStore(loadPending().filter(p=>inflightRef.current.has(p.pid)));
+      for(const p of stale){
+        let ok=false;
+        try{
+          const key=p.type==='insp'?STOR+'insp':storKey('sched',p.store||'honten');
+          const data=await sGet(key);
+          if(isPlainObj(data)){
+            if(p.type==='insp'){
+              const r=(data[p.dk]||[])[p.idx];
+              ok=p.kind==='delete'
+                ?(!r||!r.name||r.name!==p.name)
+                :(!!r&&r.name===p.name&&(!p.check?.time||r.time===p.check.time));
+            }else{
+              const day=data[p.dk]||{};
+              ok=p.kind==='delete'
+                ?!(day[p.slot]&&day[p.slot].name===p.name)
+                :Object.keys(day).some(k=>{const r=day[k];return r&&r.name===p.name&&getBaseSlot(k)===getBaseSlot(p.slot);});
+            }
+          }
+        }catch{}
+        if(!ok){
+          const label=`${p.name||'予約'}${p.name?'さん':''}の${p.type==='insp'?'車検':'整備'}予約${p.kind==='delete'?'の削除':''}`;
+          upsertBanner({pid:p.pid,phase:'fail',label,detail:'前回アプリを閉じた際に保存が完了していない可能性があります。該当日を確認してください'});
+          notifyFail(p,'アプリ終了により保存を確認できませんでした（起動時チェックで検出）');
+        }
+      }
+    })();
+  },[user]);
+
   // ── 書き込みレイヤ ──
   // 保存はサーバーの最新値を読み直してから差分適用（read-modify-write）＋読み返し検証。
   // GAS混雑時は書き込みがロック待ちタイムアウト等で「静かに失敗」することがある
@@ -1041,14 +1148,21 @@ const App=()=>{
     },20000);
     return lockedBy;
   };
-  const releaseLock=async()=>{
-    const key=curLockKeyRef.current;
-    curLockKeyRef.current=null;
-    if(lockHeartbeatRef.current){clearInterval(lockHeartbeatRef.current);lockHeartbeatRef.current=null;}
-    if(!key)return;
-    const l=await sGet(STOR+'locks');
-    if(isPlainObj(l)&&l[key]){const c={...l};delete c[key];sSet(STOR+'locks',c);}
+  // ロックの所有をモーダルから切り離す（バックグラウンド保存が完了するまでハートビートは継続し、
+  // 保存中に他端末が同じ枠を開いたら「編集中」警告が出るようにする）
+  const detachLock=()=>{
+    const key=curLockKeyRef.current;curLockKeyRef.current=null;
+    const hb=lockHeartbeatRef.current;lockHeartbeatRef.current=null;
+    return{key,hb};
   };
+  const releaseLockHandle=async(h)=>{
+    if(!h)return;
+    if(h.hb)clearInterval(h.hb);
+    if(!h.key)return;
+    const l=await sGet(STOR+'locks');
+    if(isPlainObj(l)&&l[h.key]){const c={...l};delete c[h.key];sSet(STOR+'locks',c);}
+  };
+  const releaseLock=async()=>releaseLockHandle(detachLock());
   useEffect(()=>()=>{if(lockHeartbeatRef.current)clearInterval(lockHeartbeatRef.current);},[]);
 
   const openEdit=useCallback(async(req)=>{
@@ -1134,9 +1248,32 @@ const App=()=>{
     return entry;
   };
 
-  const handleSave=useCallback(async(form,loanerAction)=>{
-    const req=editMode;
-    if(!req)return;
+  // 保存失敗の通知メール（GAS側の notifyFail アクションが必要。未対応デプロイでは何も送られず'ok'相当で無視される）
+  const notifyFail=async(pend,detail)=>{
+    const dkp=String(pend.dk||'').split('-');
+    const when=dkp.length===3?`${dkp[0]}年${dkp[1]}月${dkp[2]}日`:pend.dk;
+    const text=`${when} の${pend.type==='insp'?'車検':'タイムスケジュール'}${pend.kind==='delete'?'予約の削除':'予約'}「${pend.name}」（操作: ${pend.by||'不明'}）がサーバーに保存できていない可能性があります。\nアプリで該当日を確認し、登録されていなければお手数ですがもう一度操作してください。\n詳細: ${detail||'-'}`;
+    const body=JSON.stringify({action:'notifyFail',apiKey:GAS_API_KEY,emailsKey:STOR+'notify-emails',user:pend.by||'',env:STOR==='hub-v8-'?'本番':'DEV',detail:text});
+    try{await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body});}
+    catch{
+      await new Promise(r=>setTimeout(r,1500));
+      try{await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body});}catch{}
+    }
+  };
+
+  // 通知メールアドレスの登録（{スタッフ名:アドレス} マップを読み返し検証つきで更新）
+  const saveNotifyEmail=async(email)=>{
+    const name=user?.name;
+    if(!name)throw new Error('ログイン情報がありません');
+    await writeShared(STOR+'notify-emails',{},base=>{
+      const n={...base};
+      if(email)n[name]=email;else delete n[name];
+      return n;
+    },()=>{},echo=>email?echo[name]===email:!(name in echo));
+  };
+
+  // サーバー保存の本体（読み返し検証つき）。handleSaveから切り離されてバックグラウンドで実行される
+  const saveCore=async(req,form,loanerAction)=>{
     const userName=form.name||user?.name||'';
     if(req.type==='insp'){
       const bkFinal=`insp-${req.dk}-${req.idx}`;
@@ -1163,16 +1300,6 @@ const App=()=>{
       });
       if(placedPending)alert('⚠️ 1日の上限を超えたため、本店承認が必要です（通常6台／レギュラー車検3台）。この予約は承認待ちになります。');
     }else{
-      // 入庫制限チェック（PC版handleSaveModalと同じルール）
-      const restriction=schedRestrictions[req.dk];
-      if(restriction){
-        const toMin=t=>{const[h,m]=String(t).split(':').map(Number);return h*60+m;};
-        const slotMin=toMin(getBaseSlot(req.slot));
-        if(slotMin>=toMin(restriction.startTime)&&slotMin<toMin(restriction.endTime)){
-          const isExempt=restriction.exemptWorks&&restriction.exemptWorks.includes(form.work);
-          if(!isExempt)throw new Error(`🚫 この時間帯（${restriction.startTime}〜${restriction.endTime}）は入庫制限中です。制限解除されている作業内容のみ予約可能です`);
-        }
-      }
       const sdKey=storKey('sched',vsId);
       const sd=vsId==='honten'?schedDataH:schedDataS;
       const setSd=vsId==='honten'?setSchedDataH:setSchedDataS;
@@ -1206,13 +1333,51 @@ const App=()=>{
         return !!r&&r.id===placedId;
       });
     }
-    setEditMode(null);
-    releaseLock();
-  },[editMode,user,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,loanerCarsS,inspLimits,schedRestrictions]);
+  };
 
-  const handleDelete=useCallback(async()=>{
+  // 楽観的受付: ローカルで判定できる事前チェックが通ったら即モーダルを閉じてバナー表示し、
+  // サーバー保存（読み返し検証つき）はバックグラウンドで継続する。結果はバナーで通知し、
+  // 失敗時は通知メール＋サーバー最新値への再同期を行う。
+  const handleSave=useCallback((form,loanerAction)=>{
     const req=editMode;
     if(!req)return;
+    // 入庫制限チェック（PC版handleSaveModalと同じルール。受付前に弾いてモーダル内に表示する）
+    if(req.type!=='insp'){
+      const restriction=schedRestrictions[req.dk];
+      if(restriction){
+        const toMin=t=>{const[h,m]=String(t).split(':').map(Number);return h*60+m;};
+        const slotMin=toMin(getBaseSlot(req.slot));
+        if(slotMin>=toMin(restriction.startTime)&&slotMin<toMin(restriction.endTime)){
+          const isExempt=restriction.exemptWorks&&restriction.exemptWorks.includes(form.work);
+          if(!isExempt)throw new Error(`🚫 この時間帯（${restriction.startTime}〜${restriction.endTime}）は入庫制限中です。制限解除されている作業内容のみ予約可能です`);
+        }
+      }
+    }
+    const pid=`${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    const label=`${form.name}さんの${req.type==='insp'?'車検':'整備'}予約`;
+    const pend={pid,kind:'save',type:req.type,dk:req.dk,idx:req.idx,slot:req.slot,store:vsId,name:form.name,by:user?.name||'',check:{time:form.time||'',work:form.work||''},ts:Date.now()};
+    addPending(pend);inflightRef.current.add(pid);
+    const lockHandle=detachLock();
+    upsertBanner({pid,phase:'saving',label});
+    setEditMode(null);
+    (async()=>{
+      try{
+        await saveCore(req,form,loanerAction);
+        upsertBanner({pid,phase:'done',label});
+        setTimeout(()=>removeBanner(pid),6000);
+      }catch(e){
+        upsertBanner({pid,phase:'fail',label,detail:String(e?.message||e)});
+        notifyFail(pend,String(e?.message||e));
+        fetchAll(true); // 楽観表示をサーバーの実際の状態に揃える
+      }finally{
+        removePendingStore(pid);inflightRef.current.delete(pid);
+        releaseLockHandle(lockHandle);
+      }
+    })();
+  },[editMode,user,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,loanerCarsS,inspLimits,schedRestrictions]);
+
+  // 削除の本体（読み返し検証つき）。バックグラウンドで実行される
+  const deleteCore=async(req)=>{
     const bk=req.type==='insp'?`insp-${req.dk}-${req.idx}`:`sched-${req.dk}-${req.slot}`;
     const deletedSeq=req.initial?.seq;
     const deletedName=req.initial?.name;
@@ -1256,9 +1421,35 @@ const App=()=>{
     };
     await writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres,echo=>!hasBk(echo,bk));
     await writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData,echo=>!hasBk(echo,bk));
+  };
+
+  // 削除も保存と同じ楽観的受付（即モーダルを閉じてバックグラウンド実行＋バナー通知）
+  const handleDelete=useCallback(()=>{
+    const req=editMode;
+    if(!req)return;
+    const nm=req.initial?.name||'';
+    const pid=`${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    const label=`${nm||'予約'}${nm?'さん':''}の${req.type==='insp'?'車検':'整備'}予約の削除`;
+    const pend={pid,kind:'delete',type:req.type,dk:req.dk,idx:req.idx,slot:req.slot,store:vsId,name:nm,by:user?.name||'',check:{},ts:Date.now()};
+    addPending(pend);inflightRef.current.add(pid);
+    const lockHandle=detachLock();
+    upsertBanner({pid,phase:'saving',label});
     setEditMode(null);
-    releaseLock();
-  },[editMode,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,inspLimits]);
+    (async()=>{
+      try{
+        await deleteCore(req);
+        upsertBanner({pid,phase:'done',label});
+        setTimeout(()=>removeBanner(pid),6000);
+      }catch(e){
+        upsertBanner({pid,phase:'fail',label,detail:String(e?.message||e)});
+        notifyFail(pend,String(e?.message||e));
+        fetchAll(true);
+      }finally{
+        removePendingStore(pid);inflightRef.current.delete(pid);
+        releaseLockHandle(lockHandle);
+      }
+    })();
+  },[editMode,user,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,inspLimits]);
 
   if(!user)return <LoginScreen onLogin={u=>{setUser(u);setFadeIn(true);}}/>;
   const TABS=[{id:'cal',label:'カレンダー',icon:'📅'},{id:'sched',label:'スケジュール',icon:'⏰'},{id:'loaner',label:'代車',icon:'🚙'}];
@@ -1274,6 +1465,8 @@ const App=()=>{
           <div style={{marginLeft:'auto',display:'flex',gap:6}}>
             <button onClick={()=>fetchAll(true)} disabled={loading}
               style={{padding:'3px 10px',background:'rgba(255,255,255,.15)',border:'none',borderRadius:6,color:'white',fontSize:10,fontWeight:700,cursor:'pointer'}}> {loading?'⏳':'🔄'} </button>
+            <button onClick={()=>setMailModal(true)}
+              style={{padding:'3px 8px',background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,color:'rgba(255,255,255,.7)',fontSize:10,cursor:'pointer'}}> ✉ </button>
             <button onClick={()=>setUser(null)}
               style={{padding:'3px 8px',background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,color:'rgba(255,255,255,.7)',fontSize:10,cursor:'pointer'}}> ↩ </button>
           </div>
@@ -1291,6 +1484,30 @@ const App=()=>{
           })}
         </div>
       </div>
+      {saveBanners.length>0&&(
+        <div style={{flexShrink:0,display:'flex',flexDirection:'column',gap:4,padding:'6px 8px',background:'#f1f5f9'}}>
+          {saveBanners.map(b=>{
+            const st=b.phase==='saving'?{bg:'#eef2ff',bd:'#a5b4fc',fg:'#3730a3',icon:'📨'}
+              :b.phase==='done'?{bg:'#f0fdf4',bd:'#86efac',fg:'#15803d',icon:'✅'}
+              :{bg:'#fef2f2',bd:'#fca5a5',fg:'#dc2626',icon:'⚠️'};
+            return(
+              <div key={b.pid} style={{display:'flex',alignItems:'flex-start',gap:7,padding:'8px 10px',borderRadius:10,background:st.bg,border:`1.5px solid ${st.bd}`}}>
+                <span style={{fontSize:13,lineHeight:1.3}}>{st.icon}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:800,color:st.fg,lineHeight:1.35}}>
+                    {b.phase==='saving'&&`${b.label}を受け付けました（サーバー反映を確認中… このまま操作できます）`}
+                    {b.phase==='done'&&`${b.label}を反映しました`}
+                    {b.phase==='fail'&&`${b.label}が保存できていません。お手数ですが内容を確認して、もう一度操作してください`}
+                  </div>
+                  {b.phase==='fail'&&b.detail&&<div style={{fontSize:10,color:'#991b1b',marginTop:2,lineHeight:1.4}}>{b.detail}</div>}
+                </div>
+                {b.phase!=='saving'&&<button onClick={()=>removeBanner(b.pid)}
+                  style={{flexShrink:0,width:22,height:22,borderRadius:'50%',border:'none',background:'rgba(0,0,0,.06)',color:st.fg,fontSize:11,fontWeight:700}}>✕</button>}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minHeight:0}}>
         {tab==='sched'&&<ScheduleView inspData={inspData} schedDataH={schedDataH} schedDataS={schedDataS} memoDataH={memoDataH} memoDataS={memoDataS}
           loanerResH={loanerResH} loanerResS={loanerResS} loanerCarsH={loanerCarsH} loanerCarsS={loanerCarsS} vsId={vsId} initDate={schedInitDate} onOpenEdit={openEdit}
@@ -1320,6 +1537,7 @@ const App=()=>{
         onSave={handleSave}
         onDelete={editMode.isNew?null:handleDelete}
         onClose={closeEdit}/>}
+      {mailModal&&<MailModal user={user} onClose={()=>setMailModal(false)} onSaveEmail={saveNotifyEmail}/>}
     </div>
   );
 };
