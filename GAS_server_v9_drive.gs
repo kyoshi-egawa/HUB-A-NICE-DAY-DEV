@@ -99,52 +99,86 @@ function driveRead(key) {
   return null;
 }
 
+// 1キー分の値文字列を読む（キャッシュ→シート→Drive/レガシーチャンクの順。doGetの単発・一括の共通部）
+// rowHint: 呼び出し側が既に行番号を知っていれば渡す（-2なら未調査＝ここでfindRowする）
+function readOneValue(sheet, cache, key, rowHint) {
+  var cached = cache.get(key);
+  if (cached !== null && cached.indexOf(CHUNK_MARKER) !== 0 && cached !== FILE_MARKER) {
+    return cached;
+  }
+  var row = (rowHint === -2) ? findRow(sheet, key) : rowHint;
+  if (row === -1) return 'null';
+  var value = sheet.getRange(row, 2).getValue();
+  value = (value === '' || value === null || value === undefined) ? 'null' : String(value);
+
+  // value lives in a Drive file
+  if (value === FILE_MARKER) {
+    var c = driveRead(key);
+    if (c === null || c === '') c = 'null';
+    try { if (c.length < 90000) cache.put(key, c, 60); } catch (ce) {}
+    return c;
+  }
+
+  // legacy chunked (v7/v8) - read separate __chunkN rows and join
+  if (value.indexOf(CHUNK_MARKER) === 0) {
+    var numChunks = parseInt(value.substring(CHUNK_MARKER.length), 10) || 0;
+    var result = '';
+    for (var j = 0; j < numChunks; j++) {
+      var cr = findRow(sheet, key + '__chunk' + j);
+      if (cr !== -1) {
+        var cv = sheet.getRange(cr, 2).getValue();
+        result += (cv === null || cv === undefined) ? '' : String(cv);
+      }
+    }
+    if (!result) result = 'null';
+    try { if (result.length < 90000) cache.put(key, result, 60); } catch (ce) {}
+    return result;
+  }
+
+  try { cache.put(key, value, 60); } catch (ce) {}
+  return value;
+}
+
 function doGet(e) {
   if (!e.parameter || e.parameter.apiKey !== HUB_API_KEY) {
     return makeResponse('unauthorized');
   }
   try {
-    var key = e.parameter && e.parameter.key;
-    if (!key) return makeResponse('null');
-
     var cache = CacheService.getScriptCache();
-    var cached = cache.get(key);
-    if (cached !== null && cached.indexOf(CHUNK_MARKER) !== 0 && cached !== FILE_MARKER) {
-      return makeResponse(cached);
-    }
 
-    var sheet = getSheet();
-    var row = findRow(sheet, key);
-    if (row === -1) return makeResponse('null');
-    var value = sheet.getRange(row, 2).getValue();
-    value = (value === '' || value === null || value === undefined) ? 'null' : String(value);
-
-    // value lives in a Drive file
-    if (value === FILE_MARKER) {
-      var c = driveRead(key);
-      if (c === null || c === '') c = 'null';
-      try { if (c.length < 90000) cache.put(key, c, 60); } catch (ce) {}
-      return makeResponse(c);
-    }
-
-    // legacy chunked (v7/v8) - read separate __chunkN rows and join
-    if (value.indexOf(CHUNK_MARKER) === 0) {
-      var numChunks = parseInt(value.substring(CHUNK_MARKER.length), 10) || 0;
-      var result = '';
-      for (var j = 0; j < numChunks; j++) {
-        var cr = findRow(sheet, key + '__chunk' + j);
-        if (cr !== -1) {
-          var cv = sheet.getRange(cr, 2).getValue();
-          result += (cv === null || cv === undefined) ? '' : String(cv);
+    // 一括読み: ?keys=a,b,c → {"a":"<値文字列|null>", ...} のJSON。
+    // フロントのポーリングを21リクエスト→1リクエストにするための同時実行数対策。
+    if (e.parameter.keys) {
+      var ks = String(e.parameter.keys).split(',').slice(0, 40);
+      var sheet0 = getSheet();
+      // キー列を1回だけ読んで行番号を索引化（キー数ぶんfindRowを繰り返さない）
+      var last = sheet0.getLastRow();
+      var rowOf = {};
+      if (last >= 1) {
+        var colKeys = sheet0.getRange(1, 1, last, 1).getValues();
+        for (var i = 1; i < colKeys.length; i++) {
+          var kk = colKeys[i][0];
+          if (kk && !(kk in rowOf)) rowOf[kk] = i + 1;
         }
       }
-      if (!result) result = 'null';
-      try { if (result.length < 90000) cache.put(key, result, 60); } catch (ce) {}
-      return makeResponse(result);
+      var out = {};
+      for (var m = 0; m < ks.length; m++) {
+        var k = ks[m];
+        if (!k) continue;
+        out[k] = readOneValue(sheet0, cache, k, (k in rowOf) ? rowOf[k] : -1);
+      }
+      return makeResponse(JSON.stringify(out));
     }
 
-    try { cache.put(key, value, 60); } catch (ce) {}
-    return makeResponse(value);
+    var key = e.parameter && e.parameter.key;
+    if (!key) return makeResponse('null');
+    // 単発読みはキャッシュヒット時にシートを開かない（従来動作の維持）
+    var cachedOne = cache.get(key);
+    if (cachedOne !== null && cachedOne.indexOf(CHUNK_MARKER) !== 0 && cachedOne !== FILE_MARKER) {
+      return makeResponse(cachedOne);
+    }
+    var sheet = getSheet();
+    return makeResponse(readOneValue(sheet, cache, key, -2));
   } catch (err) {
     return makeResponse('error: ' + err.message);
   }

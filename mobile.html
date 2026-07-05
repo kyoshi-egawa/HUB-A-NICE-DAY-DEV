@@ -25,7 +25,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.07';
+const MOBILE_VERSION='1.08';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -125,6 +125,22 @@ const sSet=async(k,v)=>{
     await new Promise(r=>setTimeout(r,1500));
     try{await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body});}catch{}
   }
+};
+// 複数キーの一括読み（GAS doGet?keys= 対応版なら1リクエスト。未対応の旧デプロイは'null'を返すので
+// nullを返して呼び出し側が従来の並列sGetにフォールバックする）
+const sGetMany=async ks=>{
+  try{
+    const r=await fetch(`${GAS_URL}?keys=${encodeURIComponent(ks.join(','))}&apiKey=${encodeURIComponent(GAS_API_KEY)}`,{cache:'no-store'});
+    const t=await r.text();
+    if(!t||t==='null'||t.startsWith('error')||t==='unauthorized')return null;
+    let map;try{map=JSON.parse(t);}catch{return null;}
+    if(map===null||typeof map!=='object'||Array.isArray(map))return null;
+    return ks.map(k=>{
+      const s=map[k];
+      if(!s||s==='null'||typeof s!=='string')return null;
+      try{return JSON.parse(s);}catch{return null;}
+    });
+  }catch{return null;}
 };
 const isPlainObj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 
@@ -1010,6 +1026,31 @@ const App=()=>{
   const curLockKeyRef=useRef(null);
   const upsertBanner=b=>setSaveBanners(list=>{const i=list.findIndex(x=>x.pid===b.pid);if(i<0)return[...list,{ts:Date.now(),...b}].slice(-4);const n=[...list];n[i]={...n[i],...b};return n;});
   const removeBanner=pid=>setSaveBanners(list=>list.filter(x=>x.pid!==pid));
+
+  // ── 楽観オーバーレイ ──
+  // 受付した瞬間にローカル表示へエントリを反映し、保存中＋保存完了後75秒（GASキャッシュTTL余裕分）は
+  // ポーリング結果にも同じ変更を重ね続ける。これにより「保存が終わるまで予定表に出ない」
+  // 「サーバーの古い応答で一瞬消えてまた出る」の両方が起きなくなる。apply は冪等
+  // （サーバー値に既に反映済みなら何もしない）であること。
+  const overlaysRef=useRef([]); // [{pid,key,apply(data)=>data}]
+  const applyOverlays=(key,data)=>overlaysRef.current.filter(o=>o.key===key).reduce((d,o)=>{try{return o.apply(d);}catch{return d;}},data);
+  const setterOfKey=key=>{
+    if(key===STOR+'insp')return setInspData;
+    if(key===storKey('sched','honten'))return setSchedDataH;
+    if(key===storKey('sched','sanda'))return setSchedDataS;
+    if(key===storKey('lres','honten'))return setLoanerResH;
+    if(key===storKey('lres','sanda'))return setLoanerResS;
+    if(key===STOR+'rres')return setRentalResData;
+    return null;
+  };
+  const addOverlays=ovs=>{
+    overlaysRef.current=[...overlaysRef.current,...ovs];
+    ovs.forEach(o=>{const set=setterOfKey(o.key);if(set)set(d=>{try{return o.apply(d);}catch{return d;}});}); // 即時反映
+  };
+  const dropOverlays=(pid,graceMs)=>{
+    if(graceMs>0)setTimeout(()=>{overlaysRef.current=overlaysRef.current.filter(o=>o.pid!==pid);},graceMs);
+    else overlaysRef.current=overlaysRef.current.filter(o=>o.pid!==pid);
+  };
   const vsId=user?.store||'honten';
   const cDays=vsId==='honten'?closedDaysH:closedDaysS;
   const fetchAll=useCallback(async(force)=>{
@@ -1018,33 +1059,34 @@ const App=()=>{
     fetchBusyRef.current=true;
     setLoading(true);
     try{
-      const [insp,sh,ss,mh,ms,lh,ls,cdh,cds,cdate,ov,rcars,rres,carsH,carsS,limits,restr,doH,doS,stH,stS]=await Promise.all([
-        sGet(STOR+'insp'),sGet(storKey('sched','honten')),sGet(storKey('sched','sanda')),
-        sGet(storKey('memo','honten')),sGet(storKey('memo','sanda')),
-        sGet(storKey('lres','honten')),sGet(storKey('lres','sanda')),
-        sGet(storKey('cdow','honten')),sGet(storKey('cdow-v2','sanda')),
-        sGet(storKey('cdate','honten')),sGet(storKey('overrideOpen','honten')),
-        sGet(STOR+'rentalcars'),sGet(STOR+'rres'),
-        sGet(storKey('cars','honten')),sGet(storKey('cars','sanda')),
-        sGet(STOR+'inspLimits'),
-        sGet('schedRestrictions'),
-        sGet(storKey('dayoff','honten')),sGet(storKey('dayoff','sanda')),
-        sGet(storKey('staff-v2','honten')),sGet(storKey('staff-v2','sanda')),
-      ]);
+      const KEYS=[STOR+'insp',storKey('sched','honten'),storKey('sched','sanda'),
+        storKey('memo','honten'),storKey('memo','sanda'),
+        storKey('lres','honten'),storKey('lres','sanda'),
+        storKey('cdow','honten'),storKey('cdow-v2','sanda'),
+        storKey('cdate','honten'),storKey('overrideOpen','honten'),
+        STOR+'rentalcars',STOR+'rres',
+        storKey('cars','honten'),storKey('cars','sanda'),
+        STOR+'inspLimits','schedRestrictions',
+        storKey('dayoff','honten'),storKey('dayoff','sanda'),
+        storKey('staff-v2','honten'),storKey('staff-v2','sanda')];
+      // まとめ読み1リクエスト（GAS未対応の間は従来の並列GETへ自動フォールバック）
+      let vals=await sGetMany(KEYS);
+      if(!vals)vals=await Promise.all(KEYS.map(k=>sGet(k)));
+      const [insp,sh,ss,mh,ms,lh,ls,cdh,cds,cdate,ov,rcars,rres,carsH,carsS,limits,restr,doH,doS,stH,stS]=vals;
       if(writeGuardRef.current>0&&!force){setLoading(false);return;} // 取得中に保存が始まった場合も反映しない
-      if(isPlainObj(insp))setInspData(insp);
-      if(isPlainObj(sh))setSchedDataH(sh);
-      if(isPlainObj(ss))setSchedDataS(ss);
+      if(isPlainObj(insp))setInspData(applyOverlays(STOR+'insp',insp));
+      if(isPlainObj(sh))setSchedDataH(applyOverlays(storKey('sched','honten'),sh));
+      if(isPlainObj(ss))setSchedDataS(applyOverlays(storKey('sched','sanda'),ss));
       if(isPlainObj(mh))setMemoDataH(mh);
       if(isPlainObj(ms))setMemoDataS(ms);
-      if(isPlainObj(lh))setLoanerResH(lh);
-      if(isPlainObj(ls))setLoanerResS(ls);
+      if(isPlainObj(lh))setLoanerResH(applyOverlays(storKey('lres','honten'),lh));
+      if(isPlainObj(ls))setLoanerResS(applyOverlays(storKey('lres','sanda'),ls));
       if(Array.isArray(cdh))setClosedDaysH(cdh);
       if(Array.isArray(cds))setClosedDaysS(cds);
       if(Array.isArray(cdate))setClosedDates(cdate);
       if(Array.isArray(ov))setOverrideOpen(ov);
       if(Array.isArray(rcars)&&rcars.length>0)setRentalCars(rcars);
-      if(isPlainObj(rres))setRentalResData(rres);
+      if(isPlainObj(rres))setRentalResData(applyOverlays(STOR+'rres',rres));
       if(Array.isArray(carsH)&&carsH.length>0)setLoanerCarsH(carsH);
       if(Array.isArray(carsS)&&carsS.length>0)setLoanerCarsS(carsS);
       if(isPlainObj(limits))setInspLimits(limits);
@@ -1202,8 +1244,11 @@ const App=()=>{
     };
     const colorOf=name=>RES_COLORS[[...String(name||'')].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length];
     if(action.kind==='none'){
-      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal));
-      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal));
+      // 別キーへの独立した書き込みは並列化（GASロック側で直列化されるが、読み・検証待ちが重なる分速い）
+      await Promise.all([
+        writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal)),
+        writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal)),
+      ]);
       return {...entry,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null};
     }
     if(action.kind==='loaner'){
@@ -1216,16 +1261,18 @@ const App=()=>{
         user:userName,color:colorOf(userName),bookingKey:bkFinal,
         carName:car?.name,carNum:car?.num,
       };
-      await writeShared(lresKey,myLres,base=>{
-        const cleaned=cleanOwn(base);
-        const days={...(cleaned[action.carId]||{})};
-        // PC版は開始日をキーにする。別予約と衝突する場合はサフィックスを付けて上書きを防ぐ
-        let k=String(action.from.d);
-        if(days[k])k=`${action.from.d}_${rec.id}`;
-        days[k]=rec;
-        return{...cleaned,[action.carId]:days};
-      },setMyLres,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal));
-      await writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal));
+      await Promise.all([
+        writeShared(lresKey,myLres,base=>{
+          const cleaned=cleanOwn(base);
+          const days={...(cleaned[action.carId]||{})};
+          // PC版は開始日をキーにする。別予約と衝突する場合はサフィックスを付けて上書きを防ぐ
+          let k=String(action.from.d);
+          if(days[k])k=`${action.from.d}_${rec.id}`;
+          days[k]=rec;
+          return{...cleaned,[action.carId]:days};
+        },setMyLres,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal)),
+        writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal)),
+      ]);
       return {...entry,loaner:car?`${car.name} (${car.num})`:'',loanerId:action.carId,rentalLabel:'',rentalCarId:null};
     }
     if(action.kind==='rental'){
@@ -1236,13 +1283,15 @@ const App=()=>{
         ty:action.to.y,tm:action.to.m0,td:action.to.d,
         user:userName,color:colorOf(userName),bookingKey:bkFinal,
       };
-      await writeShared(STOR+'rres',rentalResData,base=>{
-        const cleaned=cleanOwn(base);
-        const days={...(cleaned[action.carId]||{})};
-        days[String(rec.id)]=rec; // PC版addRentalResと同じくidをキーにする
-        return{...cleaned,[action.carId]:days};
-      },setRentalResData,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal));
-      await writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal));
+      await Promise.all([
+        writeShared(STOR+'rres',rentalResData,base=>{
+          const cleaned=cleanOwn(base);
+          const days={...(cleaned[action.carId]||{})};
+          days[String(rec.id)]=rec; // PC版addRentalResと同じくidをキーにする
+          return{...cleaned,[action.carId]:days};
+        },setRentalResData,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal)),
+        writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal)),
+      ]);
       return {...entry,loaner:'',loanerId:null,rentalLabel:`🔑 ${rcar?rcar.name:'レンタカー'}${rcar?.num?` (${rcar.num})`:''}`,rentalCarId:action.carId};
     }
     return entry;
@@ -1358,6 +1407,59 @@ const App=()=>{
     const pend={pid,kind:'save',type:req.type,dk:req.dk,idx:req.idx,slot:req.slot,store:vsId,name:form.name,by:user?.name||'',check:{time:form.time||'',work:form.work||''},ts:Date.now()};
     addPending(pend);inflightRef.current.add(pid);
     const lockHandle=detachLock();
+
+    // ── 楽観オーバーレイの構築（予定表・代車表へ今すぐ反映）──
+    const bkOpt=req.type==='insp'?`insp-${req.dk}-${req.idx}`:`sched-${req.dk}-${req.slot}`;
+    const colorOf=name=>RES_COLORS[[...String(name||'')].reduce((a,c)=>a+c.charCodeAt(0),0)%RES_COLORS.length];
+    let displayEntry={...form};
+    const ovs=[];
+    const rmBkOv=res=>{const out={};for(const cid of Object.keys(res||{})){const days={...(res[cid]||{})};Object.keys(days).forEach(k=>{if(days[k]?.bookingKey===bkOpt)delete days[k];});out[cid]=days;}return out;};
+    if(loanerAction&&loanerAction.kind==='none'){
+      displayEntry={...displayEntry,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null};
+      ovs.push({pid,key:storKey('lres',vsId),apply:rmBkOv});
+      ovs.push({pid,key:STOR+'rres',apply:rmBkOv});
+    }
+    if(loanerAction&&(loanerAction.kind==='loaner'||loanerAction.kind==='rental')){
+      const isLoaner=loanerAction.kind==='loaner';
+      const cars=isLoaner?(vsId==='honten'?loanerCarsH:loanerCarsS):(rentalCars.length?rentalCars:DEFAULT_RENTAL_CARS);
+      const car=cars.find(c=>String(c.id)===String(loanerAction.carId));
+      displayEntry=isLoaner
+        ?{...displayEntry,loaner:car?`${car.name} (${car.num})`:'',loanerId:loanerAction.carId,rentalLabel:'',rentalCarId:null}
+        :{...displayEntry,loaner:'',loanerId:null,rentalLabel:`🔑 ${car?car.name:'レンタカー'}${car?.num?` (${car.num})`:''}`,rentalCarId:loanerAction.carId};
+      const rec={id:Date.now(),fy:loanerAction.from.y,fm:loanerAction.from.m0,fd:loanerAction.from.d,
+        ty:loanerAction.to.y,tm:loanerAction.to.m0,td:loanerAction.to.d,
+        user:form.name,color:colorOf(form.name),bookingKey:bkOpt,
+        ...(isLoaner?{carName:car?.name,carNum:car?.num}:{})};
+      ovs.push({pid,key:isLoaner?storKey('lres',vsId):STOR+'rres',apply:res=>{
+        // サーバーに同bookingKeyの予約が既にあれば何もしない（冪等）
+        if(Object.values(res||{}).some(days=>Object.values(days||{}).some(r=>r&&r.bookingKey===bkOpt)))return res;
+        const days={...(res?.[loanerAction.carId]||{})};
+        days[`opt-${rec.id}`]=rec;
+        return{...res,[loanerAction.carId]:days};
+      }});
+    }
+    if(req.type==='insp'){
+      const entryOpt={...blankInsp(),...displayEntry,store:vsId,bookingStatus:'confirmed'};
+      const reflected=r=>r&&r.name===form.name&&r.time===(form.time||'')&&String(r.course)===String(form.course)&&(r.note||'')===(form.note||'');
+      ovs.push({pid,key:STOR+'insp',apply:data=>{
+        const rows=((data[req.dk]||[]).map(r=>r||blankInsp()));
+        while(rows.length<=req.idx)rows.push(blankInsp());
+        if(reflected(rows[req.idx]))return data; // サーバー反映済みならサーバー版を尊重
+        rows[req.idx]=entryOpt;
+        return{...data,[req.dk]:rows};
+      }});
+    }else{
+      const entryOpt={...displayEntry};
+      const reflected=r=>r&&r.name===form.name&&(r.work||'')===(form.work||'')&&(r.content||'')===(form.content||'');
+      ovs.push({pid,key:storKey('sched',vsId),apply:data=>{
+        const day={...(data[req.dk]||{})};
+        if(Object.entries(day).some(([k,r])=>reflected(r)&&getBaseSlot(k)===getBaseSlot(req.slot)))return data;
+        day[req.slot]=entryOpt;
+        return{...data,[req.dk]:day};
+      }});
+    }
+    addOverlays(ovs);
+
     upsertBanner({pid,phase:'saving',label});
     setEditMode(null);
     (async()=>{
@@ -1365,7 +1467,9 @@ const App=()=>{
         await saveCore(req,form,loanerAction);
         upsertBanner({pid,phase:'done',label});
         setTimeout(()=>removeBanner(pid),6000);
+        dropOverlays(pid,75000); // GAS読み取りキャッシュ(60s)が入れ替わるまで重ね続ける
       }catch(e){
+        dropOverlays(pid,0);
         upsertBanner({pid,phase:'fail',label,detail:String(e?.message||e)});
         notifyFail(pend,String(e?.message||e));
         fetchAll(true); // 楽観表示をサーバーの実際の状態に揃える
@@ -1419,8 +1523,10 @@ const App=()=>{
       }
       return out;
     };
-    await writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres,echo=>!hasBk(echo,bk));
-    await writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData,echo=>!hasBk(echo,bk));
+    await Promise.all([
+      writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres,echo=>!hasBk(echo,bk)),
+      writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData,echo=>!hasBk(echo,bk)),
+    ]);
   };
 
   // 削除も保存と同じ楽観的受付（即モーダルを閉じてバックグラウンド実行＋バナー通知）
@@ -1433,6 +1539,31 @@ const App=()=>{
     const pend={pid,kind:'delete',type:req.type,dk:req.dk,idx:req.idx,slot:req.slot,store:vsId,name:nm,by:user?.name||'',check:{},ts:Date.now()};
     addPending(pend);inflightRef.current.add(pid);
     const lockHandle=detachLock();
+
+    // 楽観オーバーレイ: 画面からは今すぐ消す（冪等: サーバー側で既に消えていれば何もしない）
+    const bkDel=req.type==='insp'?`insp-${req.dk}-${req.idx}`:`sched-${req.dk}-${req.slot}`;
+    const rmBkDel=res=>{const out={};for(const cid of Object.keys(res||{})){const days={...(res[cid]||{})};Object.keys(days).forEach(k=>{if(days[k]?.bookingKey===bkDel)delete days[k];});out[cid]=days;}return out;};
+    const ovs=[];
+    if(req.type==='insp'){
+      ovs.push({pid,key:STOR+'insp',apply:data=>{
+        const rows=((data[req.dk]||[]).map(r=>r||blankInsp()));
+        if(!(nm&&rows[req.idx]&&rows[req.idx].name===nm))return data;
+        rows[req.idx]=blankInsp();
+        while(rows.length>0&&!rows[rows.length-1]?.name)rows.pop();
+        return{...data,[req.dk]:rows};
+      }});
+    }else{
+      ovs.push({pid,key:storKey('sched',vsId),apply:data=>{
+        const day={...(data[req.dk]||{})};
+        if(!(day[req.slot]&&day[req.slot].name===nm))return data;
+        delete day[req.slot];
+        return{...data,[req.dk]:day};
+      }});
+    }
+    ovs.push({pid,key:storKey('lres',vsId),apply:rmBkDel});
+    ovs.push({pid,key:STOR+'rres',apply:rmBkDel});
+    addOverlays(ovs);
+
     upsertBanner({pid,phase:'saving',label});
     setEditMode(null);
     (async()=>{
@@ -1440,7 +1571,9 @@ const App=()=>{
         await deleteCore(req);
         upsertBanner({pid,phase:'done',label});
         setTimeout(()=>removeBanner(pid),6000);
+        dropOverlays(pid,75000);
       }catch(e){
+        dropOverlays(pid,0);
         upsertBanner({pid,phase:'fail',label,detail:String(e?.message||e)});
         notifyFail(pend,String(e?.message||e));
         fetchAll(true);
