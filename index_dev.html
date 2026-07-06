@@ -7568,8 +7568,12 @@ function AppInner() {
       const rowTop=row.getBoundingClientRect().top-cont.getBoundingClientRect().top+cont.scrollTop;
       const head=cont.querySelector('thead');
       const headH=head?head.getBoundingClientRect().height:0; // stickyヘッダーの直下に枠が来るように
-      cont.scrollTo({top:Math.max(0,rowTop-headH),behavior:'smooth'});
+      // 非表示タブではsmoothアニメーションが動かず空振りするため、見えている時だけsmooth
+      cont.scrollTo({top:Math.max(0,rowTop-headH),behavior:document.visibilityState==='visible'?'smooth':'auto'});
     };
+    // タブが表に戻った時も即追従（非表示中はintervalが間引かれるため）
+    const onVis=()=>{if(document.visibilityState==='visible')apply(true);};
+    document.addEventListener('visibilitychange',onVis);
     // 起動直後は初期データ読み込みでレイアウトが動きスクロールが定着しないため、
     // 実際にスクロールが付くまで1.5秒間隔で再適用する（最大30秒で打ち切り）
     let attempts=0;
@@ -7582,7 +7586,7 @@ function AppInner() {
       apply(false);
     },1500);
     const iv=setInterval(()=>apply(false),30000); // 以後は30秒ごとに30分境界を確認
-    return()=>{clearInterval(initIv);clearInterval(iv);};
+    return()=>{clearInterval(initIv);clearInterval(iv);document.removeEventListener('visibilitychange',onVis);};
   },[view,dk,schedCollapsed]);
 
   return (
