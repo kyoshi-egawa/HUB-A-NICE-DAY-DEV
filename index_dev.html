@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.10';
+const APP_VERSION = '1.11';
 
 
 
@@ -5900,10 +5900,37 @@ function AppInner() {
   // 全画面表示（ブラウザFullscreen API。タブ・ブックマークバーごと隠れる）
   const [isFullscreen,setIsFullscreen]=useState(false);
   useEffect(()=>{
-    const h=()=>setIsFullscreen(!!(document.fullscreenElement||document.webkitFullscreenElement));
+    // 全画面状態をsessionStorageに保存し、customers.htmlと相互に引き継ぐ。
+    // ページ遷移でブラウザの全画面は強制解除されるため、遷移先で最初のクリック時に自動復帰させる
+    //（ブラウザの制約でユーザー操作なしにJSから全画面化はできない）。
+    let unloading=false;
+    const onHide=()=>{unloading=true;};
+    const h=()=>{
+      const fs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+      setIsFullscreen(fs);
+      if(!unloading){try{sessionStorage.setItem(STOR+'fs-restore',fs?'1':'0');}catch(e){}}
+    };
     document.addEventListener('fullscreenchange',h);
     document.addEventListener('webkitfullscreenchange',h);
-    return()=>{document.removeEventListener('fullscreenchange',h);document.removeEventListener('webkitfullscreenchange',h);};
+    window.addEventListener('pagehide',onHide);
+    let restore=null;
+    try{
+      if(sessionStorage.getItem(STOR+'fs-restore')==='1'&&!(document.fullscreenElement||document.webkitFullscreenElement)){
+        restore=()=>{
+          document.removeEventListener('pointerdown',restore,true);restore=null;
+          const el=document.documentElement;
+          const req=el.requestFullscreen||el.webkitRequestFullscreen;
+          if(req)Promise.resolve(req.call(el)).catch(()=>{});
+        };
+        document.addEventListener('pointerdown',restore,true);
+      }
+    }catch(e){}
+    return()=>{
+      document.removeEventListener('fullscreenchange',h);
+      document.removeEventListener('webkitfullscreenchange',h);
+      window.removeEventListener('pagehide',onHide);
+      if(restore)document.removeEventListener('pointerdown',restore,true);
+    };
   },[]);
   const toggleFullscreen=useCallback(()=>{
     try{
@@ -7589,7 +7616,7 @@ function AppInner() {
                 <button onClick={()=>setShowSearch(true)} style={{display:'flex',alignItems:'center',gap:4,padding:'6px 14px',borderRadius:7,fontWeight:700,fontSize:12,border:'2px solid #ea580c',background:'#ea580c',color:'white',cursor:'pointer'}}>
                   <Search size={12}/> 空き枠検索
                 </button>
-                <a href="./customers.html" style={{display:'flex',alignItems:'center',gap:4,padding:'6px 14px',borderRadius:7,fontWeight:700,fontSize:12,border:'2px solid #16a34a',background:'#dcfce7',color:'#15803d',textDecoration:'none',cursor:'pointer'}}>
+                <a href="./customers.html" onClick={()=>{try{sessionStorage.setItem(STOR+'fs-restore',(document.fullscreenElement||document.webkitFullscreenElement)?'1':'0');}catch(e){}}} style={{display:'flex',alignItems:'center',gap:4,padding:'6px 14px',borderRadius:7,fontWeight:700,fontSize:12,border:'2px solid #16a34a',background:'#dcfce7',color:'#15803d',textDecoration:'none',cursor:'pointer'}}>
                   👥 顧客リスト
                 </a>
                </div>
