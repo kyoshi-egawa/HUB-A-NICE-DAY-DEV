@@ -7570,10 +7570,19 @@ function AppInner() {
       const headH=head?head.getBoundingClientRect().height:0; // stickyヘッダーの直下に枠が来るように
       cont.scrollTo({top:Math.max(0,rowTop-headH),behavior:'smooth'});
     };
-    // 起動直後は初期データ読み込みでレイアウトが動くため、10秒間は数回強制再適用する
-    const timers=[300,1000,2500,5000,10000].map(ms=>setTimeout(()=>apply(true),ms));
+    // 起動直後は初期データ読み込みでレイアウトが動きスクロールが定着しないため、
+    // 実際にスクロールが付くまで1.5秒間隔で再適用する（最大30秒で打ち切り）
+    let attempts=0;
+    const initIv=setInterval(()=>{
+      attempts++;
+      const cont=document.getElementById(SEC_SCHED);
+      const stuck=cont&&cont.scrollTop>10; // 定着済み（先頭枠=09:00のままが正解の朝は付かないが実害なし）
+      if(stuck||attempts>20){clearInterval(initIv);return;}
+      lastAutoSlotRef.current=null; // 未定着の間は「未適用」扱いで毎回実行
+      apply(false);
+    },1500);
     const iv=setInterval(()=>apply(false),30000); // 以後は30秒ごとに30分境界を確認
-    return()=>{timers.forEach(clearTimeout);clearInterval(iv);};
+    return()=>{clearInterval(initIv);clearInterval(iv);};
   },[view,dk,schedCollapsed]);
 
   return (
