@@ -7549,11 +7549,14 @@ function AppInner() {
       m=Math.max(9*60,Math.min(18*60,m)); // 09:00〜18:00にクランプ
       return `${String(Math.floor(m/60)).padStart(2,'0')}:${m%60===0?'00':'30'}`;
     };
-    const apply=()=>{
+    const apply=(force)=>{
       const slot=targetSlot();
-      if(lastAutoSlotRef.current===slot)return; // 境界を越えた時だけ動かす
+      if(!force&&lastAutoSlotRef.current===slot)return; // 通常は境界を越えた時だけ動かす
       const cont=document.getElementById(SEC_SCHED);
       if(!cont)return;
+      // レイアウト未確定でスクロール余地がない間は適用しない（後の再試行に任せる。
+      // ここでスクロールすると0にクランプされたまま「適用済み」になってしまう）
+      if(cont.scrollHeight-cont.clientHeight<40)return;
       // 対象枠の行を探す（畳み表示で行が無ければ後続の枠にフォールバック）
       let row=null;
       const idx=Math.max(0,TIME_SLOTS.indexOf(slot));
@@ -7567,9 +7570,10 @@ function AppInner() {
       const headH=head?head.getBoundingClientRect().height:0; // stickyヘッダーの直下に枠が来るように
       cont.scrollTo({top:Math.max(0,rowTop-headH),behavior:'smooth'});
     };
-    const t=setTimeout(apply,300);      // 初回はレンダリング完了後
-    const iv=setInterval(apply,30000);  // 30秒ごとに30分境界を確認
-    return()=>{clearTimeout(t);clearInterval(iv);};
+    // 起動直後は初期データ読み込みでレイアウトが動くため、10秒間は数回強制再適用する
+    const timers=[300,1000,2500,5000,10000].map(ms=>setTimeout(()=>apply(true),ms));
+    const iv=setInterval(()=>apply(false),30000); // 以後は30秒ごとに30分境界を確認
+    return()=>{timers.forEach(clearTimeout);clearInterval(iv);};
   },[view,dk,schedCollapsed]);
 
   return (
