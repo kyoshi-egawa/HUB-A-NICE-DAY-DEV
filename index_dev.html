@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.12';
+const APP_VERSION = '1.13';
 
 
 
@@ -4264,7 +4264,8 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
   const contentQItems=setItems||[];
 
   return (
-    <tr style={{background:isRestricted?'#fee2e2':locked?'#fff7ed':row.store==='sanda'?'#fff0f0':row.store==='honten'?'#eff6ff':isHour?'white':'#f0feff',cursor:locked||otherStore?'not-allowed':'pointer'}}
+    <tr id={isFirstSub?'sched-slot-'+(baseSlot||slot).replace(':',''):undefined}
+      style={{background:isRestricted?'#fee2e2':locked?'#fff7ed':row.store==='sanda'?'#fff0f0':row.store==='honten'?'#eff6ff':isHour?'white':'#f0feff',cursor:locked||otherStore?'not-allowed':'pointer'}}
       onClick={()=>{if(!locked&&!otherStore){const _e=!row.name;onOpenModal('sched',dk,null,slot,_e);}}}>
       <td style={{...TD,fontWeight:isFirstSub&&isHour?800:500,color:isFirstSub&&isHour?'#0891b2':'#7dd3fc',whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isHour?13:11,borderLeft:isSub?'3px solid #7dd3fc':''}}>
         {isFirstSub?slot:<span style={{fontSize:9,color:'#a5f3fc'}}>↳</span>}
@@ -7531,6 +7532,45 @@ function AppInner() {
     setSelDate(d);
   };
   const dayMemos=dk?memoData[dk]||[]:[];
+
+  // タイムスケジュールを現在時刻に自動追従スクロール（今日を表示中のみ）。
+  // 常に「現在時刻の1枠（30分）前」の行が先頭に来るようにする。
+  // 例: 10:00になったら9:30の枠が先頭、10:30になったら10:00の枠が先頭。
+  // 手動で上にスクロールすれば過去の予定も見られる（次の30分境界で再び追従する）。
+  const lastAutoSlotRef=useRef(null);
+  useEffect(()=>{
+    lastAutoSlotRef.current=null;
+    if(view!=='schedule'||!dk)return;
+    const n0=new Date();
+    if(dk!==dateKey(n0.getFullYear(),n0.getMonth(),n0.getDate()))return; // 今日以外は追従しない
+    const targetSlot=()=>{
+      const n=new Date();
+      let m=Math.floor((n.getHours()*60+n.getMinutes())/30)*30-30; // 現在枠の1枠前
+      m=Math.max(9*60,Math.min(18*60,m)); // 09:00〜18:00にクランプ
+      return `${String(Math.floor(m/60)).padStart(2,'0')}:${m%60===0?'00':'30'}`;
+    };
+    const apply=()=>{
+      const slot=targetSlot();
+      if(lastAutoSlotRef.current===slot)return; // 境界を越えた時だけ動かす
+      const cont=document.getElementById(SEC_SCHED);
+      if(!cont)return;
+      // 対象枠の行を探す（畳み表示で行が無ければ後続の枠にフォールバック）
+      let row=null;
+      const idx=Math.max(0,TIME_SLOTS.indexOf(slot));
+      for(let i=idx;i<TIME_SLOTS.length&&!row;i++){
+        row=document.getElementById('sched-slot-'+TIME_SLOTS[i].replace(':',''));
+      }
+      if(!row)return;
+      lastAutoSlotRef.current=slot;
+      const rowTop=row.getBoundingClientRect().top-cont.getBoundingClientRect().top+cont.scrollTop;
+      const head=cont.querySelector('thead');
+      const headH=head?head.getBoundingClientRect().height:0; // stickyヘッダーの直下に枠が来るように
+      cont.scrollTo({top:Math.max(0,rowTop-headH),behavior:'smooth'});
+    };
+    const t=setTimeout(apply,300);      // 初回はレンダリング完了後
+    const iv=setInterval(apply,30000);  // 30秒ごとに30分境界を確認
+    return()=>{clearTimeout(t);clearInterval(iv);};
+  },[view,dk,schedCollapsed]);
 
   return (
     <div style={{height:'100vh',overflow:'hidden',background:'linear-gradient(140deg,#7c2d12,#EA580C,#f97316)',fontFamily:'system-ui,-apple-system,sans-serif'}}>
