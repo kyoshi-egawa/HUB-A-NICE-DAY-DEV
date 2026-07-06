@@ -82,7 +82,10 @@ const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
-const APP_VERSION='1.11'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
+// index側の全画面オーバーレイ（iframe）内で開かれているか。埋め込み時は
+// 「スケジュールに戻る」がページ遷移ではなく親へのpostMessage（オーバーレイ閉鎖）になる。
+const IS_EMBED=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
+const APP_VERSION='1.12'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
 const CHUNK_SIZE=100;
 // ファイル名をGASキーに使える形に変換
@@ -1224,7 +1227,7 @@ const App=()=>{
     window.addEventListener('pagehide',onHide);
     let restore=null;
     try{
-      if(sessionStorage.getItem(STOR+'fs-restore')==='1'&&!(document.fullscreenElement||document.webkitFullscreenElement)){
+      if(!IS_EMBED&&sessionStorage.getItem(STOR+'fs-restore')==='1'&&!(document.fullscreenElement||document.webkitFullscreenElement)){
         restore=()=>{
           document.removeEventListener('pointerdown',restore,true);restore=null;
           const el=document.documentElement;
@@ -2065,7 +2068,10 @@ const App=()=>{
     <div style={{height:'100vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
       {/* ── ヘッダー ── */}
       <div style={{flexShrink:0,background:'linear-gradient(135deg,#1e1b4b,#1d4ed8)',padding:'10px 16px',display:'flex',alignItems:'center',gap:10}}>
-        <a href="./index.html" onClick={()=>{try{sessionStorage.setItem(STOR+'fs-restore',(document.fullscreenElement||document.webkitFullscreenElement)?'1':'0');}catch(e){}}}
+        <a href="./index.html" onClick={e=>{
+            if(IS_EMBED){e.preventDefault();try{window.parent.postMessage({type:'hub-close-customers'},location.origin);}catch(err){}return;}
+            try{sessionStorage.setItem(STOR+'fs-restore',(document.fullscreenElement||document.webkitFullscreenElement)?'1':'0');}catch(err){}
+          }}
           style={{color:'#fef08a',fontSize:12,textDecoration:'none',fontWeight:800,
           padding:'6px 14px',background:'#16a34a',borderRadius:8,border:'2px solid #15803d',
           boxShadow:'0 2px 6px rgba(22,163,74,0.4)'}}>
@@ -2076,7 +2082,7 @@ const App=()=>{
           <div style={{width:7,height:7,borderRadius:'50%',background:gasOk===true?'#4ade80':gasOk===false?'#f87171':'#fbbf24'}}/>
           <span style={{color:'rgba(255,255,255,.6)',fontSize:10}}>{gasOk===true?'GAS接続済':gasOk===false?'GAS接続エラー':'確認中'}</span>
         </div>
-        <button onClick={toggleFullscreen} title={isFullscreen?'全画面を終了して元のウインドウに戻す':'全画面表示（ブラウザのタブ・お気に入りバーを隠して大きく表示）'}
+        {!IS_EMBED&&<button onClick={toggleFullscreen} title={isFullscreen?'全画面を終了して元のウインドウに戻す':'全画面表示（ブラウザのタブ・お気に入りバーを隠して大きく表示）'}
           style={{display:'flex',alignItems:'center',gap:4,padding:'5px 10px',background:'rgba(255,255,255,0.15)',border:'2px solid rgba(255,255,255,0.5)',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:11,color:'white',whiteSpace:'nowrap'}}
           onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.3)'}
           onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.15)'}>
@@ -2086,7 +2092,7 @@ const App=()=>{
               :<><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/></>}
           </svg>
           {isFullscreen?'元に戻す':'全画面'}
-        </button>
+        </button>}
       </div>
 
       {/* ── ファイルタブ ── */}

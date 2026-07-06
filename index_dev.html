@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.11';
+const APP_VERSION = '1.12';
 
 
 
@@ -5944,6 +5944,9 @@ function AppInner() {
       }
     }catch(e){/* 非対応ブラウザは無視 */}
   },[]);
+  // 全画面中の顧客リスト：ページ遷移すると全画面が強制解除されるため、遷移せず
+  // iframeオーバーレイで重ねて表示する（全画面が一瞬も切れない）。通常時は従来どおり遷移。
+  const [custOverlay,setCustOverlay]=useState(false);
 
   // 車検は両店舗共通
   const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},15000);
@@ -6153,30 +6156,44 @@ function AppInner() {
   },[]);
 
   // customers.htmlから戻ってきたとき即リフレッシュ
+  // （タブ復帰時と、全画面オーバーレイの顧客リストを閉じたときの両方から呼ぶ）
+  const refreshMainData=useCallback(()=>{
+    // 主要データを即再取得（updateLocal＝GAS書き戻しなし・writeCount操作なし。
+    // setXxx(v)を使うとGASへ書き戻して他端末の最新データを消す恐れがある）
+    // ★2026-07-03 ポーリング間隔を15秒に伸ばした代わりに、タブ復帰時は主要キーを全て即時更新する
+    const applyIfObj=(fn)=>(v)=>{if(v&&typeof v==='object'&&!Array.isArray(v))fn(v);};
+    sGet(STOR+'insp').then(applyIfObj(updateLocalInspData));
+    sGet(storKey('sched','honten')).then(applyIfObj(updateLocalSchedH));
+    sGet(storKey('sched','sanda')).then(applyIfObj(updateLocalSchedS));
+    sGet(storKey('lres','honten')).then(applyIfObj(updateLocalLresH));
+    sGet(storKey('lres','sanda')).then(applyIfObj(updateLocalLresS));
+    sGet(STOR+'rres').then(applyIfObj(updateLocalRres));
+    sGet(STOR+'locks').then(applyIfObj(updateLocalLocks));
+    // customers.htmlから戻ったとき店舗をログインユーザーに合わせて復元
+    try{
+      const saved=sessionStorage.getItem('hub_currentUser');
+      if(saved){const u=JSON.parse(saved);const sid=u?.store?.id||u?.store||null;if(sid)setViewStore(sid);}
+    }catch(e){}
+  },[]);
   useEffect(()=>{
     const onVisible=()=>{
-      if(document.visibilityState==='visible'){
-        // 主要データを即再取得（updateLocal＝GAS書き戻しなし・writeCount操作なし。
-        // setXxx(v)を使うとGASへ書き戻して他端末の最新データを消す恐れがある）
-        // ★2026-07-03 ポーリング間隔を15秒に伸ばした代わりに、タブ復帰時は主要キーを全て即時更新する
-        const applyIfObj=(fn)=>(v)=>{if(v&&typeof v==='object'&&!Array.isArray(v))fn(v);};
-        sGet(STOR+'insp').then(applyIfObj(updateLocalInspData));
-        sGet(storKey('sched','honten')).then(applyIfObj(updateLocalSchedH));
-        sGet(storKey('sched','sanda')).then(applyIfObj(updateLocalSchedS));
-        sGet(storKey('lres','honten')).then(applyIfObj(updateLocalLresH));
-        sGet(storKey('lres','sanda')).then(applyIfObj(updateLocalLresS));
-        sGet(STOR+'rres').then(applyIfObj(updateLocalRres));
-        sGet(STOR+'locks').then(applyIfObj(updateLocalLocks));
-        // customers.htmlから戻ったとき店舗をログインユーザーに合わせて復元
-        try{
-          const saved=sessionStorage.getItem('hub_currentUser');
-          if(saved){const u=JSON.parse(saved);const sid=u?.store?.id||u?.store||null;if(sid)setViewStore(sid);}
-        }catch(e){}
-      }
+      if(document.visibilityState==='visible')refreshMainData();
     };
     document.addEventListener('visibilitychange',onVisible);
     return()=>document.removeEventListener('visibilitychange',onVisible);
-  },[]);
+  },[refreshMainData]);
+  // 全画面オーバーレイ内の顧客リストから「スケジュールに戻る」→ オーバーレイを閉じてデータ再取得
+  useEffect(()=>{
+    const onMsg=(e)=>{
+      if(e.origin!==location.origin)return;
+      if(e.data&&e.data.type==='hub-close-customers'){
+        setCustOverlay(false);
+        refreshMainData();
+      }
+    };
+    window.addEventListener('message',onMsg);
+    return()=>window.removeEventListener('message',onMsg);
+  },[refreshMainData]);
 
   // 顧客リストデータのバックグラウンドプリロード
   useEffect(()=>{
@@ -7616,7 +7633,11 @@ function AppInner() {
                 <button onClick={()=>setShowSearch(true)} style={{display:'flex',alignItems:'center',gap:4,padding:'6px 14px',borderRadius:7,fontWeight:700,fontSize:12,border:'2px solid #ea580c',background:'#ea580c',color:'white',cursor:'pointer'}}>
                   <Search size={12}/> 空き枠検索
                 </button>
-                <a href="./customers.html" onClick={()=>{try{sessionStorage.setItem(STOR+'fs-restore',(document.fullscreenElement||document.webkitFullscreenElement)?'1':'0');}catch(e){}}} style={{display:'flex',alignItems:'center',gap:4,padding:'6px 14px',borderRadius:7,fontWeight:700,fontSize:12,border:'2px solid #16a34a',background:'#dcfce7',color:'#15803d',textDecoration:'none',cursor:'pointer'}}>
+                <a href="./customers.html" onClick={e=>{
+                  // 全画面中はページ遷移せずオーバーレイ表示（遷移すると全画面が解除されるため）
+                  if(document.fullscreenElement||document.webkitFullscreenElement){e.preventDefault();setCustOverlay(true);return;}
+                  try{sessionStorage.setItem(STOR+'fs-restore','0');}catch(e2){}
+                }} style={{display:'flex',alignItems:'center',gap:4,padding:'6px 14px',borderRadius:7,fontWeight:700,fontSize:12,border:'2px solid #16a34a',background:'#dcfce7',color:'#15803d',textDecoration:'none',cursor:'pointer'}}>
                   👥 顧客リスト
                 </a>
                </div>
@@ -8504,6 +8525,13 @@ function AppInner() {
           </div>
         )}
       </main>
+
+      {/* -- 顧客リスト（全画面時のオーバーレイ表示。閉じるのはiframe内の「スケジュールに戻る」→postMessage） -- */}
+      {custOverlay&&(
+        <div style={{position:'fixed',inset:0,zIndex:100000,background:'white'}}>
+          <iframe src="./customers.html" title="顧客リスト" style={{width:'100%',height:'100%',border:'none',display:'block'}}/>
+        </div>
+      )}
 
       {/* -- 代車設定モーダル -- */}
       <LoanerSettingsModal
