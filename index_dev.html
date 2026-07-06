@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.13';
+const APP_VERSION = '1.14';
 
 
 
@@ -7542,7 +7542,13 @@ function AppInner() {
     lastAutoSlotRef.current=null;
     if(view!=='schedule'||!dk)return;
     const n0=new Date();
-    if(dk!==dateKey(n0.getFullYear(),n0.getMonth(),n0.getDate()))return; // 今日以外は追従しない
+    // 今日以外は時間連動しない。前の日で下方向にスクロールした位置が残らないよう
+    // 先頭（09:00）へ戻す。レイアウト確定を待って数回リセットする。
+    if(dk!==dateKey(n0.getFullYear(),n0.getMonth(),n0.getDate())){
+      const resetTop=()=>{const c=document.getElementById(SEC_SCHED);if(c)c.scrollTop=0;};
+      const rts=[0,150,400,900].map(ms=>setTimeout(resetTop,ms));
+      return()=>rts.forEach(clearTimeout);
+    }
     const targetSlot=()=>{
       const n=new Date();
       let m=Math.floor((n.getHours()*60+n.getMinutes())/30)*30-30; // 現在枠の1枠前
