@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.09';
+const APP_VERSION = '1.10';
 
 
 
@@ -105,6 +105,8 @@ const iconStyle = (size=16) => ({width:size,height:size,display:'inline-block',v
 const Calendar = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>;
 const Car = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><path d="M5 17H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1l2-4h10l2 4h1a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2"/><circle cx="7.5" cy="17.5" r="2.5"/><circle cx="16.5" cy="17.5" r="2.5"/></svg>;
 const Clock = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>;
+const Expand = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M21 16v3a2 2 0 0 1-2 2h-3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/></svg>;
+const Shrink = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>;
 const ChevronLeft = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>;
 const ChevronRight = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>;
 const ChevronsLeft = ({size=16,color='currentColor',...p}) => <svg {...p} style={iconStyle(size)} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>;
@@ -5895,6 +5897,26 @@ function AppInner() {
     return()=>clearTimeout(t);
   },[view,curMonth]);
   const [schedCollapsed,setSchedCollapsed]=useState(false); // スケジュール畳む/開く（デフォルト：開く）
+  // 全画面表示（ブラウザFullscreen API。タブ・ブックマークバーごと隠れる）
+  const [isFullscreen,setIsFullscreen]=useState(false);
+  useEffect(()=>{
+    const h=()=>setIsFullscreen(!!(document.fullscreenElement||document.webkitFullscreenElement));
+    document.addEventListener('fullscreenchange',h);
+    document.addEventListener('webkitfullscreenchange',h);
+    return()=>{document.removeEventListener('fullscreenchange',h);document.removeEventListener('webkitfullscreenchange',h);};
+  },[]);
+  const toggleFullscreen=useCallback(()=>{
+    try{
+      if(document.fullscreenElement||document.webkitFullscreenElement){
+        const ex=document.exitFullscreen||document.webkitExitFullscreen;
+        if(ex)Promise.resolve(ex.call(document)).catch(()=>{});
+      }else{
+        const el=document.documentElement;
+        const req=el.requestFullscreen||el.webkitRequestFullscreen;
+        if(req)Promise.resolve(req.call(el)).catch(()=>{});
+      }
+    }catch(e){/* 非対応ブラウザは無視 */}
+  },[]);
 
   // 車検は両店舗共通
   const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},15000);
@@ -7498,6 +7520,12 @@ function AppInner() {
 
               </div>
               <div style={{display:'flex',alignItems:'center',gap:5}}>
+                <button onClick={toggleFullscreen} title={isFullscreen?'全画面を終了して元のウインドウに戻す':'全画面表示（ブラウザのタブ・お気に入りバーを隠して大きく表示）'}
+                  style={{display:'flex',alignItems:'center',gap:4,padding:'5px 10px',background:'rgba(255,255,255,0.18)',border:'2px solid rgba(255,255,255,0.55)',borderRadius:8,cursor:'pointer',fontWeight:700,fontSize:11,color:'white',whiteSpace:'nowrap'}}
+                  onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.32)'}
+                  onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.18)'}>
+                  {isFullscreen?<Shrink size={14}/>:<Expand size={14}/>}{isFullscreen?'元に戻す':'全画面'}
+                </button>
                 <div style={{display:'flex',alignItems:'center',gap:5,padding:'3px 10px',background:userStore.bg,borderRadius:8,border:`2px solid ${userStore.color}33`}}>
                   <span style={{width:22,height:22,borderRadius:'50%',background:userStore.color,color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:11}}>{currentUser?.myNumber??currentUser?.id}</span>
                   <span style={{fontWeight:700,color:userStore.accent,fontSize:12}}>{currentUser?.name}</span>
@@ -8332,7 +8360,7 @@ function AppInner() {
                   </div>
 
                 </div>
-              <div id={SEC_SCHED} style={{flex:1,overflow:'auto',maxHeight:'calc(100vh - 290px)'}}>
+              <div id={SEC_SCHED} style={{flex:1,minHeight:0,overflow:'auto'}}>
                 <div style={{minWidth:'max-content'}}>
                   <table style={{...TBL,width:'100%'}}>
                     <thead><tr style={{background:'linear-gradient(90deg,#0e7490,#0891b2)',color:'white',position:'sticky',top:0,zIndex:5}}>
