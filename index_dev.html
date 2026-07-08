@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.22';
+const APP_VERSION = '1.23';
 
 
 
@@ -5484,12 +5484,6 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
       </div>
 
       {/* ホバープレビュー（軽量・消えやすい） */}
-      {!pickMode&&hoverRes&&!pinnedRes&&(
-        <div style={{position:'fixed',bottom:24,right:24,zIndex:1900,background:'rgba(30,27,74,0.92)',color:'white',borderRadius:8,padding:'8px 14px',fontSize:12,pointerEvents:'none',boxShadow:'0 4px 16px rgba(0,0,0,0.3)'}}>
-          🚙 {hoverRes.car.name}　{hoverRes.res.fm+1}/{hoverRes.res.fd}〜{hoverRes.res.tm+1}/{hoverRes.res.td}　{hoverRes.res.user}
-          <div style={{fontSize:10,opacity:0.7,marginTop:2}}>クリックで編集・削除</div>
-        </div>
-      )}
 
       {/* 固定編集パネル（予約済みバーをクリックで開く） */}
       {!pickMode&&pinnedRes&&pinnedRes.res&&(
@@ -5566,9 +5560,22 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
           💡 空きセルをクリック→右にスライド→離して日数確定
         </div>
       )}
+      {/* ①代車ホバー情報：代車とレンタカーの間の空白に大きく表示（右下の小窓は廃止） */}
       {!pickMode&&(
-        <div style={{fontSize:11,color:'#9ca3af',marginBottom:4}}>
-          予約バーをクリックで編集・削除
+        <div style={{minHeight:62,margin:'4px 0 10px',borderRadius:11,border:`1px ${hoverRes&&hoverRes.res?'solid':'dashed'} ${hoverRes&&hoverRes.res?(hoverRes.res._rental?'#6ee7b7':'#fdba74'):'#cbd5e1'}`,background:hoverRes&&hoverRes.res?(hoverRes.res._rental?'#f0fdf4':'#fff7ed'):'#f8fafc',display:'flex',alignItems:'center',padding:'10px 18px',transition:'background .1s'}}>
+          {hoverRes&&hoverRes.res?(
+            <div style={{display:'flex',alignItems:'center',gap:18,flexWrap:'wrap'}}>
+              <span style={{display:'inline-flex',alignItems:'center',gap:9,fontSize:19,fontWeight:800,color:hoverRes.res._rental?'#065f46':'#7c2d12'}}>
+                <span style={{width:15,height:15,borderRadius:4,background:hoverRes.res.color||'#94a3b8',display:'inline-block',boxShadow:'0 1px 2px rgba(0,0,0,.25)'}}/>
+                {hoverRes.res._rental?'🔑':'🚙'} {hoverRes.car.name}{hoverRes.car.num?`（${hoverRes.car.num}）`:''}
+              </span>
+              <span style={{fontSize:16,fontWeight:700,color:'#334155'}}>📅 {hoverRes.res.fm+1}/{hoverRes.res.fd} 〜 {hoverRes.res.tm+1}/{hoverRes.res.td}</span>
+              <span style={{fontSize:18,fontWeight:800,color:'#1e293b'}}>👤 {hoverRes.res.user}</span>
+              <span style={{fontSize:11,color:'#94a3b8',fontWeight:600}}>クリックで編集・削除</span>
+            </div>
+          ):(
+            <span style={{fontSize:13,color:'#94a3b8'}}>🖱 予約バーにマウスを乗せると、ここに詳細が大きく表示されます（クリックで編集・削除）</span>
+          )}
         </div>
       )}
 
