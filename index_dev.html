@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.27';
+const APP_VERSION = '1.28';
 
 
 
@@ -5121,7 +5121,9 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
   const [editForm,setEditForm]=useState({user:'',startDate:'',endDate:''});
   const [rentalEditModal,setRentalEditModal]=useState(null);
   const [rentalEditForm,setRentalEditForm]=useState({user:'',startDate:'',endDate:''});
-  const [optResult,setOptResult]=useState(null); // ⑤最適化のプレビュー {moves,newLoanerRes,total,locked}
+  const [optResult,setOptResult]=useState(null); // ⑤最適化のプレビュー
+  // ⑤最適化の基準日（この日以降を並べ替え・これより前は対象外）。既定は今日。カレンダーの日付ヘッダークリックで変更。
+  const [optBaseDate,setOptBaseDate]=useState(()=>{const n=new Date();return{year:n.getFullYear(),month:n.getMonth(),day:n.getDate()};});
 
   // ⑤ 代車最適化：歯抜けを減らすよう非限定の予約を車ごとに詰め直す（限定は現状維持）。
   // 貪欲法：開始日順に、重複しない車のうち「直前の返却が今回の貸出に最も近い車」へ割り当て（＝すき間最小・車を集約）。
@@ -5133,9 +5135,9 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
       Object.keys(day).forEach(k=>{const r=day[k]; if(r&&r.user) all.push({...r,_curCar:String(cid),_key:k});});
     });
     const toN=(y,m,d)=>toNum(y,m,d);
-    // 現在日が基準。過去（返却済み）は対象外、貸出中・限定は動かさず枠だけ占有、これから貸す分だけ並べ替える。
-    const now=new Date();
-    const todayD=toN(now.getFullYear(),now.getMonth(),now.getDate());
+    // 基準日（既定は今日／カレンダーの日付クリックで変更）。基準日より前は対象外、
+    // 基準日をまたぐ貸出中・限定は動かさず枠だけ占有、基準日以降の貸出だけ並べ替える。
+    const todayD=toN(optBaseDate.year,optBaseDate.month,optBaseDate.day);
     const past=[],fixed=[],movable=[];
     all.forEach(r=>{
       const s=toN(r.fy,r.fm,r.fd), e=toN(r.ty,r.tm,r.td);
@@ -5394,10 +5396,10 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
           {!pickMode&&<span style={{fontSize:12,color:'#6b7280',marginLeft:8,fontWeight:500}}>（閲覧専用）</span>}
         </h2>
         {!pickMode&&<div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
-          {onApplyOptimize&&<button onClick={()=>setOptResult(computeOptimize())} title="歯抜けを減らすよう代車の割り当てを詰め直す（限定した予約は動かさない）"
-            style={{padding:'6px 12px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,fontWeight:700,cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',gap:4}}
+          {onApplyOptimize&&<button onClick={()=>setOptResult(computeOptimize())} title="基準日以降の代車の割り当てを詰め直す（過去・貸出中・限定は動かさない）。基準日はカレンダーの日付をクリックで変更。"
+            style={{padding:'6px 12px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,fontWeight:700,cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',gap:5}}
             onMouseEnter={e=>e.currentTarget.style.background='#4338ca'}
-            onMouseLeave={e=>e.currentTarget.style.background='#4f46e5'}>✨ 最適化</button>}
+            onMouseLeave={e=>e.currentTarget.style.background='#4f46e5'}>✨ 最適化<span style={{fontSize:10,fontWeight:600,background:'rgba(255,255,255,0.25)',borderRadius:4,padding:'1px 6px'}}>基準 {optBaseDate.month+1}/{optBaseDate.day}〜</span></button>}
           <button onClick={onUndo} style={{padding:'6px 13px',background:'#f59e0b',color:'white',border:'none',borderRadius:6,fontWeight:700,cursor:'pointer',fontSize:12}}>↶ 戻す</button>
           <button onClick={onOpenTireEdit} title="タイヤ種別 一括設定"
             style={{padding:'6px 10px',background:'#fef3c7',border:'2px solid #fbbf24',borderRadius:6,cursor:'pointer',display:'flex',alignItems:'center',gap:4,fontSize:11,fontWeight:700,color:'#d97706'}}
@@ -5456,9 +5458,13 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                 const isHol=isHoliday(year,month,day);
                 // 月が変わるタイミング
                 const isMonthStart=i===0||(dateRange[i-1]&&dateRange[i-1].month!==month);
-                return <th key={i} style={{width:44,minWidth:44,maxWidth:44,textAlign:'center',padding:'3px 0',border:'1px solid #e5e7eb',fontSize:9,background:h2?'#fef08a':isMonthStart?'#ddd6fe':'#fff7ed',color:dow===0||isHol?'#dc2626':dow===6?'#1d4ed8':'#374151',fontWeight:h2?800:600,boxSizing:'border-box'}}>
+                // ⑤最適化の基準日か（クリックで設定・紫で強調）
+                const isOptBase=optBaseDate&&optBaseDate.year===year&&optBaseDate.month===month&&optBaseDate.day===day;
+                return <th key={i} onClick={()=>setOptBaseDate({year,month,day})} title="クリックで最適化の基準日に設定"
+                  style={{width:44,minWidth:44,maxWidth:44,textAlign:'center',padding:'3px 0',border:isOptBase?'2px solid #4f46e5':'1px solid #e5e7eb',cursor:'pointer',fontSize:9,background:isOptBase?'#ede9fe':h2?'#fef08a':isMonthStart?'#ddd6fe':'#fff7ed',color:dow===0||isHol?'#dc2626':dow===6?'#1d4ed8':'#374151',fontWeight:isOptBase||h2?800:600,boxSizing:'border-box',position:'relative'}}>
                   {isMonthStart&&<div style={{fontSize:7,fontWeight:800,color:'#c2410c'}}>{month+1}月</div>}
                   <div>{day}</div><div style={{fontSize:7}}>{DOW[dow]}</div>
+                  {isOptBase&&<div style={{fontSize:7,fontWeight:800,color:'#4f46e5',lineHeight:1}}>基準</div>}
                 </th>;
               })}
             </tr>
@@ -5669,7 +5675,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
           <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:14,width:'min(560px,96vw)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 24px 60px rgba(0,0,0,0.35)',overflow:'hidden'}}>
             <div style={{background:'linear-gradient(135deg,#3730a3,#4f46e5)',color:'white',padding:'14px 20px'}}>
               <div style={{fontSize:16,fontWeight:800}}>✨ 代車の最適化</div>
-              <div style={{fontSize:11,opacity:0.85,marginTop:2}}>今日以降の貸出を詰め直します（過去・貸出中・限定は動かしません）</div>
+              <div style={{fontSize:11,opacity:0.85,marginTop:2}}>基準日（{optBaseDate.month+1}/{optBaseDate.day}）以降の貸出を詰め直します（それ以前・貸出中・限定は動かしません）</div>
             </div>
             <div style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
               {optResult.moves.length===0?(
