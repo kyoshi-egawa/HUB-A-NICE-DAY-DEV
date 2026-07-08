@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.15';
+const APP_VERSION = '1.16';
 
 
 
@@ -5863,7 +5863,7 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
   };
 
   const ov={position:'fixed',inset:0,background:'rgba(15,23,42,0.6)',zIndex:6000,display:'flex',alignItems:'center',justifyContent:'center',padding:12};
-  const box={background:'white',borderRadius:16,width:'min(920px,97vw)',maxHeight:'92vh',display:'flex',flexDirection:'column',boxShadow:'0 24px 70px rgba(0,0,0,0.4)',overflow:'hidden'};
+  const box={background:'white',borderRadius:16,width:'min(880px,96vw)',maxWidth:'96vw',maxHeight:'92vh',display:'flex',flexDirection:'column',boxShadow:'0 24px 70px rgba(0,0,0,0.4)',overflow:'hidden'};
   const row=(active)=>({display:'flex',alignItems:'center',gap:10,padding:'9px 11px',border:`1px solid ${active?'#1d4ed8':'#eef2f8'}`,borderRadius:10,marginBottom:6,cursor:'pointer',background:active?'#eff4ff':'white',boxShadow:active?'inset 0 0 0 1px #1d4ed8':'none'});
   const ghd={fontSize:11,fontWeight:800,letterSpacing:'.05em',color:'#94a3b8',margin:'4px 2px 7px',display:'flex',alignItems:'center',gap:6};
 
@@ -5893,9 +5893,9 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
             <div style={{fontSize:12,marginTop:6}}>復旧は指定された担当者のみ実行できます。</div>
           </div>
         ) : (
-        <div style={{display:'flex',minHeight:0,flex:1}}>
+        <div style={{display:'flex',minHeight:0,minWidth:0,flex:1}}>
           {/* 左：一覧 */}
-          <div style={{width:'44%',borderRight:'1px solid #e5e7eb',padding:'13px 13px 16px',overflowY:'auto'}}>
+          <div style={{width:'42%',minWidth:0,flexShrink:0,borderRight:'1px solid #e5e7eb',padding:'13px 13px 16px',overflowY:'auto'}}>
             {list===null ? <div style={{padding:'20px',textAlign:'center',color:'#94a3b8',fontSize:13}}>読み込み中…</div>
              : list.length===0 ? <div style={{padding:'20px',textAlign:'center',color:'#94a3b8',fontSize:13}}>保存された時点がまだありません<br/>（30分ごとに自動で貯まります）</div>
              : <>
