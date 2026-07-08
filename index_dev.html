@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.17';
+const APP_VERSION = '1.18';
 
 
 
@@ -7844,13 +7844,7 @@ function AppInner() {
                       🕒 復旧
                     </button>
                   )}
-                  {/* バックアップを歯車の隣に収納 */}
-                  <button onClick={handleExport} title="バックアップ：全データをクリップボードにコピー"
-                    style={{background:'none',border:'none',cursor:'pointer',fontSize:14,display:'flex',alignItems:'center',padding:'1px',borderRadius:3,color:exportStatus==='ok'?'#0891b2':exportStatus==='err'?'#dc2626':'#6b7280'}}
-                    onMouseEnter={e=>e.currentTarget.style.color='#059669'}
-                    onMouseLeave={e=>e.currentTarget.style.color=exportStatus==='ok'?'#0891b2':exportStatus==='err'?'#dc2626':'#6b7280'}>
-                    📋
-                  </button>
+                  {/* 📋クリップボードコピーは廃止（戻せず一部データのみで紛らわしいため）。バックアップは自動保存＋🕒復旧に一本化。 */}
                   <button onClick={()=>{releaseLock(curLockKey);setCurrentUserPersist(null);setCurLockKey(null);setModalOpen(false);}} title="ログアウト" style={{background:'none',border:'none',cursor:'pointer',color:'#6b7280',display:'flex',alignItems:'center'}}><LogOut size={14}/></button>
                 </div>
               </div>
@@ -7907,8 +7901,6 @@ function AppInner() {
             </div>
           </div>);
         })()}
-        {exportStatus==='ok'&&(<div style={{position:'fixed',top:70,right:20,zIndex:9999,background:'#0891b2',color:'white',borderRadius:10,padding:'12px 18px',fontSize:13,fontWeight:700,boxShadow:'0 4px 20px rgba(0,0,0,0.25)',maxWidth:320}}>✓ クリップボードにコピーしました<br/><span style={{fontWeight:400,fontSize:11,opacity:0.9}}>メモ帳を開いて「Ctrl+V」で貼り付け→名前をつけて保存</span></div>)}
-        {exportStatus==='err'&&(<div style={{position:'fixed',top:70,right:20,zIndex:9999,background:'#dc2626',color:'white',borderRadius:10,padding:'12px 18px',fontSize:13,fontWeight:700,boxShadow:'0 4px 20px rgba(0,0,0,0.25)'}}>✕ コピーに失敗しました<br/><span style={{fontWeight:400,fontSize:11,opacity:0.9}}>ブラウザのクリップボード権限を確認してください</span></div>)}
       </header>
 
       {/* ===== DEV版警告バナー ===== */}
