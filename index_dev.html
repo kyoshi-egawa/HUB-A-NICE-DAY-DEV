@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.24';
+const APP_VERSION = '1.25';
 
 
 
@@ -3628,7 +3628,7 @@ const InspCalendarPicker=memo(({form,setForm,bmInspData,bmClosedDays,bmClosedDat
   );
 });
 
-const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSlot,onSave,onDelete,onDateChange,onOpenLoanerPicker,pendingLoanerId,pendingRentalId,pendingRentalRec,rentalCarsData,loanerRes,modalDk,modalIdx:modalIdxProp,onDeleteLoaner,currentUser,setItems,onOpenSetItemEdit,allCars,fromCustList,savedModalData,inspData:bmInspData,closedDays:bmClosedDays,closedDates:bmClosedDates,overrideOpenDates:bmOverrideOpen,inspLimits:bmInspLimits})=>{
+const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSlot,onSave,onDelete,onDateChange,onOpenLoanerPicker,pendingLoanerId,pendingRentalId,pendingRentalRec,rentalCarsData,loanerRes,modalDk,modalIdx:modalIdxProp,onDeleteLoaner,onToggleLoanerLock,currentUser,setItems,onOpenSetItemEdit,allCars,fromCustList,savedModalData,inspData:bmInspData,closedDays:bmClosedDays,closedDates:bmClosedDates,overrideOpenDates:bmOverrideOpen,inspLimits:bmInspLimits})=>{
   const [form,setForm]=useState(initialData);
   const [staffInput,setStaffInput]=useState('');
   const [showStaff,setShowStaff]=useState(false);
@@ -4026,9 +4026,15 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
                   ?(()=>{const c=(allCars&&allCars.length?allCars:LOANERS).find(x=>String(x.id)===String(pendingLoanerId));return c?`${c.name} (${c.num})`:''})()
                   :getLoanerLabel(loanerRes,modalDk,form.name,bk2);
                 const dynamicLoanerId=pendingLoanerId??getLoanerIdForRow(loanerRes,modalDk,form.name,bk2);
+                // ⑤ 限定：保存済みの代車予約（bookingKey一致）を探し、その locked を切り替える
+                const _lockResv=(dynamicLoanerId!=null&&pendingLoanerId==null)?Object.values(loanerRes[dynamicLoanerId]||{}).find(r=>r.bookingKey===bk2):null;
                 return(<>
                   <input value={dynamicLoaner} readOnly placeholder="管理表で選択" style={{...INP,flex:1,cursor:'pointer',background:'#fef9c3',color:dynamicLoaner?'#7c2d12':'#9ca3af'}} onClick={()=>onOpenLoanerPicker({...form,loaner:dynamicLoaner,loanerId:dynamicLoanerId})}/>
                   <button onClick={()=>onOpenLoanerPicker({...form,loaner:dynamicLoaner,loanerId:dynamicLoanerId})} style={{padding:'0 12px',background:'#0891b2',color:'white',border:'none',borderRadius:7,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',fontSize:12}}>選択</button>
+                  {_lockResv&&onToggleLoanerLock&&<button onClick={()=>onToggleLoanerLock(dynamicLoanerId,_lockResv.id)}
+                    title={_lockResv.locked?'固定を解除（最適化で動かせるようにする）':'この予約の車を固定（最適化で動かさない）'}
+                    style={{padding:'0 10px',background:_lockResv.locked?'#7c2d12':'#f3f4f6',color:_lockResv.locked?'white':'#6b7280',border:`2px solid ${_lockResv.locked?'#7c2d12':'#d1d5db'}`,borderRadius:7,cursor:'pointer',fontWeight:700,fontSize:11,whiteSpace:'nowrap'}}>
+                    {_lockResv.locked?'🔒 限定中':'🔓 限定'}</button>}
                   {dynamicLoaner&&<button onClick={()=>{
                     setForm({...form,loaner:'',loanerId:null});
                     if(dynamicLoanerId)onDeleteLoaner(dynamicLoanerId,modalDk,form.name);
@@ -5107,7 +5113,7 @@ const LoanerSettingsModal = memo(({isOpen, onClose, listH, listS, onSaveH, onSav
 // ============================================
 //  代車管理グリッド（閲覧専用 + モーダル編集）
 // ============================================
-const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRes,onUndo,selDate,onBack,onPickLoaner,pickMode,locks,currentUser,onLockCar,onUnlockCar,savedModalData,inspData,schedData,onOpenBooking,pinnedRes,setPinnedRes,hoverRes,setHoverRes,storeLoaners,storeInfo,rentalCars,rentalRes,onAddRentalRes,onDeleteRentalRes,onReplaceRentalRes,onPickRental,onOpenSettings,tireData,locationData,onOpenTireEdit,onOpenLocationEdit,pendingDeleteBk=''})=>{
+const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRes,onUndo,selDate,onBack,onPickLoaner,pickMode,locks,currentUser,onLockCar,onUnlockCar,savedModalData,inspData,schedData,onOpenBooking,pinnedRes,setPinnedRes,hoverRes,setHoverRes,storeLoaners,storeInfo,rentalCars,rentalRes,onAddRentalRes,onDeleteRentalRes,onReplaceRentalRes,onPickRental,onOpenSettings,tireData,locationData,onOpenTireEdit,onOpenLocationEdit,onApplyOptimize,pendingDeleteBk=''})=>{
   const LOANERS_LOCAL=storeLoaners||LOANERS;
   const RENTAL_LOCAL=rentalCars||DEFAULT_RENTAL_CARS;
   const rentalResLocal=rentalRes||{};
@@ -5115,6 +5121,51 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
   const [editForm,setEditForm]=useState({user:'',startDate:'',endDate:''});
   const [rentalEditModal,setRentalEditModal]=useState(null);
   const [rentalEditForm,setRentalEditForm]=useState({user:'',startDate:'',endDate:''});
+  const [optResult,setOptResult]=useState(null); // ⑤最適化のプレビュー {moves,newLoanerRes,total,locked}
+
+  // ⑤ 代車最適化：歯抜けを減らすよう非限定の予約を車ごとに詰め直す（限定は現状維持）。
+  // 貪欲法：開始日順に、重複しない車のうち「直前の返却が今回の貸出に最も近い車」へ割り当て（＝すき間最小・車を集約）。
+  const computeOptimize=()=>{
+    const cars=LOANERS_LOCAL||[];
+    const all=[];
+    Object.keys(loanerRes||{}).forEach(cid=>{
+      const day=loanerRes[cid]||{};
+      Object.keys(day).forEach(k=>{const r=day[k]; if(r&&r.user) all.push({...r,_curCar:String(cid),_key:k});});
+    });
+    const toN=(y,m,d)=>toNum(y,m,d);
+    const locked=all.filter(r=>r.locked);
+    const movable=all.filter(r=>!r.locked);
+    const carById={}; cars.forEach(c=>carById[String(c.id)]=c);
+    const carInt={}; cars.forEach(c=>carInt[String(c.id)]=[]);
+    locked.forEach(r=>{const cid=r._curCar; if(carInt[cid]) carInt[cid].push({s:toN(r.fy,r.fm,r.fd),e:toN(r.ty,r.tm,r.td)});});
+    movable.sort((a,b)=>toN(a.fy,a.fm,a.fd)-toN(b.fy,b.fm,b.fd));
+    const assign={};
+    movable.forEach(r=>{
+      const s=toN(r.fy,r.fm,r.fd), e=toN(r.ty,r.tm,r.td);
+      let best=null,bestScore=-Infinity;
+      for(const c of cars){
+        const cid=String(c.id); const ints=carInt[cid]||[];
+        if(ints.some(iv=> s<=iv.e && iv.s<=e)) continue; // 重複する車は不可
+        const lastEnd=ints.reduce((mx,iv)=> iv.e<s?Math.max(mx,iv.e):mx, -Infinity); // 直前の返却
+        if(lastEnd>bestScore){best=cid;bestScore=lastEnd;} // 直前返却が最も近い＝すき間最小。全空きは車順で先頭
+      }
+      if(best==null) best=r._curCar; // 万一入らなければ現状維持
+      assign[r.id]=best;
+      (carInt[best]=carInt[best]||[]).push({s,e});
+    });
+    const newLR={}; Object.keys(loanerRes||{}).forEach(cid=>{newLR[String(cid)]={};}); cars.forEach(c=>{if(!newLR[String(c.id)])newLR[String(c.id)]={};});
+    const moves=[];
+    locked.forEach(r=>{const {_curCar,_key,...res}=r; (newLR[_curCar]=newLR[_curCar]||{})[String(r.fd)]=res;});
+    movable.forEach(r=>{
+      const cid=assign[r.id]; const car=carById[cid]; const {_curCar,_key,...res}=r;
+      (newLR[cid]=newLR[cid]||{})[String(r.fd)]={...res,carName:car?car.name:res.carName,carNum:car?car.num:res.carNum};
+      if(String(_curCar)!==String(cid)){
+        const oldCar=carById[_curCar];
+        moves.push({user:r.user,fromCarId:_curCar,toCarId:cid,fromName:(oldCar&&oldCar.name)||res.carName||'?',toName:(car&&car.name)||'?',period:`${r.fm+1}/${r.fd}〜${r.tm+1}/${r.td}`,bookingKey:r.bookingKey});
+      }
+    });
+    return {moves,newLoanerRes:newLR,total:all.length,locked:locked.length};
+  };
   // pinnedRes/hoverResは親から受け取る（グリッドの再レンダリングを防いでscrollLeftを保持）
   // pickMode用ドラッグ状態
   const [drag,setDrag]=useState(null);
@@ -5330,6 +5381,10 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
           {!pickMode&&<span style={{fontSize:12,color:'#6b7280',marginLeft:8,fontWeight:500}}>（閲覧専用）</span>}
         </h2>
         {!pickMode&&<div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
+          {onApplyOptimize&&<button onClick={()=>setOptResult(computeOptimize())} title="歯抜けを減らすよう代車の割り当てを詰め直す（限定した予約は動かさない）"
+            style={{padding:'6px 12px',background:'#4f46e5',color:'white',border:'none',borderRadius:6,fontWeight:700,cursor:'pointer',fontSize:12,display:'flex',alignItems:'center',gap:4}}
+            onMouseEnter={e=>e.currentTarget.style.background='#4338ca'}
+            onMouseLeave={e=>e.currentTarget.style.background='#4f46e5'}>✨ 最適化</button>}
           <button onClick={onUndo} style={{padding:'6px 13px',background:'#f59e0b',color:'white',border:'none',borderRadius:6,fontWeight:700,cursor:'pointer',fontSize:12}}>↶ 戻す</button>
           <button onClick={onOpenTireEdit} title="タイヤ種別 一括設定"
             style={{padding:'6px 10px',background:'#fef3c7',border:'2px solid #fbbf24',borderRadius:6,cursor:'pointer',display:'flex',alignItems:'center',gap:4,fontSize:11,fontWeight:700,color:'#d97706'}}
@@ -5592,6 +5647,49 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
           ):(
             <span style={{fontSize:13,color:'#94a3b8'}}>🖱 予約バーにマウスを乗せると、ここに詳細が大きく表示されます（クリックで編集・削除）</span>
           )}
+        </div>
+      )}
+
+      {/* ⑤ 最適化：変更内容の確認モーダル */}
+      {optResult&&(
+        <div style={{position:'fixed',inset:0,background:'rgba(15,23,42,0.55)',zIndex:5000,display:'flex',alignItems:'center',justifyContent:'center',padding:14}} onClick={()=>setOptResult(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:14,width:'min(560px,96vw)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 24px 60px rgba(0,0,0,0.35)',overflow:'hidden'}}>
+            <div style={{background:'linear-gradient(135deg,#3730a3,#4f46e5)',color:'white',padding:'14px 20px'}}>
+              <div style={{fontSize:16,fontWeight:800}}>✨ 代車の最適化</div>
+              <div style={{fontSize:11,opacity:0.85,marginTop:2}}>歯抜けを減らすよう割り当てを詰め直します（限定した予約は動かしません）</div>
+            </div>
+            <div style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
+              {optResult.moves.length===0?(
+                <div style={{textAlign:'center',padding:'24px 8px',color:'#334155'}}>
+                  <div style={{fontSize:30,marginBottom:8}}>👍</div>
+                  <div style={{fontWeight:700}}>すでに最適です</div>
+                  <div style={{fontSize:12,color:'#64748b',marginTop:6}}>動かせる予約はありませんでした（対象 {optResult.total-optResult.locked} 件／限定 {optResult.locked} 件）。</div>
+                </div>
+              ):(<>
+                <div style={{fontSize:13,color:'#334155',marginBottom:12}}><b>{optResult.moves.length}件</b>の予約の代車が変わります：</div>
+                <div style={{display:'flex',flexDirection:'column',gap:7}}>
+                  {optResult.moves.map((mv,i)=>(
+                    <div key={i} style={{border:'1px solid #e5e7eb',borderRadius:9,padding:'9px 12px',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                      <span style={{fontWeight:800,fontSize:14,color:'#1e293b'}}>👤 {mv.user}</span>
+                      <span style={{fontSize:12,color:'#64748b'}}>{mv.period}</span>
+                      <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:7,fontWeight:700,fontSize:13}}>
+                        <span style={{color:'#94a3b8',textDecoration:'line-through'}}>{mv.fromName}</span>
+                        <span style={{color:'#4f46e5'}}>→ {mv.toName}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{marginTop:12,fontSize:11,color:'#64748b',background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:8,padding:'8px 11px'}}>
+                  ※ お客様が使う代車が変わります。実行後に「↶ 戻す」で元に戻せます。特定の車で貸したい予約は、予約カードの「🔒 限定」で固定してください。
+                </div>
+              </>)}
+            </div>
+            <div style={{padding:'12px 20px',borderTop:'1px solid #e5e7eb',display:'flex',gap:8,flexShrink:0}}>
+              {optResult.moves.length>0&&<button onClick={()=>{onApplyOptimize(optResult.newLoanerRes,optResult.moves);setOptResult(null);}}
+                style={{flex:1,padding:'12px',background:'linear-gradient(135deg,#3730a3,#4f46e5)',color:'white',border:'none',borderRadius:9,fontWeight:800,fontSize:14,cursor:'pointer'}}>✓ この内容で最適化する</button>}
+              <button onClick={()=>setOptResult(null)} style={{padding:'12px 18px',background:'#f3f4f6',border:'none',borderRadius:9,fontWeight:700,fontSize:13,color:'#475569',cursor:'pointer'}}>{optResult.moves.length>0?'キャンセル':'閉じる'}</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -7666,6 +7764,29 @@ function AppInner() {
     }
   },[setLoanerRes,setInspData]);
   const undoLoanerRes=useCallback(()=>{if(!loanerUndo.length){return;}setLoanerRes(loanerUndo[loanerUndo.length-1].prevState);setLoanerUndo(u=>u.slice(0,-1));},[loanerUndo,setLoanerRes]);
+  // ⑤ 限定：この予約の代車を固定（最適化で動かさない）。locked を反転する。
+  const toggleLoanerLock=useCallback((cid,resId)=>{
+    setLoanerRes(prev=>{
+      const day={...(prev[cid]||{})};
+      Object.keys(day).forEach(k=>{ if(day[k]&&day[k].id===resId) day[k]={...day[k],locked:!day[k].locked}; });
+      return{...prev,[cid]:day};
+    });
+  },[setLoanerRes]);
+  // ⑤ 最適化の適用：現在店舗の代車予約を丸ごと差し替え（実行前に戻す用スナップショットを積む）。
+  //   連動するスケジュール行の loanerId/loaner ラベルは bookingKey 一致の getLoanerLabel が
+  //   予約側の carName から再計算するため表示は自動追従する。念のため loanerId も更新する。
+  const applyLoanerOptimize=useCallback((newLoanerRes,moves)=>{
+    setLoanerUndo(u=>[...u,{prevState:loanerRes}]);
+    setLoanerRes(newLoanerRes);
+    // 連動スケジュール行の loanerId を新しい車に更新（表示は carName 追従だが整合のため）
+    (moves||[]).forEach(mv=>{
+      const bk=mv.bookingKey; if(!bk)return;
+      const mi=bk.match(/^insp-(.+)-(\d+)$/);
+      if(mi){const dk=mi[1],idx=Number(mi[2]);
+        setInspData(prev=>{const rows=[...(prev[dk]||[])];if(rows[idx]){rows[idx]={...rows[idx],loanerId:mv.toCarId};return{...prev,[dk]:rows};}return prev;});
+      }
+    });
+  },[loanerRes,setLoanerRes,setInspData]);
   const handleLockCar  =useCallback(cid=>acquireLock(`lock-loaner-${cid}`,currentUser.name),[acquireLock,currentUser]);
   const handleUnlockCar=useCallback(cid=>releaseLock(`lock-loaner-${cid}`),[releaseLock]);
 
@@ -8806,7 +8927,8 @@ function AppInner() {
               tireData={carTireData}
               locationData={rentalLocData}
               onOpenTireEdit={()=>setShowTireEdit(true)}
-              onOpenLocationEdit={()=>setShowLocationEdit(true)}/>
+              onOpenLocationEdit={()=>setShowLocationEdit(true)}
+              onApplyOptimize={applyLoanerOptimize}/>
           </div>
         )}
         {view==='vehicle'&&(
@@ -8946,6 +9068,7 @@ function AppInner() {
         rentalCarsData={dynRentalCars}
         loanerRes={loanerRes} modalDk={modalDk}
         onDeleteLoaner={handleDeleteLoaner}
+        onToggleLoanerLock={toggleLoanerLock}
         currentUser={currentUser}
         setItems={setItems}
         onOpenSetItemEdit={()=>setShowSetItemEdit(true)}
