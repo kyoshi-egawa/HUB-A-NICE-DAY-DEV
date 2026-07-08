@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.14';
+const APP_VERSION = '1.15';
 
 
 
@@ -1497,6 +1497,16 @@ const GAS_API_KEY = 'hub2026SandaHonten!9xKy';
 
 const GAS_READY = GAS_URL !== 'YOUR_GAS_URL_HERE' && GAS_URL !== '';
 
+// 復旧（過去の時点に戻す）を実行できる人。全データ上書きの危険操作のため名指しで限定。
+// uid か 氏名 のどちらか一致で許可（スタッフ再登録でuidが変わっても氏名で拾う）。
+const RESTORE_ALLOWED = [
+  {uid:'h0',  name:'見取勇一'},
+  {uid:'h1',  name:'見取大介'},
+  {uid:'s10', name:'藤原昭人'},
+  {uid:'h7',  name:'江川京志'},
+];
+const canRestore = (u) => !!u && RESTORE_ALLOWED.some(a => (u.uid && a.uid===u.uid) || (u.name && a.name===u.name));
+
 // GASからデータを読み込む
 const sGet = async(k, retries=3) => {
   if (!GAS_READY) return null;
@@ -1535,6 +1545,37 @@ const sSet = async(k, v, retries=3) => {
       if(i<retries-1) await new Promise(r=>setTimeout(r,1500*(i+1)));
     }
   }
+};
+
+// ── 時点スナップショット/復旧（GAS v10。sGet/sSetは触らず新規に追加） ──
+// 一覧を取得（新しい順・要約件数つき）。この環境(STOR)のぶんだけ。
+const snapList = async () => {
+  if(!GAS_READY) return [];
+  try{
+    const r = await fetch(`${GAS_URL}?action=snapList&prefix=${encodeURIComponent(STOR)}&apiKey=${encodeURIComponent(GAS_API_KEY)}`, {cache:'no-store'});
+    const t = await r.text();
+    if(!t || t.startsWith('error')) return [];
+    const a = JSON.parse(t);
+    return Array.isArray(a) ? a : [];
+  }catch{ return []; }
+};
+// 1つの時点の中身（プレビュー用。keysに全データが入る）
+const snapRead = async (file) => {
+  if(!GAS_READY) return null;
+  try{
+    const r = await fetch(`${GAS_URL}?action=snapRead&prefix=${encodeURIComponent(STOR)}&file=${encodeURIComponent(file)}&apiKey=${encodeURIComponent(GAS_API_KEY)}`, {cache:'no-store'});
+    const t = await r.text();
+    if(!t || t.startsWith('error')) return null;
+    return JSON.parse(t);
+  }catch{ return null; }
+};
+// 復旧を実行（no-corsのため応答は読めない。呼び出し側は完了後にリロードで反映）
+const snapRestore = async (file) => {
+  if(!GAS_READY) return;
+  await fetch(GAS_URL, {
+    method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'snapRestore', prefix:STOR, file, apiKey:GAS_API_KEY}),
+  });
 };
 
 // ===========================================================
@@ -5786,6 +5827,153 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
 });
 
 // ============================================
+//  RestoreModal — 時点復旧（4名のみ・GAS v10スナップショット）
+// ============================================
+const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
+  const [list,setList]=useState(null);         // null=読込中, []=なし
+  const [sel,setSel]=useState(null);           // 選択中のエントリ
+  const [detail,setDetail]=useState(null);     // 詳しい中身(snapRead)
+  const [detailLoading,setDetailLoading]=useState(false);
+  const [confirming,setConfirming]=useState(false);
+  const [restoring,setRestoring]=useState(false);
+  const [done,setDone]=useState(false);
+
+  useEffect(()=>{
+    if(!isOpen)return;
+    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);
+    snapList().then(a=>{ setList(a); if(a.length) setSel(a[0]); });
+  },[isOpen]);
+
+  if(!isOpen) return null;
+  const allowed = canRestore(currentUser);
+  const kindLabel = (k)=> k==='daily'?'日次':k==='pre-restore'?'復旧前':k==='manual'?'手動':'自動';
+  const autoList  = (list||[]).filter(e=>e.kind!=='daily');
+  const dailyList = (list||[]).filter(e=>e.kind==='daily');
+  const sum = sel&&sel.summary?sel.summary:{insp:0,sched:0,loaner:0,memo:0};
+
+  const pick=(e)=>{ setSel(e); setDetail(null); setConfirming(false); };
+  const loadDetail = async()=>{ if(!sel)return; setDetailLoading(true); const d=await snapRead(sel.file); setDetail(d); setDetailLoading(false); };
+  const doRestore = async()=>{
+    if(!sel||!allowed)return;
+    setRestoring(true);
+    await snapRestore(sel.file);
+    await new Promise(r=>setTimeout(r,3500)); // no-corsで応答不可→待ってからリロード
+    setDone(true);
+    setTimeout(()=>location.reload(),1500);
+  };
+
+  const ov={position:'fixed',inset:0,background:'rgba(15,23,42,0.6)',zIndex:6000,display:'flex',alignItems:'center',justifyContent:'center',padding:12};
+  const box={background:'white',borderRadius:16,width:'min(920px,97vw)',maxHeight:'92vh',display:'flex',flexDirection:'column',boxShadow:'0 24px 70px rgba(0,0,0,0.4)',overflow:'hidden'};
+  const row=(active)=>({display:'flex',alignItems:'center',gap:10,padding:'9px 11px',border:`1px solid ${active?'#1d4ed8':'#eef2f8'}`,borderRadius:10,marginBottom:6,cursor:'pointer',background:active?'#eff4ff':'white',boxShadow:active?'inset 0 0 0 1px #1d4ed8':'none'});
+  const ghd={fontSize:11,fontWeight:800,letterSpacing:'.05em',color:'#94a3b8',margin:'4px 2px 7px',display:'flex',alignItems:'center',gap:6};
+
+  return (
+    <div style={ov} onClick={restoring?undefined:onClose}>
+      <div style={box} onClick={e=>e.stopPropagation()}>
+        {/* ヘッダー */}
+        <div style={{background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',color:'white',padding:'14px 20px',display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+          <span style={{fontSize:18}}>🕒</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:16,fontWeight:800}}>データ復旧（バックアップから戻す）</div>
+            <div style={{fontSize:11,opacity:0.85}}>本店・三田店の全データ／保存時点を選んで戻せます</div>
+          </div>
+          <button onClick={onClose} disabled={restoring} style={{background:'rgba(255,255,255,0.18)',border:'none',borderRadius:'50%',width:30,height:30,cursor:restoring?'default':'pointer',color:'white',fontSize:15}}>✕</button>
+        </div>
+
+        {done ? (
+          <div style={{padding:'44px 24px',textAlign:'center'}}>
+            <div style={{fontSize:34,marginBottom:10}}>✅</div>
+            <div style={{fontSize:16,fontWeight:800,color:'#0f9d58'}}>復旧しました</div>
+            <div style={{fontSize:12,color:'#64748b',marginTop:6}}>最新の状態を読み込むため、画面を再読み込みします…</div>
+          </div>
+        ) : !allowed ? (
+          <div style={{padding:'44px 24px',textAlign:'center',color:'#64748b'}}>
+            <div style={{fontSize:30,marginBottom:8}}>🔒</div>
+            <div style={{fontWeight:700,color:'#334155'}}>この操作は許可されていません</div>
+            <div style={{fontSize:12,marginTop:6}}>復旧は指定された担当者のみ実行できます。</div>
+          </div>
+        ) : (
+        <div style={{display:'flex',minHeight:0,flex:1}}>
+          {/* 左：一覧 */}
+          <div style={{width:'44%',borderRight:'1px solid #e5e7eb',padding:'13px 13px 16px',overflowY:'auto'}}>
+            {list===null ? <div style={{padding:'20px',textAlign:'center',color:'#94a3b8',fontSize:13}}>読み込み中…</div>
+             : list.length===0 ? <div style={{padding:'20px',textAlign:'center',color:'#94a3b8',fontSize:13}}>保存された時点がまだありません<br/>（30分ごとに自動で貯まります）</div>
+             : <>
+                {autoList.length>0 && <div style={ghd}><span style={{width:7,height:7,borderRadius:'50%',background:'#0f9d58',display:'inline-block'}}/>最近の自動保存（30分ごと）</div>}
+                {autoList.map(e=>(
+                  <div key={e.file} style={row(sel&&sel.file===e.file)} onClick={()=>pick(e)}>
+                    <div style={{width:30,height:30,borderRadius:8,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,background:'#e6f6ec'}}>🕒</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:700,fontSize:13}}>{e.tsText}<span style={{fontSize:10,color:'#94a3b8',marginLeft:6,fontWeight:600}}>{kindLabel(e.kind)}</span></div>
+                      <div style={{fontSize:11,color:'#64748b'}}>車検{e.summary?e.summary.insp:0}・整備{e.summary?e.summary.sched:0}</div>
+                    </div>
+                  </div>
+                ))}
+                {dailyList.length>0 && <div style={{...ghd,marginTop:14}}><span style={{width:7,height:7,borderRadius:'50%',background:'#1d4ed8',display:'inline-block'}}/>過去の日次バックアップ（毎朝2時・90日分）</div>}
+                {dailyList.map(e=>(
+                  <div key={e.file} style={row(sel&&sel.file===e.file)} onClick={()=>pick(e)}>
+                    <div style={{width:30,height:30,borderRadius:8,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,background:'#eff4ff'}}>📅</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:700,fontSize:13}}>{e.tsText}</div>
+                      <div style={{fontSize:11,color:'#64748b'}}>車検{e.summary?e.summary.insp:0}・整備{e.summary?e.summary.sched:0}</div>
+                    </div>
+                  </div>
+                ))}
+               </>}
+          </div>
+
+          {/* 右：プレビュー */}
+          <div style={{flex:1,minWidth:0,padding:'15px 18px 18px',overflowY:'auto'}}>
+            {!sel ? <div style={{color:'#94a3b8',fontSize:13,paddingTop:20}}>左から時点を選んでください。</div>
+             : <>
+              <div style={{fontSize:16,fontWeight:800}}>{sel.tsText} の状態</div>
+              <div style={{fontSize:12,color:'#64748b',margin:'2px 0 13px'}}>この時点に保存されていた内容です。戻す前にここで確認できます。</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:14}}>
+                {[['🚗 車検予約',sum.insp,'#1d4ed8'],['⏰ 整備',sum.sched,'#1d4ed8'],['🔑 代車・レンタカー',sum.loaner,'#0f9d58'],['📝 備考メモ',sum.memo,'#0f9d58']].map(([l,n,c])=>(
+                  <div key={l} style={{border:'1px solid #e5e7eb',borderRadius:10,padding:'9px 12px',background:'#f8fafc'}}>
+                    <div style={{fontSize:22,fontWeight:800,color:c,lineHeight:1.1}}>{n}</div>
+                    <div style={{fontSize:11,color:'#64748b',fontWeight:600}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+
+              {!confirming ? <>
+                <button onClick={()=>setConfirming(true)} style={{width:'100%',border:'none',borderRadius:11,padding:'13px',fontSize:15,fontWeight:800,color:'white',background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',cursor:'pointer'}}>↩ この時点（{sel.tsText}）に戻す</button>
+                <button onClick={loadDetail} disabled={detailLoading} style={{width:'100%',marginTop:8,border:'1px solid #e5e7eb',borderRadius:11,padding:'11px',fontSize:13,fontWeight:700,color:'#475569',background:'white',cursor:'pointer'}}>{detailLoading?'読み込み中…':'🔍 詳しい中身を見る'}</button>
+                <div style={{marginTop:13,background:'#e6f6ec',border:'1px solid #b7e4c7',borderRadius:10,padding:'10px 13px',fontSize:12,color:'#334155',display:'flex',gap:9}}>
+                  <span>🛡️</span><div><b>戻す操作も取り消せます。</b> 復旧の直前に「今の状態」も自動で1つ保存するので、間違えてもすぐ元に戻せます。</div>
+                </div>
+                {detail && detail.keys && (()=>{
+                  let insp={}; try{insp=JSON.parse(detail.keys[STOR+'insp']||'{}')||{};}catch(e){}
+                  const dates=Object.keys(insp).filter(d=>(insp[d]||[]).some(r=>r&&r.name)).sort();
+                  return <div style={{marginTop:12,border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 13px'}}>
+                    <div style={{fontSize:12,fontWeight:800,color:'#334155',marginBottom:6}}>車検予約が入っていた日（{dates.length}日分）</div>
+                    {dates.length===0?<div style={{fontSize:12,color:'#94a3b8'}}>なし</div>:
+                     <div style={{display:'flex',flexWrap:'wrap',gap:5,maxHeight:120,overflowY:'auto'}}>
+                       {dates.map(d=>{const c=(insp[d]||[]).filter(r=>r&&r.name).length;return <span key={d} style={{fontSize:11,background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:14,padding:'2px 8px',color:'#1e40af',fontWeight:600}}>{d}：{c}台</span>;})}
+                     </div>}
+                  </div>;
+                })()}
+              </> : <>
+                <div style={{background:'#fdece9',border:'1px solid #f3b4ab',borderRadius:10,padding:'12px 14px'}}>
+                  <div style={{fontWeight:800,color:'#d33a2c',fontSize:14,marginBottom:3}}>⚠️ {sel.tsText} の状態に戻します</div>
+                  <div style={{fontSize:12,color:'#475569'}}>現在のデータは、この時点の内容で上書きされます。全端末に反映されます。</div>
+                </div>
+                <div style={{display:'flex',gap:8,marginTop:12}}>
+                  <button onClick={doRestore} disabled={restoring} style={{flex:1,border:'none',borderRadius:9,padding:'12px',fontWeight:800,fontSize:14,color:'white',background:restoring?'#94a3b8':'#d33a2c',cursor:restoring?'default':'pointer'}}>{restoring?'復旧中…（そのままお待ちください）':'はい、この時点に戻す'}</button>
+                  <button onClick={()=>setConfirming(false)} disabled={restoring} style={{border:'1px solid #e5e7eb',background:'white',borderRadius:9,padding:'12px 18px',fontWeight:700,fontSize:13,color:'#475569',cursor:restoring?'default':'pointer'}}>やめる</button>
+                </div>
+              </>}
+             </>}
+          </div>
+        </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+// ============================================
 //  メインアプリ
 // ============================================
 
@@ -6050,6 +6238,7 @@ function AppInner() {
   const [pendingRentalRec,setPendingRentalRec]=useState(null);
   const [savedModalData, setSavedModalData] =useState(null);
   const [showHoliday,    setShowHoliday]    =useState(false);
+  const [showRestore,    setShowRestore]    =useState(false);
   const [showDayOff,     setShowDayOff]     =useState(false);
   const headerRef=useRef(null);
   const [headerH, setHeaderH]=useState(90); // ヘッダー高さ（デフォルト90px）
@@ -7643,7 +7832,7 @@ function AppInner() {
                     onMouseLeave={e=>e.currentTarget.style.color='#6b7280'}>
                     <Users size={14}/>
                   </button>
-                  <button onClick={()=>setShowHoliday(true)} title="休業日設定・バックアップ"
+                  <button onClick={()=>setShowHoliday(true)} title="休業日設定"
                     style={{background:'none',border:'none',cursor:'pointer',color:'#6b7280',display:'flex',alignItems:'center',padding:'1px',borderRadius:3}}
                     onMouseEnter={e=>e.currentTarget.style.color='#c2410c'}
                     onMouseLeave={e=>e.currentTarget.style.color='#6b7280'}>
@@ -7651,6 +7840,15 @@ function AppInner() {
                   </button>
                   {(closedDays.length>0||closedDates.length>0)&&(
                     <span style={{background:'#dc2626',color:'white',borderRadius:10,padding:'1px 5px',fontSize:10,fontWeight:700}}>{closedDays.length+closedDates.length}</span>
+                  )}
+                  {/* データ復旧（バックアップから戻す）— 指定された4名のみ表示 */}
+                  {canRestore(currentUser)&&(
+                    <button onClick={()=>setShowRestore(true)} title="データ復旧（バックアップから戻す）"
+                      style={{display:'flex',alignItems:'center',gap:3,padding:'2px 8px',background:'#eff4ff',border:'1px solid #bcd0f7',borderRadius:6,cursor:'pointer',fontWeight:700,fontSize:10,color:'#1d4ed8'}}
+                      onMouseEnter={e=>e.currentTarget.style.background='#dbe6fb'}
+                      onMouseLeave={e=>e.currentTarget.style.background='#eff4ff'}>
+                      🕒 復旧
+                    </button>
                   )}
                   {/* バックアップを歯車の隣に収納 */}
                   <button onClick={handleExport} title="バックアップ：全データをクリップボードにコピー"
@@ -8737,6 +8935,9 @@ function AppInner() {
         overrideOpenDates={Array.isArray(overrideOpenDates)?overrideOpenDates:[]}
         setOverrideOpenDates={setOverrideOpenDates}
         vsStore={vsStore}/>
+
+      {/* -- データ復旧（4名のみ） -- */}
+      <RestoreModal isOpen={showRestore} onClose={()=>setShowRestore(false)} currentUser={currentUser}/>
 
       {/* -- 休日スタッフモーダル -- */}
       <DayOffModal
