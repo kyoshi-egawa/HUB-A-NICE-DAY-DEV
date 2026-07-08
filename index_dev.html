@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.21';
+const APP_VERSION = '1.22';
 
 
 
@@ -3738,8 +3738,9 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
   const onTimeKb=(e)=>{
     if(!showTmPk){if(e.key==='Enter'){e.preventDefault();setShowTmPk(true);}return;}
     const cur=TIME_VALS.indexOf(form.time);
-    if(e.key==='ArrowDown'){e.preventDefault();setForm(p=>({...p,time:TIME_VALS[Math.min(cur+1,TIME_VALS.length-1)]}));}
-    else if(e.key==='ArrowUp'){e.preventDefault();setForm(p=>({...p,time:TIME_VALS[Math.max(cur-1,0)]}));}
+    const scrollTmIntoView=(v)=>{const el=document.querySelector('[data-tmid="'+v+'"]');if(el)el.scrollIntoView({block:'nearest'});};
+    if(e.key==='ArrowDown'){e.preventDefault();const nv=TIME_VALS[Math.min(cur+1,TIME_VALS.length-1)];setForm(p=>({...p,time:nv}));scrollTmIntoView(nv);}
+    else if(e.key==='ArrowUp'){e.preventDefault();const nv=TIME_VALS[Math.max(cur-1,0)];setForm(p=>({...p,time:nv}));scrollTmIntoView(nv);}
     else if(e.key==='Enter'||e.key==='Escape'){e.preventDefault();setShowTmPk(false);if(e.key==='Enter')goNext('time');}
   };
   const WIDS=WORKS.map(w=>w.id);
@@ -4087,7 +4088,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
               {showTmPk&&(
                 <div style={{border:'2px solid #0891b2',borderRadius:8,marginTop:4,maxHeight:200,overflowY:'auto',background:'white',boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
                   {TIME_VALS.map(v=>(
-                    <div key={v}
+                    <div key={v} data-tmid={v}
                       onMouseDown={e=>{e.preventDefault();setForm(p=>({...p,time:v}));setShowTmPk(false);goNext('time');}}
                       style={{padding:'8px 16px',cursor:'pointer',fontSize:14,fontWeight:form.time===v?800:400,
                         background:form.time===v?'#e0f2fe':'white',
