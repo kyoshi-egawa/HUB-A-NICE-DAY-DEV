@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.25';
+const APP_VERSION = '1.26';
 
 
 
@@ -7772,21 +7772,13 @@ function AppInner() {
       return{...prev,[cid]:day};
     });
   },[setLoanerRes]);
-  // ⑤ 最適化の適用：現在店舗の代車予約を丸ごと差し替え（実行前に戻す用スナップショットを積む）。
-  //   連動するスケジュール行の loanerId/loaner ラベルは bookingKey 一致の getLoanerLabel が
-  //   予約側の carName から再計算するため表示は自動追従する。念のため loanerId も更新する。
-  const applyLoanerOptimize=useCallback((newLoanerRes,moves)=>{
+  // ⑤ 最適化の適用：現在店舗の代車予約を丸ごと差し替えるだけ（実行前に戻す用スナップショットを積む）。
+  //   スケジュール行の表示は bookingKey 一致の getLoanerLabel が予約側の carName から再計算するため
+  //   自動で新しい車に追従する（insp側は触らないので「↶ 戻す」で完全に元へ戻せる）。
+  const applyLoanerOptimize=useCallback((newLoanerRes)=>{
     setLoanerUndo(u=>[...u,{prevState:loanerRes}]);
     setLoanerRes(newLoanerRes);
-    // 連動スケジュール行の loanerId を新しい車に更新（表示は carName 追従だが整合のため）
-    (moves||[]).forEach(mv=>{
-      const bk=mv.bookingKey; if(!bk)return;
-      const mi=bk.match(/^insp-(.+)-(\d+)$/);
-      if(mi){const dk=mi[1],idx=Number(mi[2]);
-        setInspData(prev=>{const rows=[...(prev[dk]||[])];if(rows[idx]){rows[idx]={...rows[idx],loanerId:mv.toCarId};return{...prev,[dk]:rows};}return prev;});
-      }
-    });
-  },[loanerRes,setLoanerRes,setInspData]);
+  },[loanerRes,setLoanerRes]);
   const handleLockCar  =useCallback(cid=>acquireLock(`lock-loaner-${cid}`,currentUser.name),[acquireLock,currentUser]);
   const handleUnlockCar=useCallback(cid=>releaseLock(`lock-loaner-${cid}`),[releaseLock]);
 
