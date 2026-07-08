@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.23';
+const APP_VERSION = '1.24';
 
 
 
@@ -299,6 +299,22 @@ const TIME_SLOTS = (()=>{
   const s=[];
   for(let h=9;h<=18;h++){s.push(`${String(h).padStart(2,'0')}:00`);if(h<18)s.push(`${String(h).padStart(2,'0')}:30`);}
   return s;
+})();
+// 整理用の特別枠（時刻を持たない＝台数アラート等の時間計算には含めない）。
+// ★TIME_SLOTS本体には入れないこと（時刻計算が壊れるため）。表示・選択肢用にだけ使う。
+const SPECIAL_SLOTS=[
+  {id:'未定',label:'入庫時間未定'},
+  {id:'午前',label:'午前入庫'},
+  {id:'午後',label:'午後入庫'},
+];
+const SPECIAL_SLOT_IDS=SPECIAL_SLOTS.map(s=>s.id);
+const isSpecialSlot=(id)=>SPECIAL_SLOT_IDS.includes(getBaseSlot(id));
+const specialSlotLabel=(id)=>{const b=getBaseSlot(id);const s=SPECIAL_SLOTS.find(x=>x.id===b);return s?s.label:id;};
+// タイムスケジュールの並び：未定・午前 → 9:00〜12:30 → 午後 → 13:00〜18:00
+const SCHED_SLOTS=(()=>{
+  const out=['未定','午前'];
+  for(const s of TIME_SLOTS){ if(s==='13:00')out.push('午後'); out.push(s); }
+  return out;
 })();
 const DEFAULT_LOANERS_HONTEN = [
   {id:1, name:'ワゴンR',   num:'1234', store:'honten'},
@@ -3684,7 +3700,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
     ?{outline:`3px solid ${isInsp?'#c2410c':'#0891b2'}`,outlineOffset:'2px',boxShadow:`0 0 0 4px rgba(${isInsp?'67,56,202':'8,145,178'},0.15)`}
     :{};
   // 次/前のフィールドへ
-  const TIME_VALS=Array.from({length:19},(_,i)=>{const h=Math.floor(i/2)+9,m=i%2===0?'00':'30';return`${String(h).padStart(2,'0')}:${m}`;});
+  const TIME_VALS=SCHED_SLOTS; // 9:00〜18:00＋整理用の特別枠（未定/午前/午後）
   const goNext=(from)=>{
     const i=ORDER.indexOf(from); if(i<0||i>=ORDER.length-1)return;
     const next=ORDER[i+1]; setKbField(next);
@@ -3903,7 +3919,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
               <select value={getBaseSlot(form._slot||timeSlot)}
                 onChange={e=>setForm(p=>({...p,_slot:e.target.value}))}
                 style={{...INP,fontWeight:700,color:'#0891b2'}}>
-                {TIME_SLOTS.map(s=><option key={s} value={s}>{s}</option>)}
+                {SCHED_SLOTS.map(s=><option key={s} value={s}>{specialSlotLabel(s)}</option>)}
               </select>
             </div>
           )}
@@ -4080,8 +4096,8 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
                 onFocus={()=>setKbField('time')} onBlur={()=>{setKbField('');setTimeout(()=>setShowTmPk(false),150);}}
                 onKeyDown={onTimeKb} onClick={()=>setShowTmPk(p=>!p)}
                 style={{...INP,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',...KB('time')}}>
-                <span style={{fontWeight:700,color:form.time?'#0891b2':'#9ca3af',fontSize:14}}>
-                  {form.time||'時間を選択（Enterで開く）'}
+                <span style={{fontWeight:700,color:form.time?(isSpecialSlot(form.time)?'#9333ea':'#0891b2'):'#9ca3af',fontSize:14}}>
+                  {form.time?specialSlotLabel(form.time):'時間を選択（Enterで開く）'}
                 </span>
                 <span style={{fontSize:10,color:'#6b7280'}}>{showTmPk?'▲':'▼'}</span>
               </div>
@@ -4091,10 +4107,10 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
                     <div key={v} data-tmid={v}
                       onMouseDown={e=>{e.preventDefault();setForm(p=>({...p,time:v}));setShowTmPk(false);goNext('time');}}
                       style={{padding:'8px 16px',cursor:'pointer',fontSize:14,fontWeight:form.time===v?800:400,
-                        background:form.time===v?'#e0f2fe':'white',
-                        color:form.time===v?'#0891b2':'#374151',
+                        background:form.time===v?'#e0f2fe':(isSpecialSlot(v)?'#faf5ff':'white'),
+                        color:form.time===v?'#0891b2':(isSpecialSlot(v)?'#9333ea':'#374151'),
                         borderLeft:form.time===v?'4px solid #0891b2':'4px solid transparent'}}>
-                      {v}
+                      {specialSlotLabel(v)}
                     </div>
                   ))}
                 </div>
@@ -4317,8 +4333,8 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
     <tr id={isFirstSub?'sched-slot-'+(baseSlot||slot).replace(':',''):undefined}
       style={{background:isRestricted?'#fee2e2':locked?'#fff7ed':row.store==='sanda'?'#fff0f0':row.store==='honten'?'#eff6ff':isHour?'white':'#f0feff',cursor:locked||otherStore?'not-allowed':'pointer'}}
       onClick={()=>{if(!locked&&!otherStore){const _e=!row.name;onOpenModal('sched',dk,null,slot,_e);}}}>
-      <td style={{...TD,fontWeight:isFirstSub&&isHour?800:500,color:isFirstSub&&isHour?'#0891b2':'#7dd3fc',whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isHour?13:11,borderLeft:isSub?'3px solid #7dd3fc':''}}>
-        {isFirstSub?slot:<span style={{fontSize:9,color:'#a5f3fc'}}>↳</span>}
+      <td style={{...TD,fontWeight:isFirstSub&&(isHour||isSpecialSlot(baseSlot))?800:500,color:isFirstSub&&isSpecialSlot(baseSlot)?'#9333ea':(isFirstSub&&isHour?'#0891b2':'#7dd3fc'),whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isSpecialSlot(baseSlot)?11:(isFirstSub&&isHour?13:11),borderLeft:isSub?'3px solid #7dd3fc':''}}>
+        {isFirstSub?(isSpecialSlot(baseSlot)?specialSlotLabel(baseSlot):slot):<span style={{fontSize:9,color:'#a5f3fc'}}>↳</span>}
       </td>
       <td style={TD}>
         {locked?<div style={{padding:'3px 5px'}}><div style={{fontWeight:600}}>{row.name||'—'}</div><LockBadge lockedBy={lockInfo.lockedBy}/></div>
@@ -6519,7 +6535,8 @@ function AppInner() {
     const workStaff = staffList.filter(s=>!dayOff.includes(s.name));
 
     // タイムスケジュール：9:00〜18:00 全枠（空き含む）
-    const PRINT_SLOTS = TIME_SLOTS.filter(s=>{
+    const PRINT_SLOTS = SCHED_SLOTS.filter(s=>{
+      if(isSpecialSlot(s)) return true;       // 未定/午前/午後の枠も印刷に含める
       const h=parseInt(s.split(':')[0]);
       return h>=9 && h<=18 && s!=='12:30';  // 12:30（昼休み枠）は印刷では省く
     });
@@ -8688,7 +8705,7 @@ function AppInner() {
                       {['時間','氏名','車種','作業','代車・レンタカー','指・見','内容'].map(h=><th key={h} style={{padding:'7px 8px',textAlign:'left',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>{h}</th>)}
                     </tr></thead>
                     <tbody>
-                      {TIME_SLOTS.map(slot=>{
+                      {SCHED_SLOTS.map(slot=>{
                         // baseSlotの全サブキーを取得（既存行 + 空の基本行）
                         const subKeys=getSchedSubKeys(dk,slot);
                         const displayKeys=subKeys.length>0?subKeys:[slot];
@@ -8737,7 +8754,7 @@ function AppInner() {
                             {!schedCollapsed&&lastHasData&&!isSlotRestricted&&(
                               <tr style={{background:'#f0feff'}}>
                                 <td style={{...TD,paddingLeft:10,borderLeft:'3px solid #7dd3fc'}}>
-                                  <span style={{fontSize:10,color:'#7dd3fc',fontWeight:500}}>{slot}</span>
+                                  <span style={{fontSize:10,color:'#7dd3fc',fontWeight:500}}>{specialSlotLabel(slot)}</span>
                                 </td>
                                 <td colSpan={6} style={TD}>
                                   <button
