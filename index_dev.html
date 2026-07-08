@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.20';
+const APP_VERSION = '1.21';
 
 
 
@@ -5379,7 +5379,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
             </tr>
           </thead>
           <tbody>
-            {LOANERS_LOCAL.map(car=>{
+            {LOANERS_LOCAL.map((car,carIdx)=>{
               return (
                 <tr key={car.id}>
                   <td style={{background:'#f9fafb',border:'1px solid #e5e7eb',padding:'5px 9px',fontWeight:600,fontSize:11,whiteSpace:'nowrap',position:'sticky',left:0,zIndex:5,transform:'translateZ(0)',backfaceVisibility:'hidden',height:40,boxSizing:'border-box'}}>
@@ -5410,6 +5410,14 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                     const bg=isDrag?'#bef264':isConf?'#93c5fd':isObj?(st.color||RES_COLORS[0]):h2?'#fef08a':'white';
                     const isFree=pickMode&&!isObj&&!isDrag&&!isConf;
                     const isBlocked=pickMode&&isObj;
+                    // 隣（左＝同じ代車の前日／上＝1つ上の代車の同日）が別の予約なら濃い区切り線を引く。
+                    // 同系色の予約が隣り合っても境目が分かるようにする（色は変えない）。
+                    const _sameRes=(a,b)=>a&&b&&typeof a==='object'&&typeof b==='object'&&a.id===b.id;
+                    const _leftSt=(i>0&&dateRange[i-1])?getState(car.id,dateRange[i-1]):null;
+                    const _upSt=carIdx>0?getState(LOANERS_LOCAL[carIdx-1].id,dateObj):null;
+                    const sepL=isObj&&!_sameRes(st,_leftSt);
+                    const sepT=isObj&&_upSt&&typeof _upSt==='object'&&!_sameRes(st,_upSt);
+                    const SEP='2px solid #1e293b';
                     return (
                       <td key={i}
                         onMouseDown={e=>{
@@ -5434,6 +5442,8 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                         style={{
                           width:44,minWidth:44,maxWidth:44,height:40,
                           border:'1px solid #e5e7eb',
+                          ...(sepL?{borderLeft:SEP}:{}),
+                          ...(sepT?{borderTop:SEP}:{}),
                           boxShadow:isDrag?'inset 0 0 0 2px #65a30d':isConf?'inset 0 0 0 2px #2563eb':'none',
                           background:bg,
                           cursor:isBlocked?'not-allowed':isFree?'crosshair':!pickMode&&isObj?'pointer':'default',
