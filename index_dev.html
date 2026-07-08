@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.16';
+const APP_VERSION = '1.17';
 
 
 
@@ -7682,6 +7682,62 @@ function AppInner() {
     else setDesktopListS(p=>(p||[]).filter(d=>d.uid!==uid));
   },[setDesktopListH,setDesktopListS]);
 
+  // タイムスケジュールを現在時刻に自動追従スクロール（今日を表示中のみ・現在の1枠前を先頭に）。
+  // ★フックは必ずログイン判定(if(!currentUser)return)より前に置くこと（後ろに置くと
+  //   ログイン⇄ログアウトでフック数が変わりReactがレンダリングエラーになる）。dkは内部で算出。
+  const lastAutoSlotRef=useRef(null);
+  useEffect(()=>{
+    const _sd = selDate instanceof Date ? selDate
+      : (selDate ? (()=>{const p=String(selDate).split('-').map(Number);return p.length===3?new Date(p[0],p[1]-1,p[2]):new Date(selDate);})() : null);
+    const _dk = _sd?dateKey(_sd.getFullYear(),_sd.getMonth(),_sd.getDate()):null;
+    lastAutoSlotRef.current=null;
+    if(!currentUser||view!=='schedule'||!_dk)return;
+    const n0=new Date();
+    // 今日以外は時間連動しない。前日で下にスクロールした位置が残らないよう先頭(09:00)へ戻す。
+    if(_dk!==dateKey(n0.getFullYear(),n0.getMonth(),n0.getDate())){
+      const resetTop=()=>{const c=document.getElementById(SEC_SCHED);if(c)c.scrollTop=0;};
+      const rts=[0,150,400,900].map(ms=>setTimeout(resetTop,ms));
+      return()=>rts.forEach(clearTimeout);
+    }
+    const targetSlot=()=>{
+      const n=new Date();
+      let m=Math.floor((n.getHours()*60+n.getMinutes())/30)*30-30; // 現在枠の1枠前
+      m=Math.max(9*60,Math.min(18*60,m));                          // 09:00〜18:00にクランプ
+      return `${String(Math.floor(m/60)).padStart(2,'0')}:${m%60===0?'00':'30'}`;
+    };
+    const apply=(force)=>{
+      const slot=targetSlot();
+      if(!force&&lastAutoSlotRef.current===slot)return;
+      const cont=document.getElementById(SEC_SCHED);
+      if(!cont)return;
+      if(cont.scrollHeight-cont.clientHeight<40)return; // レイアウト未確定時は後の再試行に任せる
+      let row=null;
+      const idx=Math.max(0,TIME_SLOTS.indexOf(slot));
+      for(let i=idx;i<TIME_SLOTS.length&&!row;i++){
+        row=document.getElementById('sched-slot-'+TIME_SLOTS[i].replace(':',''));
+      }
+      if(!row)return;
+      lastAutoSlotRef.current=slot;
+      const rowTop=row.getBoundingClientRect().top-cont.getBoundingClientRect().top+cont.scrollTop;
+      const head=cont.querySelector('thead');
+      const headH=head?head.getBoundingClientRect().height:0;
+      cont.scrollTo({top:Math.max(0,rowTop-headH),behavior:document.visibilityState==='visible'?'smooth':'auto'});
+    };
+    const onVis=()=>{if(document.visibilityState==='visible')apply(true);};
+    document.addEventListener('visibilitychange',onVis);
+    let attempts=0;
+    const initIv=setInterval(()=>{
+      attempts++;
+      const cont=document.getElementById(SEC_SCHED);
+      const stuck=cont&&cont.scrollTop>10;
+      if(stuck||attempts>20){clearInterval(initIv);return;}
+      lastAutoSlotRef.current=null;
+      apply(false);
+    },1500);
+    const iv=setInterval(()=>apply(false),30000);
+    return()=>{clearInterval(initIv);clearInterval(iv);document.removeEventListener('visibilitychange',onVis);};
+  },[currentUser,view,selDate,schedCollapsed]);
+
   if(!currentUser)return(
     <>
       <style>{GCSS}</style>
@@ -7721,68 +7777,6 @@ function AppInner() {
     setSelDate(d);
   };
   const dayMemos=dk?memoData[dk]||[]:[];
-
-  // タイムスケジュールを現在時刻に自動追従スクロール（今日を表示中のみ）。
-  // 常に「現在時刻の1枠（30分）前」の行が先頭に来るようにする。
-  // 例: 10:00になったら9:30の枠が先頭、10:30になったら10:00の枠が先頭。
-  // 手動で上にスクロールすれば過去の予定も見られる（次の30分境界で再び追従する）。
-  const lastAutoSlotRef=useRef(null);
-  useEffect(()=>{
-    lastAutoSlotRef.current=null;
-    if(view!=='schedule'||!dk)return;
-    const n0=new Date();
-    // 今日以外は時間連動しない。前の日で下方向にスクロールした位置が残らないよう
-    // 先頭（09:00）へ戻す。レイアウト確定を待って数回リセットする。
-    if(dk!==dateKey(n0.getFullYear(),n0.getMonth(),n0.getDate())){
-      const resetTop=()=>{const c=document.getElementById(SEC_SCHED);if(c)c.scrollTop=0;};
-      const rts=[0,150,400,900].map(ms=>setTimeout(resetTop,ms));
-      return()=>rts.forEach(clearTimeout);
-    }
-    const targetSlot=()=>{
-      const n=new Date();
-      let m=Math.floor((n.getHours()*60+n.getMinutes())/30)*30-30; // 現在枠の1枠前
-      m=Math.max(9*60,Math.min(18*60,m)); // 09:00〜18:00にクランプ
-      return `${String(Math.floor(m/60)).padStart(2,'0')}:${m%60===0?'00':'30'}`;
-    };
-    const apply=(force)=>{
-      const slot=targetSlot();
-      if(!force&&lastAutoSlotRef.current===slot)return; // 通常は境界を越えた時だけ動かす
-      const cont=document.getElementById(SEC_SCHED);
-      if(!cont)return;
-      // レイアウト未確定でスクロール余地がない間は適用しない（後の再試行に任せる。
-      // ここでスクロールすると0にクランプされたまま「適用済み」になってしまう）
-      if(cont.scrollHeight-cont.clientHeight<40)return;
-      // 対象枠の行を探す（畳み表示で行が無ければ後続の枠にフォールバック）
-      let row=null;
-      const idx=Math.max(0,TIME_SLOTS.indexOf(slot));
-      for(let i=idx;i<TIME_SLOTS.length&&!row;i++){
-        row=document.getElementById('sched-slot-'+TIME_SLOTS[i].replace(':',''));
-      }
-      if(!row)return;
-      lastAutoSlotRef.current=slot;
-      const rowTop=row.getBoundingClientRect().top-cont.getBoundingClientRect().top+cont.scrollTop;
-      const head=cont.querySelector('thead');
-      const headH=head?head.getBoundingClientRect().height:0; // stickyヘッダーの直下に枠が来るように
-      // 非表示タブではsmoothアニメーションが動かず空振りするため、見えている時だけsmooth
-      cont.scrollTo({top:Math.max(0,rowTop-headH),behavior:document.visibilityState==='visible'?'smooth':'auto'});
-    };
-    // タブが表に戻った時も即追従（非表示中はintervalが間引かれるため）
-    const onVis=()=>{if(document.visibilityState==='visible')apply(true);};
-    document.addEventListener('visibilitychange',onVis);
-    // 起動直後は初期データ読み込みでレイアウトが動きスクロールが定着しないため、
-    // 実際にスクロールが付くまで1.5秒間隔で再適用する（最大30秒で打ち切り）
-    let attempts=0;
-    const initIv=setInterval(()=>{
-      attempts++;
-      const cont=document.getElementById(SEC_SCHED);
-      const stuck=cont&&cont.scrollTop>10; // 定着済み（先頭枠=09:00のままが正解の朝は付かないが実害なし）
-      if(stuck||attempts>20){clearInterval(initIv);return;}
-      lastAutoSlotRef.current=null; // 未定着の間は「未適用」扱いで毎回実行
-      apply(false);
-    },1500);
-    const iv=setInterval(()=>apply(false),30000); // 以後は30秒ごとに30分境界を確認
-    return()=>{clearInterval(initIv);clearInterval(iv);document.removeEventListener('visibilitychange',onVis);};
-  },[view,dk,schedCollapsed]);
 
   return (
     <div style={{height:'100vh',overflow:'hidden',background:'linear-gradient(140deg,#7c2d12,#EA580C,#f97316)',fontFamily:'system-ui,-apple-system,sans-serif'}}>
