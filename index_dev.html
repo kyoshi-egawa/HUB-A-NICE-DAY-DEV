@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.26';
+const APP_VERSION = '1.27';
 
 
 
@@ -5133,11 +5133,19 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
       Object.keys(day).forEach(k=>{const r=day[k]; if(r&&r.user) all.push({...r,_curCar:String(cid),_key:k});});
     });
     const toN=(y,m,d)=>toNum(y,m,d);
-    const locked=all.filter(r=>r.locked);
-    const movable=all.filter(r=>!r.locked);
+    // 現在日が基準。過去（返却済み）は対象外、貸出中・限定は動かさず枠だけ占有、これから貸す分だけ並べ替える。
+    const now=new Date();
+    const todayD=toN(now.getFullYear(),now.getMonth(),now.getDate());
+    const past=[],fixed=[],movable=[];
+    all.forEach(r=>{
+      const s=toN(r.fy,r.fm,r.fd), e=toN(r.ty,r.tm,r.td);
+      if(e<todayD) past.push(r);                       // 返却済み → 触らない・考慮しない
+      else if(r.locked||s<todayD) fixed.push(r);       // 貸出中 or 限定 → 動かさない（枠は占有）
+      else movable.push(r);                            // これから貸す → 最適化対象
+    });
     const carById={}; cars.forEach(c=>carById[String(c.id)]=c);
     const carInt={}; cars.forEach(c=>carInt[String(c.id)]=[]);
-    locked.forEach(r=>{const cid=r._curCar; if(carInt[cid]) carInt[cid].push({s:toN(r.fy,r.fm,r.fd),e:toN(r.ty,r.tm,r.td)});});
+    fixed.forEach(r=>{const cid=r._curCar; if(carInt[cid]) carInt[cid].push({s:toN(r.fy,r.fm,r.fd),e:toN(r.ty,r.tm,r.td)});});
     movable.sort((a,b)=>toN(a.fy,a.fm,a.fd)-toN(b.fy,b.fm,b.fd));
     const assign={};
     movable.forEach(r=>{
@@ -5155,16 +5163,21 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
     });
     const newLR={}; Object.keys(loanerRes||{}).forEach(cid=>{newLR[String(cid)]={};}); cars.forEach(c=>{if(!newLR[String(c.id)])newLR[String(c.id)]={};});
     const moves=[];
-    locked.forEach(r=>{const {_curCar,_key,...res}=r; (newLR[_curCar]=newLR[_curCar]||{})[String(r.fd)]=res;});
+    // ★キーは衝突しない「年-月-日」を使う（"日"だけだと別の月で同じ日に始まる予約を
+    //   同じ車にまとめた時にキーが衝突して予約が消える。同じ車に同じ開始日=重複なので一意）。
+    const rkey=(r)=>`${r.fy}-${r.fm}-${r.fd}`;
+    // 過去・貸出中・限定はそのままの車に残す（触らない）
+    past.forEach(r=>{const {_curCar,_key,...res}=r; (newLR[_curCar]=newLR[_curCar]||{})[rkey(r)]=res;});
+    fixed.forEach(r=>{const {_curCar,_key,...res}=r; (newLR[_curCar]=newLR[_curCar]||{})[rkey(r)]=res;});
     movable.forEach(r=>{
       const cid=assign[r.id]; const car=carById[cid]; const {_curCar,_key,...res}=r;
-      (newLR[cid]=newLR[cid]||{})[String(r.fd)]={...res,carName:car?car.name:res.carName,carNum:car?car.num:res.carNum};
+      (newLR[cid]=newLR[cid]||{})[rkey(r)]={...res,carName:car?car.name:res.carName,carNum:car?car.num:res.carNum};
       if(String(_curCar)!==String(cid)){
         const oldCar=carById[_curCar];
         moves.push({user:r.user,fromCarId:_curCar,toCarId:cid,fromName:(oldCar&&oldCar.name)||res.carName||'?',toName:(car&&car.name)||'?',period:`${r.fm+1}/${r.fd}〜${r.tm+1}/${r.td}`,bookingKey:r.bookingKey});
       }
     });
-    return {moves,newLoanerRes:newLR,total:all.length,locked:locked.length};
+    return {moves,newLoanerRes:newLR,movableCount:movable.length,fixedCount:fixed.length,pastCount:past.length};
   };
   // pinnedRes/hoverResは親から受け取る（グリッドの再レンダリングを防いでscrollLeftを保持）
   // pickMode用ドラッグ状態
@@ -5656,14 +5669,14 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
           <div onClick={e=>e.stopPropagation()} style={{background:'white',borderRadius:14,width:'min(560px,96vw)',maxHeight:'88vh',display:'flex',flexDirection:'column',boxShadow:'0 24px 60px rgba(0,0,0,0.35)',overflow:'hidden'}}>
             <div style={{background:'linear-gradient(135deg,#3730a3,#4f46e5)',color:'white',padding:'14px 20px'}}>
               <div style={{fontSize:16,fontWeight:800}}>✨ 代車の最適化</div>
-              <div style={{fontSize:11,opacity:0.85,marginTop:2}}>歯抜けを減らすよう割り当てを詰め直します（限定した予約は動かしません）</div>
+              <div style={{fontSize:11,opacity:0.85,marginTop:2}}>今日以降の貸出を詰め直します（過去・貸出中・限定は動かしません）</div>
             </div>
             <div style={{flex:1,overflowY:'auto',padding:'16px 20px'}}>
               {optResult.moves.length===0?(
                 <div style={{textAlign:'center',padding:'24px 8px',color:'#334155'}}>
                   <div style={{fontSize:30,marginBottom:8}}>👍</div>
                   <div style={{fontWeight:700}}>すでに最適です</div>
-                  <div style={{fontSize:12,color:'#64748b',marginTop:6}}>動かせる予約はありませんでした（対象 {optResult.total-optResult.locked} 件／限定 {optResult.locked} 件）。</div>
+                  <div style={{fontSize:12,color:'#64748b',marginTop:6}}>動かせる予約はありませんでした（これから貸す {optResult.movableCount} 件／貸出中・限定 {optResult.fixedCount} 件／過去は対象外 {optResult.pastCount} 件）。</div>
                 </div>
               ):(<>
                 <div style={{fontSize:13,color:'#334155',marginBottom:12}}><b>{optResult.moves.length}件</b>の予約の代車が変わります：</div>
