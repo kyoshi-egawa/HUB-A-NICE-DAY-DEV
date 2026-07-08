@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.18';
+const APP_VERSION = '1.19';
 
 
 
@@ -263,7 +263,7 @@ const COURSES = [
 ];
 const TOKUENS = [{id:'①',name:'1ヶ月前予約'},{id:'②',name:'2ヶ月前予約'},{id:'-',name:'なし'}];
 const WORKS = [
-  {id:'Q',name:'クイック整備・修理'},{id:'⑫',name:'12ヶ月点検'},{id:'M12',name:'メンパ12'},
+  {id:'Q',name:'クイック整備・修理'},{id:'⑫',name:'12ヶ月点検'},{id:'M12',name:'メンパ12ヶ月点検'},
   {id:'M6',name:'メンパ6ヶ月点検'},{id:'N1',name:'新車1ヶ月点検'},{id:'N6',name:'新車6ヶ月点検'},
   {id:'B',name:'鈑金塗装'},{id:'商',name:'商談'},{id:'保',name:'保険'},{id:'試',name:'試乗'},{id:'納',name:'納車'},{id:'他',name:'その他'}
 ];
@@ -1726,6 +1726,11 @@ const GCSS=`
   ::-webkit-scrollbar{width:6px;height:6px}
   ::-webkit-scrollbar-track{background:#f1f5f9}
   ::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+  /* 代車管理など横スクロールを掴みやすくする太めバー（クリックしやすいよう約2倍） */
+  .fat-hscroll{scrollbar-width:auto;}
+  .fat-hscroll::-webkit-scrollbar{height:14px;width:14px}
+  .fat-hscroll::-webkit-scrollbar-thumb{background:#94a3b8;border-radius:8px;border:3px solid #f1f5f9}
+  .fat-hscroll::-webkit-scrollbar-thumb:hover{background:#64748b}
 `;
 
 const SEC_INSP='sec-insp', SEC_SCHED='sec-sched', SEC_NOTES='sec-notes';
@@ -3743,8 +3748,10 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
       else if(e.key==='ArrowUp'){e.preventDefault();goPrev('work');}
       return;}
     const cur=WIDS.indexOf(form.work);
-    if(e.key==='ArrowDown'){e.preventDefault();setForm(p=>({...p,work:WIDS[cur<0?0:Math.min(cur+1,WIDS.length-1)]}));}
-    else if(e.key==='ArrowUp'){e.preventDefault();setForm(p=>({...p,work:WIDS[Math.max(cur-1,0)]}));}
+    // 選択中の項目を常にリスト内に見えるようスクロール（下端に来たらドラム式に上へ送る）
+    const scrollWkIntoView=(id)=>{const el=document.querySelector('[data-wkid="'+id+'"]');if(el)el.scrollIntoView({block:'nearest'});};
+    if(e.key==='ArrowDown'){e.preventDefault();const ni=cur<0?0:Math.min(cur+1,WIDS.length-1);setForm(p=>({...p,work:WIDS[ni]}));scrollWkIntoView(WIDS[ni]);}
+    else if(e.key==='ArrowUp'){e.preventDefault();const ni=Math.max(cur-1,0);setForm(p=>({...p,work:WIDS[ni]}));scrollWkIntoView(WIDS[ni]);}
     else if(e.key==='Enter'){e.preventDefault();setShowWkPk(false);setKbField('shimi');setTimeout(()=>document.querySelector('[data-kbkey="shimi"]')?.focus(),30);}
     else if(e.key==='Escape'){e.preventDefault();setShowWkPk(false);}
   };
@@ -3967,7 +3974,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
               {showWkPk&&(
                 <div style={{border:'2px solid #0891b2',borderRadius:8,marginTop:4,maxHeight:180,overflowY:'auto',background:'white',boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
                   {WORKS.map((w,i)=>(
-                    <div key={i}
+                    <div key={i} data-wkid={w.id}
                       onMouseDown={e=>{e.preventDefault();setForm(p=>({...p,work:w.id}));setShowWkPk(false);setKbField('shimi');}}
                       style={{padding:'8px 12px',cursor:'pointer',fontSize:13,
                         background:form.work===w.id?'#e0f2fe':'white',
@@ -5347,7 +5354,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
       </div>}
 
       {/* グリッド：overflow:hiddenでズレ防止 */}
-      <div ref={gridRef} 
+      <div ref={gridRef} className="fat-hscroll"
         style={{overflowX:'auto',overflowY:'visible',userSelect:'none',WebkitUserSelect:'none'}}
         onMouseUp={handleMU}
         onMouseLeave={()=>{if(isDragging.current){isDragging.current=false;setDrag(null);}}}>
@@ -5635,7 +5642,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
               <span style={{padding:'2px 8px',borderRadius:12,background:'#d1fae5',color:'#065f46',fontSize:10,fontWeight:700}}>{RENTAL_LOCAL.length}台</span>
               {pickMode&&<span style={{fontSize:11,color:'#059669',fontWeight:600}}></span>}
             </div>
-            <div ref={rentalScrollRef} style={{overflowX:'auto',overflowY:'visible',userSelect:'none',WebkitUserSelect:'none'}}>
+            <div ref={rentalScrollRef} className="fat-hscroll" style={{overflowX:'auto',overflowY:'visible',userSelect:'none',WebkitUserSelect:'none'}}>
               <table style={{borderCollapse:'collapse',fontSize:12,tableLayout:'fixed',width:'max-content'}}>
                 <thead>
                   <tr>
