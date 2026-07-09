@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.36';
+const APP_VERSION = '1.37';
 
 
 
@@ -310,10 +310,14 @@ const SPECIAL_SLOTS=[
 const SPECIAL_SLOT_IDS=SPECIAL_SLOTS.map(s=>s.id);
 const isSpecialSlot=(id)=>SPECIAL_SLOT_IDS.includes(getBaseSlot(id));
 const specialSlotLabel=(id)=>{const b=getBaseSlot(id);const s=SPECIAL_SLOTS.find(x=>x.id===b);return s?s.label:id;};
-// タイムスケジュールの並び：未定・午前 → 9:00〜12:30 → 午後 → 13:00〜18:00
+// タイムスケジュールの並び：午前 → 9:00〜12:00 → 未定（旧12:30の位置＝昼間。夕方の自動スクロールでも見落とさない）→ 午後 → 13:00〜18:00
 const SCHED_SLOTS=(()=>{
-  const out=['未定','午前'];
-  for(const s of TIME_SLOTS){ if(s==='13:00')out.push('午後'); out.push(s); }
+  const out=['午前'];
+  for(const s of TIME_SLOTS){
+    if(s==='12:30'){ out.push('未定'); continue; } // 12:30枠は廃止し、その位置（昼間）に「未定」を配置
+    if(s==='13:00') out.push('午後');
+    out.push(s);
+  }
   return out;
 })();
 const DEFAULT_LOANERS_HONTEN = [
@@ -6942,6 +6946,8 @@ function AppInner() {
   const getSchedSubKeys=useCallback((dk,base)=>{
     const day=schedData[dk]||{};
     const keys=[...(day[base]?[base]:[]),...Object.keys(day).filter(k=>k.startsWith(base+'__')).sort()];
+    // 廃止した12:30枠に既存予約が残っている場合は「未定」枠（旧12:30の位置）に取り込んで消さない
+    if(base==='未定'){ keys.push(...(day['12:30']?['12:30']:[]),...Object.keys(day).filter(k=>k.startsWith('12:30__')).sort()); }
     return keys;
   },[schedData]);
 
