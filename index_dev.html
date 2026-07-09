@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.28';
+const APP_VERSION = '1.29';
 
 
 
@@ -3701,34 +3701,37 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
     :{};
   // 次/前のフィールドへ
   const TIME_VALS=SCHED_SLOTS; // 9:00〜18:00＋整理用の特別枠（未定/午前/午後）
+  // キー操作で送った時、フォーカスした項目をモーダルの中央にスクロール
+  //（上の方の項目は先頭でクランプされ中央に来ないが、中央を過ぎたら常に真ん中に保たれる）
+  const centerField=(el)=>{ if(el){try{el.scrollIntoView({block:'center',behavior:'smooth'});}catch(e){} } };
   const goNext=(from)=>{
     const i=ORDER.indexOf(from); if(i<0||i>=ORDER.length-1)return;
     const next=ORDER[i+1]; setKbField(next);
-    if(next==='name')nameRef.current?.focus();
-    else if(next==='staff')staffRef.current?.focus();
-    else if(next==='car')carRef.current?.focus();
-    else if(next==='time')timeRef.current?.focus();
-    else if(next==='note')noteRef.current?.focus();
-    else if(next==='cont')contRef.current?.focus();
+    if(next==='name'){nameRef.current?.focus();centerField(nameRef.current);}
+    else if(next==='staff'){staffRef.current?.focus();centerField(staffRef.current);}
+    else if(next==='car'){carRef.current?.focus();centerField(carRef.current);}
+    else if(next==='time'){timeRef.current?.focus();centerField(timeRef.current);}
+    else if(next==='note'){noteRef.current?.focus();centerField(noteRef.current);}
+    else if(next==='cont'){contRef.current?.focus();centerField(contRef.current);}
     else{// course/tokuten/work/shimi: モーダル内のdiv[tabIndex=0]を順番に探す
       const divs=Array.from(document.querySelectorAll('.booking-modal-inner div[tabIndex="0"]'));
       const target=divs.find(d=>d.dataset.kbkey===next);
-      if(target)setTimeout(()=>target.focus(),20);
+      if(target)setTimeout(()=>{target.focus();centerField(target);},20);
     }
   };
   const goPrev=(from)=>{
     const i=ORDER.indexOf(from); if(i<=0)return;
     const prev=ORDER[i-1]; setKbField(prev);
-    if(prev==='name')nameRef.current?.focus();
-    else if(prev==='staff')staffRef.current?.focus();
-    else if(prev==='car')carRef.current?.focus();
-    else if(prev==='time')timeRef.current?.focus();
-    else if(prev==='note')noteRef.current?.focus();
-    else if(prev==='cont')contRef.current?.focus();
+    if(prev==='name'){nameRef.current?.focus();centerField(nameRef.current);}
+    else if(prev==='staff'){staffRef.current?.focus();centerField(staffRef.current);}
+    else if(prev==='car'){carRef.current?.focus();centerField(carRef.current);}
+    else if(prev==='time'){timeRef.current?.focus();centerField(timeRef.current);}
+    else if(prev==='note'){noteRef.current?.focus();centerField(noteRef.current);}
+    else if(prev==='cont'){contRef.current?.focus();centerField(contRef.current);}
     else{
       const divs=Array.from(document.querySelectorAll('.booking-modal-inner div[tabIndex="0"]'));
       const target=divs.find(d=>d.dataset.kbkey===prev);
-      if(target)setTimeout(()=>target.focus(),20);
+      if(target)setTimeout(()=>{target.focus();centerField(target);},20);
     }
   };
   // 各フィールドのキーハンドラ
