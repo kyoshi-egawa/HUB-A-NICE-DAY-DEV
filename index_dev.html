@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.33';
+const APP_VERSION = '1.34';
 
 
 
@@ -4133,13 +4133,13 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
           {/* 前日入庫の入庫日（車検作業日と別の日に車が入庫する場合。チェックすると入庫日のスケジュールに自動表示） */}
           {isInsp&&(
             <div style={{position:'relative'}}>
-              <label style={LBL}>入庫日 <span style={{fontWeight:400,color:'#9ca3af',fontSize:10}}>前日・前々日入庫の場合にチェック</span></label>
+              <label style={LBL}>入庫日 <span style={{fontWeight:400,color:'#9ca3af',fontSize:10}}>事前入庫（前日・前々日など）の場合にチェック</span></label>
               <button type="button"
                 onClick={()=>{if(!entryPickerMonth){const now=new Date();const src=form.entryDate?form.entryDate.split('-').map(Number):null;setEntryPickerMonth(src?{year:src[0],month:src[1]-1}:{year:now.getFullYear(),month:now.getMonth()});}setShowEntryPicker(p=>!p);}}
                 style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:8,cursor:'pointer',border:`2px solid ${form.entryDate?'#9a3412':'#d1d5db'}`,background:form.entryDate?'#fff7ed':'#f9fafb'}}>
                 <span style={{width:20,height:20,borderRadius:5,border:`2px solid ${form.entryDate?'#9a3412':'#9ca3af'}`,background:form.entryDate?'#9a3412':'white',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,flexShrink:0}}>{form.entryDate?'✓':''}</span>
                 <span style={{fontWeight:700,fontSize:13,color:form.entryDate?'#9a3412':'#6b7280'}}>
-                  {form.entryDate?(()=>{const p=form.entryDate.split('-');return `前日入庫：${p[1]}/${p[2]}（${['日','月','火','水','木','金','土'][new Date(p[0],p[1]-1,p[2]).getDay()]}）に入庫`;})():'前日入庫にする（クリックで入庫日を選択）'}
+                  {form.entryDate?(()=>{const p=form.entryDate.split('-');return `事前入庫：${p[1]}/${p[2]}（${['日','月','火','水','木','金','土'][new Date(p[0],p[1]-1,p[2]).getDay()]}）に入庫`;})():'事前入庫にする（クリックで入庫日を選択）'}
                 </span>
                 {form.entryDate&&<span onClick={e=>{e.stopPropagation();setForm(p=>({...p,entryDate:''}));setShowEntryPicker(false);}} style={{marginLeft:'auto',color:'#9a3412',fontWeight:800,fontSize:16,padding:'0 4px'}}>✕</span>}
               </button>
@@ -4332,7 +4332,7 @@ const InspRow=memo(({row,idx,dispNo,dk,onOpenModal,lockInfo,loanerRes,loanerResH
       <td style={TD}>{cObj&&<span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 8px',borderRadius:20,background:cObj.bg,color:cObj.color,fontWeight:700,fontSize:11,opacity:pending||isOverLimit||isCancelled?0.4:1}}><span style={{width:16,height:16,borderRadius:'50%',background:cObj.color,color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:900}}>{cObj.initial}</span>{cObj.name}</span>}</td>
       <td style={TD}><span style={{fontSize:13,color:row.rentalLabel?(pending||isOverLimit||isCancelled?'#6b7280':'#065f46'):(pending||isOverLimit||isCancelled?'#6b7280':'#374151'),fontWeight:(row.rentalLabel||loanerLabel||row.loaner)&&!pending&&!isOverLimit?700:400}}>{row.rentalLabel||loanerLabel||row.loaner||'—'}</span></td>
       <td style={TD}><span style={{fontSize:13,color:pending||isOverLimit||isCancelled?'#6b7280':'#374151'}}>{row.tokuten||'—'}</span></td>
-      <td style={TD}>{(row.entryDate&&row.entryDate!==dk)?(()=>{const p=row.entryDate.split('-');const mmdd=String(p[1]).padStart(2,'0')+'/'+String(p[2]).padStart(2,'0');return <span title="前日入庫（入庫日）" style={{display:'inline-flex',flexDirection:'column',lineHeight:1.15}}><span style={{fontWeight:800,fontSize:12,color:pending||isOverLimit||isCancelled?'#9ca3af':'#c2410c',whiteSpace:'nowrap'}}>🚗{mmdd}</span>{row.time&&<span style={{fontSize:10,color:'#9ca3af'}}>{specialSlotLabel(row.time)}</span>}</span>;})():<span style={{fontWeight:600,fontSize:13,color:pending||isOverLimit||isCancelled?'#6b7280':'#374151'}}>{row.time||'—'}</span>}</td>
+      <td style={TD}>{(row.entryDate&&row.entryDate!==dk)?(()=>{const p=row.entryDate.split('-');const mmdd=String(p[1]).padStart(2,'0')+'/'+String(p[2]).padStart(2,'0');return <span title="事前入庫（入庫日）" style={{display:'inline-flex',flexDirection:'column',lineHeight:1.15}}><span style={{fontWeight:800,fontSize:12,color:pending||isOverLimit||isCancelled?'#9ca3af':'#c2410c',whiteSpace:'nowrap'}}>🚗{mmdd}</span>{row.time&&<span style={{fontSize:10,color:'#9ca3af'}}>{specialSlotLabel(row.time)}</span>}</span>;})():<span style={{fontWeight:600,fontSize:13,color:pending||isOverLimit||isCancelled?'#6b7280':'#374151'}}>{row.time||'—'}</span>}</td>
       <td style={TD}>{row.note
         ?<div style={{display:'flex',flexWrap:'wrap',gap:3,alignItems:'center'}}>
            {row.note.split('\n').map((line,i)=>{
@@ -8937,11 +8937,11 @@ function AppInner() {
                               const loaner=r.rentalLabel||dl||r.loaner||'';
                               return(
                                 <tr key={'do-'+wdk+'-'+ix} onClick={()=>handleOpenModal('insp',wdk,ix,null,false)}
-                                  style={{background:'#fff7ed',cursor:'pointer'}} title="前日入庫の車検（クリックで車検を編集）">
+                                  style={{background:'#fff7ed',cursor:'pointer'}} title="事前入庫の車検（クリックで車検を編集）">
                                   <td style={{...TD,paddingLeft:10,whiteSpace:'nowrap',color:'#9a3412',fontWeight:700,fontSize:11,borderLeft:'3px solid #ea580c'}}>{isSpecialSlot(slot)?specialSlotLabel(slot):slot}</td>
                                   <td style={TD} colSpan={6}>
                                     <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                                      <span style={{fontSize:10,fontWeight:800,color:'white',background:'#ea580c',borderRadius:20,padding:'1px 8px',whiteSpace:'nowrap'}}>🚗 前日入庫</span>
+                                      <span style={{fontSize:10,fontWeight:800,color:'white',background:'#ea580c',borderRadius:20,padding:'1px 8px',whiteSpace:'nowrap'}}>🚗 事前入庫</span>
                                       <span style={{fontWeight:700,color:'#7c2d12'}}>{r.name}</span>
                                       {r.carType&&<span style={{fontSize:12,color:'#6b7280'}}>{r.carType}</span>}
                                       {loaner&&<span style={{fontSize:11,color:'#065f46',fontWeight:700}}>🔑 {loaner}</span>}
