@@ -25,7 +25,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.32';
+const MOBILE_VERSION='1.33';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -155,7 +155,10 @@ const addPending=p=>savePendingStore([...loadPending(),p]);
 const removePendingStore=pid=>savePendingStore(loadPending().filter(p=>p.pid!==pid));
 
 // ══ 予約データのコアロジック（PC版と同一。挙動を変えないこと）══
-const blankInsp=()=>({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional'});
+const blankInsp=()=>({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional',entryDate:''});
+// dk("2026-7-9") ⇔ <input type=date>("2026-07-09") 変換
+const dkToInputDate=(dk)=>{if(!dk)return'';const p=String(dk).split('-');return p.length===3?`${p[0]}-${String(p[1]).padStart(2,'0')}-${String(p[2]).padStart(2,'0')}`:'';};
+const inputDateToDk=(v)=>{if(!v)return'';const p=v.split('-').map(Number);return p.length===3?`${p[0]}-${p[1]}-${p[2]}`:'';};
 const recomputeInspApproval=(rows,limit)=>{
   const lim=(limit!=null)?limit:6;
   const out=rows.map(r=>(r?{...r}:r));
@@ -577,6 +580,15 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
                 </div>
               </div>
               <div>
+                <label style={LBL}>入庫日 <span style={{fontWeight:400,color:'#94a3b8',fontSize:10}}>前日・前々日入庫の場合に指定</span></label>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <input type="date" value={dkToInputDate(form.entryDate)} onChange={e=>setForm(p=>({...p,entryDate:inputDateToDk(e.target.value)}))}
+                    style={{...INP,flex:1,...(form.entryDate?{border:'2px solid #9a3412',background:'#fff7ed',color:'#9a3412',fontWeight:800}:{})}}/>
+                  {form.entryDate&&<button onClick={()=>setForm(p=>({...p,entryDate:''}))} style={{padding:'0 14px',background:'#f1f5f9',border:'none',borderRadius:10,fontWeight:800,color:'#64748b',fontSize:16}}>✕</button>}
+                </div>
+                {form.entryDate&&(()=>{const p=form.entryDate.split('-');return <div style={{fontSize:11,color:'#9a3412',marginTop:4,fontWeight:800}}>🚗 前日入庫：{String(p[1]).padStart(2,'0')}/{String(p[2]).padStart(2,'0')} に入庫</div>;})()}
+              </div>
+              <div>
                 <label style={LBL}>備考</label>
                 <textarea value={form.note||''} onChange={e=>setForm(p=>({...p,note:e.target.value}))} rows={2} style={{...INP,resize:'none'}}/>
               </div>
@@ -769,7 +781,7 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
                     {!isOther&&<span style={{fontSize:13,color:'#cbd5e1'}}>›</span>}
                   </div>
                   <div style={{marginTop:3,fontSize:11,color:'#64748b',display:'flex',gap:7,flexWrap:'wrap'}}>
-                    {r.time&&<span>⏰ {r.time}</span>}{r.carType&&<span>🚗 {r.carType}</span>}{loaner&&<span style={{color:'#0284c7'}}>🔑 {loaner}</span>}{!loaner&&r.rentalLabel&&<span style={{color:'#7c3aed'}}>{r.rentalLabel}</span>}{r.tokuten&&r.tokuten!=='-'&&<span style={{color:'#7c3aed'}}>🎁 {r.tokuten}</span>}{r.staff&&<span>👤 {r.staff}</span>}
+                    {(r.entryDate&&r.entryDate!==dk)?(()=>{const p=r.entryDate.split('-');return <span style={{color:'#c2410c',fontWeight:800}}>🚗{String(p[1]).padStart(2,'0')}/{String(p[2]).padStart(2,'0')}入庫{r.time?` ${r.time}`:''}</span>;})():(r.time&&<span>⏰ {r.time}</span>)}{r.carType&&<span>🚗 {r.carType}</span>}{loaner&&<span style={{color:'#0284c7'}}>🔑 {loaner}</span>}{!loaner&&r.rentalLabel&&<span style={{color:'#7c3aed'}}>{r.rentalLabel}</span>}{r.tokuten&&r.tokuten!=='-'&&<span style={{color:'#7c3aed'}}>🎁 {r.tokuten}</span>}{r.staff&&<span>👤 {r.staff}</span>}
                   </div>
                   {r.note&&<div style={{marginTop:4,fontSize:11,color:'#374151',background:'#f8fafc',borderRadius:7,padding:'3px 7px'}}>{r.note}</div>}
                 </div>
@@ -786,6 +798,31 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
               </span>
             )}
           </div>
+          {/* 前日入庫（この日に入庫する別日の車検）を派生表示。タップで車検を開く */}
+          {(()=>{
+            const dos=[];
+            Object.keys(inspData||{}).forEach(wdk=>{ if(wdk===dk)return;
+              (inspData[wdk]||[]).forEach((r,ix)=>{ if(!r||!r.name||r.entryDate!==dk||r.bookingStatus==='cancelled')return;
+                if((normStore(r.store)||'honten')!==vsId)return;
+                dos.push({r,wdk,ix});
+              });
+            });
+            if(dos.length===0)return null;
+            return(
+              <div style={{margin:'0 0 8px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:12,padding:'8px 10px'}}>
+                <div style={{fontWeight:900,fontSize:12,color:'#c2410c',marginBottom:4}}>🚗 前日入庫（{dos.length}件）</div>
+                {dos.map(({r,wdk,ix})=>{const wl=wdk.split('-');return(
+                  <div key={wdk+'-'+ix} onClick={()=>onOpenEdit({type:'insp',dk:wdk,idx:ix,isNew:false})}
+                    style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',padding:'6px 2px',borderTop:'1px dashed #fed7aa',cursor:'pointer'}}>
+                    {r.time&&<span style={{fontSize:11,fontWeight:800,color:'#9a3412'}}>{r.time}</span>}
+                    <span style={{fontWeight:800,fontSize:13}}>{r.name}</span>
+                    {r.carType&&<span style={{fontSize:11,color:'#64748b'}}>🚗{r.carType}</span>}
+                    <span style={{marginLeft:'auto',fontSize:10,fontWeight:800,color:'#9a3412',whiteSpace:'nowrap'}}>→ {wl[1]}/{wl[2]}車検 ›</span>
+                  </div>
+                );})}
+              </div>
+            );
+          })()}
           <div style={{background:'white',borderRadius:12,overflow:'hidden',border:'1px solid #e0f2fe'}}>
             {TIME_SLOTS.map(slot=>{
               const day=sd[dk]||{};
