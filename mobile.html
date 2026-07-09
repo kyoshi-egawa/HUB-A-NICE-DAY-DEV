@@ -25,7 +25,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.37';
+const MOBILE_VERSION='1.38';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -48,6 +48,13 @@ const isHoliday=(y,m,d)=>HOLIDAYS_2026.has(`${y}-${m+1}-${d}`);
 const DOW=['日','月','火','水','木','金','土'];
 const TIME_SLOTS=(()=>{const s=[];for(let h=9;h<=18;h++)for(let m=0;m<60;m+=30)s.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);return s;})();
 const TIME_VALS=Array.from({length:19},(_,i)=>{const h=Math.floor(i/2)+9,m=i%2===0?'00':'30';return`${String(h).padStart(2,'0')}:${m}`;});
+// PC同等の特別枠（時刻を持たない＝時間計算には含めない。表示・選択用のみ）
+const SPECIAL_SLOTS=[{id:'未定',label:'入庫時間未定'},{id:'午前',label:'午前入庫'},{id:'午後',label:'午後入庫'}];
+const SPECIAL_SLOT_IDS=SPECIAL_SLOTS.map(s=>s.id);
+const isSpecialSlot=(id)=>SPECIAL_SLOT_IDS.includes(String(id).split('__')[0]);
+const specialSlotLabel=(id)=>{const b=String(id).split('__')[0];const s=SPECIAL_SLOTS.find(x=>x.id===b);return s?s.label:id;};
+// タイムスケジュール／入庫時間の並び：午前 → 9:00〜12:00 → 未定(旧12:30の位置=昼間) → 午後 → 13:00〜18:00（PC版SCHED_SLOTSと同一）
+const SCHED_SLOTS=(()=>{const out=['午前'];for(const s of TIME_SLOTS){if(s==='12:30'){out.push('未定');continue;}if(s==='13:00')out.push('午後');out.push(s);}return out;})();
 const DEFAULT_STAFF=[
   {uid:'h1',name:'見取大介',    myNumber:1, store:'honten'},
   {uid:'h2',name:'岡上秀一',    myNumber:2, store:'honten'},
@@ -384,7 +391,8 @@ const DayDetailModal=({dk,y,m,d,inspData,schedDataH,schedDataS,memoDataH,memoDat
   const irows=(inspData[dk]||[]).filter(r=>r&&r.name&&!r.pendingApproval&&r.bookingStatus!=='cancelled');
   const sorted=[...irows.filter(r=>normStore(r.store)===vsId),...irows.filter(r=>!normStore(r.store)),...irows.filter(r=>normStore(r.store)&&normStore(r.store)!==vsId)];
   const sd=vsId==='honten'?schedDataH:schedDataS;
-  const sched=Object.entries(sd[dk]||{}).filter(([,r])=>r&&r.name).sort(([a],[b])=>a.localeCompare(b));
+  const _si=k=>{let b=getBaseSlot(k);if(b==='12:30')b='未定';const i=SCHED_SLOTS.indexOf(b);return i<0?999:i;};
+  const sched=Object.entries(sd[dk]||{}).filter(([,r])=>r&&r.name).sort(([a],[b])=>_si(a)-_si(b)||a.localeCompare(b));
   const memos=((vsId==='honten'?memoDataH:memoDataS)[dk]||[]);
   // 事前入庫（この日に入庫・車検作業日は別日）を収集
   const dropoffs=[];
@@ -593,7 +601,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
                   <label style={LBL}>入庫時間 *</label>
                   <select value={form.time||''} onChange={e=>setForm(p=>({...p,time:e.target.value}))} style={INP}>
                     <option value="">選択</option>
-                    {TIME_VALS.map(t=><option key={t} value={t}>{t}</option>)}
+                    {SCHED_SLOTS.map(t=><option key={t} value={t}>{specialSlotLabel(t)}</option>)}
                   </select>
                 </div>
                 <div style={{flex:1}}>
@@ -856,14 +864,17 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
             );
           })()}
           <div style={{background:'white',borderRadius:12,overflow:'hidden',border:'1px solid #e0f2fe'}}>
-            {TIME_SLOTS.map(slot=>{
+            {SCHED_SLOTS.map(slot=>{
               const day=sd[dk]||{};
               const subKeys=[slot,...Object.keys(day).filter(k=>k.startsWith(slot+'__'))];
+              // 廃止した12:30枠の既存予約は「未定」枠（旧12:30の位置）に取り込んで消さない
+              if(slot==='未定'){ if(day['12:30'])subKeys.push('12:30'); subKeys.push(...Object.keys(day).filter(k=>k.startsWith('12:30__'))); }
               const dks=subKeys.filter(k=>{const r=day[k];return r&&r.name;});
               const isEmpty=dks.length===0;
+              const spc=isSpecialSlot(slot);
               return(
-                <div key={slot} style={{display:'flex',borderBottom:'1px solid #f0fdfa',background:isEmpty?'white':'#f0fdfa'}}>
-                  <div style={{width:44,flexShrink:0,padding:'8px 4px',fontSize:11,fontWeight:700,color:isEmpty?'#cbd5e1':'#0e7490',textAlign:'center',borderRight:`2px solid ${isEmpty?'#f0f9ff':'#99f6e4'}`}}>{slot}</div>
+                <div key={slot} style={{display:'flex',borderBottom:'1px solid #f0fdfa',background:isEmpty?(spc?'#fdfaff':'white'):(spc?'#f5f0ff':'#f0fdfa')}}>
+                  <div style={{width:44,flexShrink:0,padding:'8px 4px',fontSize:11,fontWeight:700,color:spc?(isEmpty?'#c4b5fd':'#9333ea'):(isEmpty?'#cbd5e1':'#0e7490'),textAlign:'center',borderRight:`2px solid ${spc?(isEmpty?'#f3e8ff':'#d8b4fe'):(isEmpty?'#f0f9ff':'#99f6e4')}`}}>{slot}</div>
                   <div style={{flex:1,padding:'5px 9px'}}>
                     {dks.map((key,ki)=>{
                       const r=day[key];
