@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.29';
+const APP_VERSION = '1.30';
 
 
 
@@ -347,6 +347,8 @@ const DEFAULT_RENTAL_CARS = [
 ];
 // 予約バーの配色。白文字が読める濃さで、薄い同系色を隣り合わせにしないよう暖色/寒色を交互に並べた12色。
 const RES_COLORS=['#2563eb','#c2410c','#059669','#7c3aed','#be123c','#0e7490','#b45309','#be185d','#4d7c0f','#4338ca','#0f766e','#9a3412'];
+// 代車/レンタカー予約の貸出日数（両端含む）。fm/tmは0始まり。
+const loanDays=(r)=>{try{return Math.max(1,Math.round((new Date(r.ty,r.tm,r.td)-new Date(r.fy,r.fm,r.fd))/864e5)+1);}catch(e){return 1;}};
 
 
 // ======================================================
@@ -5590,6 +5592,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
           </div>
           <div style={{fontSize:12,color:'#374151',marginBottom:4}}>
             📅 {pinnedRes.res.fm+1}/{pinnedRes.res.fd}〜{pinnedRes.res.tm+1}/{pinnedRes.res.td}
+            <span style={{marginLeft:8,fontWeight:800,color:'white',background:pinnedRes.res._rental?'#059669':'#c2410c',borderRadius:20,padding:'2px 10px',fontSize:12}}>{loanDays(pinnedRes.res)}日間</span>
           </div>
           <div style={{fontSize:12,color:'#6b7280',marginBottom:12}}>👤 {pinnedRes.res.user}</div>
           <div style={{display:'flex',gap:8}}>
@@ -5663,6 +5666,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                 {hoverRes.res._rental?'🔑':'🚙'} {hoverRes.car.name}{hoverRes.car.num?`（${hoverRes.car.num}）`:''}
               </span>
               <span style={{fontSize:16,fontWeight:700,color:'#334155'}}>📅 {hoverRes.res.fm+1}/{hoverRes.res.fd} 〜 {hoverRes.res.tm+1}/{hoverRes.res.td}</span>
+              <span style={{fontSize:15,fontWeight:800,color:'white',background:hoverRes.res._rental?'#059669':'#c2410c',borderRadius:20,padding:'3px 12px'}}>{loanDays(hoverRes.res)}日間</span>
               <span style={{fontSize:18,fontWeight:800,color:'#1e293b'}}>👤 {hoverRes.res.user}</span>
               <span style={{fontSize:11,color:'#94a3b8',fontWeight:600}}>クリックで編集・削除</span>
             </div>
