@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.35';
+const APP_VERSION = '1.36';
 
 
 
@@ -4328,7 +4328,7 @@ const InspRow=memo(({row,idx,dispNo,dk,onOpenModal,lockInfo,loanerRes,loanerResH
               {row.staff&&<div style={{fontSize:12,color:pending?'#6b7280':'#374151'}}>{row.staff}</div>}
             </div>}
       </td>
-      <td style={TD}><span style={{color:pending||isOverLimit||isCancelled?'#6b7280':'#374151',fontSize:13}}>{row.carType||'—'}</span></td>
+      <td style={TD}><span style={{color:pending||isOverLimit||isCancelled?'#6b7280':'#374151',fontSize:13,fontWeight:700}}>{row.carType||'—'}</span></td>
       <td style={TD}>{cObj&&<span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 8px',borderRadius:20,background:cObj.bg,color:cObj.color,fontWeight:700,fontSize:11,opacity:pending||isOverLimit||isCancelled?0.4:1}}><span style={{width:16,height:16,borderRadius:'50%',background:cObj.color,color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:900}}>{cObj.initial}</span>{cObj.name}</span>}</td>
       <td style={TD}><span style={{fontSize:12,color:row.rentalLabel?(pending||isOverLimit||isCancelled?'#6b7280':'#065f46'):(pending||isOverLimit||isCancelled?'#6b7280':'#374151'),fontWeight:400}}>{row.rentalLabel||loanerLabel||row.loaner||'—'}</span></td>
       <td style={TD}><span style={{fontSize:13,color:pending||isOverLimit||isCancelled?'#6b7280':'#374151'}}>{row.tokuten||'—'}</span></td>
@@ -4391,7 +4391,7 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
               {row.staff&&<div style={{fontSize:12,color:'#374151'}}>{row.staff}</div>}
             </div>}
       </td>
-      <td style={TD}><span style={{color:'#374151',fontSize:13}}>{row.carType||'—'}</span></td>
+      <td style={TD}><span style={{color:'#374151',fontSize:13,fontWeight:700}}>{row.carType||'—'}</span></td>
       <td style={TD}><span style={{fontSize:13,color:'#374151'}}>{row.work||'—'}</span></td>
       <td style={TD}><span style={{fontSize:12,color:row.rentalLabel?'#065f46':'#374151',fontWeight:400}}>{row.rentalLabel||loanerLabel||row.loaner||'—'}</span></td>
       <td style={TD}><span style={{fontSize:13,color:'#374151'}}>{row.shimi||'—'}</span></td>
