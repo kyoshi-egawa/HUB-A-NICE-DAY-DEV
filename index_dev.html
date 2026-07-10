@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.38';
+const APP_VERSION = '1.39';
 
 
 
@@ -310,6 +310,22 @@ const SPECIAL_SLOTS=[
 const SPECIAL_SLOT_IDS=SPECIAL_SLOTS.map(s=>s.id);
 const isSpecialSlot=(id)=>SPECIAL_SLOT_IDS.includes(getBaseSlot(id));
 const specialSlotLabel=(id)=>{const b=getBaseSlot(id);const s=SPECIAL_SLOTS.find(x=>x.id===b);return s?s.label:id;};
+// 納車時間の表示ラベル（入庫時間の「入庫時間未定」等とは文言を分ける）
+const deliverySlotLabel=(id)=>{const b=getBaseSlot(id);return b==='未定'?'納車時間未定':b;};
+// 法人格（前置・後置）を落として固有名だけ返す。代車管理のセルのように幅が狭い場所だけで使う。
+// ホバー情報・編集パネル・顧客リスト等はフルネームのまま表示すること。
+// ★長い語を先に並べること（'医療法人社団' が '医療法人' より先、'一般財団法人' が '財団法人' より先）
+const CORP_TOKENS=['特定非営利活動法人','一般社団法人','一般財団法人','公益社団法人','公益財団法人','社会福祉法人','独立行政法人','医療法人社団','医療法人財団','農業協同組合','生活協同組合','有限責任事業組合','医療法人','学校法人','宗教法人','財団法人','社団法人','協同組合','株式会社','有限会社','合同会社','合資会社','合名会社','相互会社','ＮＰＯ法人','NPO法人'];
+const shortenCorpName=(name)=>{
+  const orig=String(name==null?'':name).trim();
+  let s=orig;
+  for(const t of CORP_TOKENS){
+    if(s.startsWith(t)){s=s.slice(t.length);break;}
+    if(s.endsWith(t)){s=s.slice(0,s.length-t.length);break;}
+  }
+  s=s.replace(/^[\s　()（）・]+/,'').replace(/[\s　()（）・]+$/,'');
+  return s||orig; // 法人格だけの名前など、削ると空になる場合は元のまま
+};
 // タイムスケジュールの並び：午前 → 9:00〜12:00 → 未定（旧12:30の位置＝昼間。夕方の自動スクロールでも見落とさない）→ 午後 → 13:00〜18:00
 const SCHED_SLOTS=(()=>{
   const out=['午前'];
@@ -660,7 +676,7 @@ const CustLoanerDatePicker = ({isOpen, onClose, initFrom, initTo, selectedId, lo
                         onMouseDown={e=>{e.preventDefault();if(isFree)handleMD(car.id,d);}}
                         onMouseEnter={()=>{if(isFree||isDrag)handleME(car.id,d);}}
                         style={{width:26,minWidth:26,maxWidth:26,height:30,border:'1px solid '+(isToday?'#fbbf24':'#e5e7eb'),background:bg||(dow===0||dow===6?'#fafafa':'white'),cursor:isRes?'not-allowed':isFree?'crosshair':'pointer',position:'relative',overflow:'hidden',padding:0,boxSizing:'border-box',boxShadow:isDrag?'inset 0 0 0 2px #65a30d':isSel?'inset 0 0 0 2px #1d4ed8':'none',opacity:isRes?0.75:1}}>
-                        {isRes&&(()=>{const isStart=st.fd===d.day&&st.fm===d.month&&st.fy===d.year;const prevD=dateRange[i-1];const showLabel=isStart||(prevD&&(prevD.month!==d.month||!getRes(car.id,prevD.year,prevD.month,prevD.day)));return showLabel&&(<div style={{position:'absolute',left:2,top:'50%',transform:'translateY(-50%)',fontSize:7,color:'white',fontWeight:700,whiteSpace:'nowrap',textShadow:'0 1px 2px rgba(0,0,0,.6)',zIndex:2,pointerEvents:'none'}}>{(st.user||'').slice(0,5)}</div>);})()}
+                        {isRes&&(()=>{const isStart=st.fd===d.day&&st.fm===d.month&&st.fy===d.year;const prevD=dateRange[i-1];const showLabel=isStart||(prevD&&(prevD.month!==d.month||!getRes(car.id,prevD.year,prevD.month,prevD.day)));return showLabel&&(<div style={{position:'absolute',left:2,top:'50%',transform:'translateY(-50%)',fontSize:7,color:'white',fontWeight:700,whiteSpace:'nowrap',textShadow:'0 1px 2px rgba(0,0,0,.6)',zIndex:2,pointerEvents:'none'}}>{shortenCorpName(st.user).slice(0,5)}</div>);})()}
                       </td>
                     );
                   })}
@@ -1358,7 +1374,7 @@ const CustomerListView = memo(({custFiles, setCustFiles, currentUser}) => {
 });
 
 
-const blankInsp  = () => ({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional',entryDate:''});
+const blankInsp  = () => ({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional',entryDate:'',deliveryDate:'',deliveryTime:''});
 
 // ── 予約順(seq)ベースの承認状態 再計算（純粋関数）─────────────────────────
 // 各insp行の seq（予約順。新規予約時に Date.now() で付与）で昇順に並べ、
@@ -1407,7 +1423,7 @@ const BOOKING_STATUS_STRIPE = {
 };
 const BOOKING_STATUS_COLOR  = {new:'#166534',provisional:'#166534',confirmed:'#075985',cancelled:'#991b1b'};
 const BOOKING_STATUS_BORDER = {new:'#4ade80',provisional:'#4ade80',confirmed:'#38bdf8',cancelled:'#f87171'};
-const blankSched = () => ({name:'',staff:'',carType:'',work:'',loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,shimi:'',content:''});
+const blankSched = () => ({name:'',staff:'',carType:'',work:'',loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,shimi:'',content:'',deliveryDate:'',deliveryTime:''});
 const blankMemo  = () => ({content:''});
 const dateKey    = (y,m,d) => `${y}-${m+1}-${d}`;
 const toNum      = (y,m,d) => y*10000+(m+1)*100+d;
@@ -3656,6 +3672,9 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
   const [showDatePicker,setShowDatePicker]=useState(false);
   const [showEntryPicker,setShowEntryPicker]=useState(false); // 前日入庫の入庫日ピッカー
   const [entryPickerMonth,setEntryPickerMonth]=useState(null);
+  const [showDelivPicker,setShowDelivPicker]=useState(false); // 納車日ピッカー（車検・タイムスケジュール共通・任意）
+  const [delivPickerMonth,setDelivPickerMonth]=useState(null);
+  const [showDelivTmPk,setShowDelivTmPk]=useState(false);     // 納車時間ピッカー
   // モーダルオープン時に元のdkを保持
   useEffect(()=>{ if(isOpen){ originalDkRef.current=''; localTargetDkRef.current=''; } },[isOpen]);
   const [pickerMonth,setPickerMonth]=useState(null);
@@ -4163,6 +4182,57 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
               )}
             </div>
           )}
+          {/* 納車日（任意・車検/タイムスケジュール共通）。設定すると納車日のタイムスケジュールに派生表示される（行そのものは保存しない） */}
+          <div style={{position:'relative'}}>
+            <label style={LBL}>納車日 <span style={{fontWeight:400,color:'#9ca3af',fontSize:10}}>任意。決まっていれば入れておくと納車日の表に出ます</span></label>
+            <button type="button"
+              onClick={()=>{if(!delivPickerMonth){const now=new Date();const src=form.deliveryDate?form.deliveryDate.split('-').map(Number):null;setDelivPickerMonth(src?{year:src[0],month:src[1]-1}:{year:now.getFullYear(),month:now.getMonth()});}setShowDelivPicker(p=>!p);}}
+              style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:8,cursor:'pointer',border:`2px solid ${form.deliveryDate?'#047857':'#d1d5db'}`,background:form.deliveryDate?'#ecfdf5':'#f9fafb'}}>
+              <span style={{width:20,height:20,borderRadius:5,border:`2px solid ${form.deliveryDate?'#047857':'#9ca3af'}`,background:form.deliveryDate?'#047857':'white',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,flexShrink:0}}>{form.deliveryDate?'✓':''}</span>
+              <span style={{fontWeight:700,fontSize:13,color:form.deliveryDate?'#047857':'#6b7280'}}>
+                {form.deliveryDate?(()=>{const p=form.deliveryDate.split('-');return `納車：${String(p[1]).padStart(2,'0')}/${String(p[2]).padStart(2,'0')}（${['日','月','火','水','木','金','土'][new Date(p[0],p[1]-1,p[2]).getDay()]}）`;})():'納車日を設定する（クリックで日付を選択）'}
+              </span>
+              {form.deliveryDate&&<span onClick={e=>{e.stopPropagation();setForm(p=>({...p,deliveryDate:'',deliveryTime:''}));setShowDelivPicker(false);setShowDelivTmPk(false);}} style={{marginLeft:'auto',color:'#047857',fontWeight:800,fontSize:16,padding:'0 4px'}}>✕</span>}
+            </button>
+            {showDelivPicker&&delivPickerMonth&&(
+              <div style={{position:'absolute',top:'100%',left:0,zIndex:9999,marginTop:4,background:'white',borderRadius:10,boxShadow:'0 8px 30px rgba(0,0,0,0.25)',padding:12,minWidth:240,border:'2px solid #047857'}} onClick={e=>e.stopPropagation()}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                  <button type="button" onClick={()=>setDelivPickerMonth(p=>{const d=new Date(p.year,p.month-1,1);return{year:d.getFullYear(),month:d.getMonth()};})} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:'#374151'}}>‹</button>
+                  <span style={{fontWeight:700,fontSize:13,color:'#1f2937'}}>{delivPickerMonth.year}年{delivPickerMonth.month+1}月</span>
+                  <button type="button" onClick={()=>setDelivPickerMonth(p=>{const d=new Date(p.year,p.month+1,1);return{year:d.getFullYear(),month:d.getMonth()};})} style={{background:'none',border:'none',cursor:'pointer',fontSize:18,color:'#374151'}}>›</button>
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',marginBottom:2}}>
+                  {['日','月','火','水','木','金','土'].map((d,i)=><div key={d} style={{textAlign:'center',fontSize:10,fontWeight:700,color:i===0?'#ef4444':i===6?'#2563eb':'#9ca3af',padding:'2px 0'}}>{d}</div>)}
+                </div>
+                {(()=>{const yr=delivPickerMonth.year,mo=delivPickerMonth.month,first=new Date(yr,mo,1).getDay(),days=new Date(yr,mo+1,0).getDate(),cells=[];for(let i=0;i<first;i++)cells.push(<div key={'e'+i}/>);for(let d=1;d<=days;d++){const dow=new Date(yr,mo,d).getDay(),ddk=`${yr}-${mo+1}-${d}`,sel=form.deliveryDate===ddk;cells.push(<div key={d} onClick={()=>{setForm(p=>({...p,deliveryDate:ddk,deliveryTime:p.deliveryTime||'未定'}));setShowDelivPicker(false);}} style={{textAlign:'center',padding:'4px 2px',cursor:'pointer',fontSize:12,borderRadius:4,color:sel?'white':dow===0?'#ef4444':dow===6?'#2563eb':'#1f2937',fontWeight:sel?800:600,background:sel?'#047857':''}} onMouseOver={e=>{if(!sel)e.currentTarget.style.background='#f3f4f6';}} onMouseOut={e=>{if(!sel)e.currentTarget.style.background='';}}>{d}</div>);}return <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:1}}>{cells}</div>;})()}
+                <button type="button" onClick={()=>setShowDelivPicker(false)} style={{marginTop:8,width:'100%',padding:'4px',background:'#f3f4f6',border:'none',borderRadius:6,cursor:'pointer',fontSize:11,color:'#6b7280'}}>閉じる</button>
+              </div>
+            )}
+            {form.deliveryDate&&(
+              <div style={{marginTop:10}}>
+                <label style={LBL}>納車時間</label>
+                <div onClick={()=>setShowDelivTmPk(p=>!p)}
+                  style={{...INP,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'space-between',borderColor:'#047857'}}>
+                  <span style={{fontWeight:700,color:'#047857',fontSize:14}}>{deliverySlotLabel(form.deliveryTime||'未定')}</span>
+                  <span style={{fontSize:10,color:'#6b7280'}}>{showDelivTmPk?'▲':'▼'}</span>
+                </div>
+                {showDelivTmPk&&(
+                  <div style={{border:'2px solid #047857',borderRadius:8,marginTop:4,maxHeight:200,overflowY:'auto',background:'white',boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
+                    {TIME_VALS.map(v=>{const sel=(form.deliveryTime||'未定')===v;return(
+                      <div key={v}
+                        onMouseDown={e=>{e.preventDefault();setForm(p=>({...p,deliveryTime:v}));setShowDelivTmPk(false);}}
+                        style={{padding:'8px 16px',cursor:'pointer',fontSize:14,fontWeight:sel?800:400,
+                          background:sel?'#ecfdf5':(isSpecialSlot(v)?'#faf5ff':'white'),
+                          color:sel?'#047857':(isSpecialSlot(v)?'#9333ea':'#374151'),
+                          borderLeft:sel?'4px solid #047857':'4px solid transparent'}}>
+                        {deliverySlotLabel(v)}
+                      </div>
+                    );})}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           {/* 備考・内容 */}
           <div>
             <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
@@ -5586,7 +5656,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                         {/* ユーザー名を常時表示 */}
                         {isObj&&isStart&&(
                           <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
-                            {st.user.length>6?st.user.slice(0,6)+'…':st.user}
+                            {(()=>{const _n=shortenCorpName(st.user);return _n.length>6?_n.slice(0,6)+'…':_n;})()}
                           </div>
                         )}
                         {/* 月をまたぐ場合、または前のセルが違う予約の場合も表示 */}
@@ -5600,7 +5670,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                           return isDifferent||isMonthBoundary;
                         })()&&(
                           <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
-                            {st.user.length>6?st.user.slice(0,6)+'…':st.user}
+                            {(()=>{const _n=shortenCorpName(st.user);return _n.length>6?_n.slice(0,6)+'…':_n;})()}
                           </div>
                         )}
                       </td>
@@ -5903,7 +5973,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                                 padding:0,overflow:'hidden',position:'relative',boxSizing:'border-box'}}>
                               {isObj&&isStart&&(
                                 <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
-                                  {st.user.length>6?st.user.slice(0,6)+'…':st.user}
+                                  {(()=>{const _n=shortenCorpName(st.user);return _n.length>6?_n.slice(0,6)+'…':_n;})()}
                                 </div>
                               )}
                             </td>
@@ -8891,6 +8961,25 @@ function AppInner() {
                           (_doBySlot[s]=_doBySlot[s]||[]).push({r,wdk,ix});
                         });
                       });
+                      // 納車：この日(dk)に納車する車検／タイムスケジュール（作業日は同日でも別日でもよい）を納車時間ごとに集める。
+                      // deliveryDate は任意項目。行そのものは保存せず、ここで派生表示するだけ。
+                      const _dlBySlot={};
+                      Object.keys(inspData||{}).forEach(wdk=>{
+                        (inspData[wdk]||[]).forEach((r,ix)=>{ if(!r||!r.name||r.deliveryDate!==dk||r.bookingStatus==='cancelled')return;
+                          if(!(r.store===vsId||(r.store==null&&vsId==='honten')))return;
+                          const s=(r.deliveryTime&&SCHED_SLOTS.includes(getBaseSlot(r.deliveryTime)))?getBaseSlot(r.deliveryTime):'未定';
+                          (_dlBySlot[s]=_dlBySlot[s]||[]).push({r,wdk,ix,kind:'insp'});
+                        });
+                      });
+                      Object.keys(schedData||{}).forEach(wdk=>{
+                        Object.keys(schedData[wdk]||{}).forEach(sk=>{
+                          const r=schedData[wdk][sk];
+                          if(!r||!r.name||r.deliveryDate!==dk)return;
+                          if(wdk===dk&&getBaseSlot(sk)===getBaseSlot(r.deliveryTime||'未定'))return; // 自分自身の枠と重なる時は出さない
+                          const s=(r.deliveryTime&&SCHED_SLOTS.includes(getBaseSlot(r.deliveryTime)))?getBaseSlot(r.deliveryTime):'未定';
+                          (_dlBySlot[s]=_dlBySlot[s]||[]).push({r,wdk,sk,kind:'sched'});
+                        });
+                      });
                       return SCHED_SLOTS.map(slot=>{
                         // baseSlotの全サブキーを取得（既存行 + 空の基本行）
                         const subKeys=getSchedSubKeys(dk,slot);
@@ -8904,7 +8993,7 @@ function AppInner() {
                         const nextKey=makeSlotKey(slot,nextSub);
                         const isHour=slot.endsWith(':00');
                         // 畳んでいる時：この時間帯に予約（or前日入庫）がある行のみ表示
-                        const hasBookingInSlot=subKeys.some(k=>(schedData[dk]?.[k]?.name))||((_doBySlot[slot]||[]).length>0);
+                        const hasBookingInSlot=subKeys.some(k=>(schedData[dk]?.[k]?.name))||((_doBySlot[slot]||[]).length>0)||((_dlBySlot[slot]||[]).length>0);
                         if(schedCollapsed&&!hasBookingInSlot) return null;
                         // 入庫制限チェック（同時刻追加ボタン用・nullガード付き）
                         const _slotRestr=schedRestrictions[dk];
@@ -8952,6 +9041,33 @@ function AppInner() {
                                       {r.carType&&<span style={{fontSize:12,color:'#6b7280'}}>{r.carType}</span>}
                                       {loaner&&<span style={{fontSize:11,color:'#065f46',fontWeight:700}}>🔑 {loaner}</span>}
                                       <span style={{fontSize:11,color:'#9a3412',fontWeight:700,whiteSpace:'nowrap'}}>→ {wl[1]}/{wl[2]} 車検</span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {/* 納車（この日に納車する車検・予定）を読み取り専用で表示。クリックで元の予約を開く */}
+                            {(_dlBySlot[slot]||[]).map((d,di)=>{
+                              const r=d.r,wl=d.wdk.split('-');
+                              const loaner=d.kind==='insp'
+                                ?(r.rentalLabel||getLoanerLabel(loanerRes,d.wdk,r.name,`insp-${d.wdk}-${d.ix}`)||r.loaner||'')
+                                :(r.rentalLabel||r.loaner||'');
+                              const srcLabel=`${wl[1]}/${wl[2]} ${d.kind==='insp'?'車検':'予定'}`;
+                              return(
+                                <tr key={'dl-'+d.kind+'-'+d.wdk+'-'+(d.ix??d.sk)+'-'+di}
+                                  onClick={()=>d.kind==='insp'?handleOpenModal('insp',d.wdk,d.ix,null,false):handleOpenModal('sched',d.wdk,null,d.sk,false)}
+                                  style={{background:'#ecfdf5',cursor:'pointer'}} title="納車予定（クリックで元の予約を編集）">
+                                  <td style={{...TD,paddingLeft:10,whiteSpace:'nowrap',color:'#065f46',fontWeight:700,fontSize:11,borderLeft:'3px solid #059669'}}>{isSpecialSlot(slot)?specialSlotLabel(slot):slot}</td>
+                                  <td style={{...TD,fontWeight:700,color:'#064e3b',whiteSpace:'nowrap'}}>{r.name}</td>
+                                  <td style={{...TD,fontSize:12,color:'#6b7280'}}>{r.carType||''}</td>
+                                  <td style={TD}></td>
+                                  <td style={TD}>{loaner&&<span style={{fontSize:11,color:'#065f46',fontWeight:700}}>🔑 {loaner}</span>}</td>
+                                  <td style={TD}></td>
+                                  <td style={TD}>
+                                    <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                                      <span style={{fontSize:11,color:'#065f46',fontWeight:700,whiteSpace:'nowrap'}}>{srcLabel}</span>
+                                      <span style={{color:'#6ee7b7',fontWeight:800,fontSize:12}}>→</span>
+                                      <span style={{fontSize:10,fontWeight:800,color:'white',background:'#059669',borderRadius:20,padding:'1px 8px',whiteSpace:'nowrap'}}>🏁 納車</span>
                                     </div>
                                   </td>
                                 </tr>

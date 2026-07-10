@@ -25,7 +25,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.38';
+const MOBILE_VERSION='1.39';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -53,6 +53,21 @@ const SPECIAL_SLOTS=[{id:'未定',label:'入庫時間未定'},{id:'午前',label
 const SPECIAL_SLOT_IDS=SPECIAL_SLOTS.map(s=>s.id);
 const isSpecialSlot=(id)=>SPECIAL_SLOT_IDS.includes(String(id).split('__')[0]);
 const specialSlotLabel=(id)=>{const b=String(id).split('__')[0];const s=SPECIAL_SLOTS.find(x=>x.id===b);return s?s.label:id;};
+// 納車時間の表示ラベル（入庫時間の「入庫時間未定」等とは文言を分ける）
+const deliverySlotLabel=(id)=>{const b=String(id).split('__')[0];return b==='未定'?'納車時間未定':b;};
+// 法人格（前置・後置）を落として固有名だけ返す。代車管理のセルのように幅が狭い場所だけで使う。
+// ★長い語を先に並べること（'医療法人社団' が '医療法人' より先、'一般財団法人' が '財団法人' より先）
+const CORP_TOKENS=['特定非営利活動法人','一般社団法人','一般財団法人','公益社団法人','公益財団法人','社会福祉法人','独立行政法人','医療法人社団','医療法人財団','農業協同組合','生活協同組合','有限責任事業組合','医療法人','学校法人','宗教法人','財団法人','社団法人','協同組合','株式会社','有限会社','合同会社','合資会社','合名会社','相互会社','ＮＰＯ法人','NPO法人'];
+const shortenCorpName=(name)=>{
+  const orig=String(name==null?'':name).trim();
+  let s=orig;
+  for(const t of CORP_TOKENS){
+    if(s.startsWith(t)){s=s.slice(t.length);break;}
+    if(s.endsWith(t)){s=s.slice(0,s.length-t.length);break;}
+  }
+  s=s.replace(/^[\s　()（）・]+/,'').replace(/[\s　()（）・]+$/,'');
+  return s||orig; // 法人格だけの名前など、削ると空になる場合は元のまま
+};
 // タイムスケジュール／入庫時間の並び：午前 → 9:00〜12:00 → 未定(旧12:30の位置=昼間) → 午後 → 13:00〜18:00（PC版SCHED_SLOTSと同一）
 const SCHED_SLOTS=(()=>{const out=['午前'];for(const s of TIME_SLOTS){if(s==='12:30'){out.push('未定');continue;}if(s==='13:00')out.push('午後');out.push(s);}return out;})();
 const DEFAULT_STAFF=[
@@ -162,7 +177,7 @@ const addPending=p=>savePendingStore([...loadPending(),p]);
 const removePendingStore=pid=>savePendingStore(loadPending().filter(p=>p.pid!==pid));
 
 // ══ 予約データのコアロジック（PC版と同一。挙動を変えないこと）══
-const blankInsp=()=>({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional',entryDate:''});
+const blankInsp=()=>({name:'',staff:'',carType:'',course:0,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,tokuten:'-',time:'',note:'',bookingStatus:'provisional',entryDate:'',deliveryDate:'',deliveryTime:''});
 // dk("2026-7-9") ⇔ <input type=date>("2026-07-09") 変換
 const dkToInputDate=(dk)=>{if(!dk)return'';const p=String(dk).split('-');return p.length===3?`${p[0]}-${String(p[1]).padStart(2,'0')}-${String(p[2]).padStart(2,'0')}`:'';};
 const inputDateToDk=(v)=>{if(!v)return'';const p=v.split('-').map(Number);return p.length===3?`${p[0]}-${p[1]}-${p[2]}`:'';};
@@ -488,7 +503,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
   const isInsp=mode.type==='insp';
   const sc=isInsp?'#3730a3':'#0e7490';
   const [form,setForm]=useState(()=>({
-    ...(isInsp?blankInsp():{name:'',staff:'',carType:'',work:'',loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,shimi:'',content:''}),
+    ...(isInsp?blankInsp():{name:'',staff:'',carType:'',work:'',loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null,shimi:'',content:'',deliveryDate:'',deliveryTime:''}),
     staff:currentUser?.name||'',
     ...(initial||{}),
   }));
@@ -653,6 +668,26 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
               </div>
             </React.Fragment>
           )}
+          {/* 納車日（任意・車検/タイムスケジュール共通）。設定すると納車日のタイムスケジュールに派生表示される（行そのものは保存しない） */}
+          <div>
+            <label style={LBL}>納車日 <span style={{fontWeight:400,color:'#94a3b8',fontSize:10}}>任意。決まっていれば入れておくと納車日の表に出ます</span></label>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input type="date" value={dkToInputDate(form.deliveryDate)}
+                onChange={e=>{const v=inputDateToDk(e.target.value);setForm(p=>({...p,deliveryDate:v,deliveryTime:v?(p.deliveryTime||'未定'):''}));}}
+                style={{...INP,flex:1,...(form.deliveryDate?{border:'2px solid #047857',background:'#ecfdf5',color:'#047857',fontWeight:800}:{})}}/>
+              {form.deliveryDate&&<button onClick={()=>setForm(p=>({...p,deliveryDate:'',deliveryTime:''}))} style={{padding:'0 14px',background:'#f1f5f9',border:'none',borderRadius:10,fontWeight:800,color:'#64748b',fontSize:16}}>✕</button>}
+            </div>
+            {form.deliveryDate&&(
+              <div style={{marginTop:8}}>
+                <label style={LBL}>納車時間</label>
+                <select value={form.deliveryTime||'未定'} onChange={e=>setForm(p=>({...p,deliveryTime:e.target.value}))}
+                  style={{...INP,border:'2px solid #047857',color:'#047857',fontWeight:800}}>
+                  {SCHED_SLOTS.map(v=><option key={v} value={v}>{deliverySlotLabel(v)}</option>)}
+                </select>
+                {(()=>{const p=form.deliveryDate.split('-');return <div style={{fontSize:11,color:'#047857',marginTop:4,fontWeight:800}}>🏁 納車：{String(p[1]).padStart(2,'0')}/{String(p[2]).padStart(2,'0')} {deliverySlotLabel(form.deliveryTime||'未定')}</div>;})()}
+              </div>
+            )}
+          </div>
           <div style={{border:'2px solid #e0f2fe',borderRadius:12,padding:'10px 12px',background:'#f8fdff'}}>
             <div style={{fontSize:12,fontWeight:800,color:'#0369a1',marginBottom:6}}>🔑 代車・レンタカー</div>
             {currentBinding&&carKind==='keep'&&<div style={{fontSize:12,color:'#0c4a6e',marginBottom:6,fontWeight:700}}>現在: {currentBinding}</div>}
@@ -863,6 +898,49 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
               </div>
             );
           })()}
+          {/* 納車（この日に納車する車検・予定）を派生表示。タップで元の予約を開く。deliveryDateは任意項目 */}
+          {(()=>{
+            const dls=[];
+            Object.keys(inspData||{}).forEach(wdk=>{
+              (inspData[wdk]||[]).forEach((r,ix)=>{ if(!r||!r.name||r.deliveryDate!==dk||r.bookingStatus==='cancelled')return;
+                if((normStore(r.store)||'honten')!==vsId)return;
+                dls.push({r,wdk,ix,kind:'insp'});
+              });
+            });
+            Object.keys(sd||{}).forEach(wdk=>{
+              Object.keys(sd[wdk]||{}).forEach(sk=>{
+                const r=sd[wdk][sk];
+                if(!r||!r.name||r.deliveryDate!==dk)return;
+                if(wdk===dk&&getBaseSlot(sk)===getBaseSlot(r.deliveryTime||'未定'))return; // 自分自身の枠と重なる時は出さない
+                dls.push({r,wdk,sk,kind:'sched'});
+              });
+            });
+            if(dls.length===0)return null;
+            const slotIx=v=>{const i=SCHED_SLOTS.indexOf(getBaseSlot(v||'未定'));return i<0?999:i;};
+            dls.sort((a,b)=>slotIx(a.r.deliveryTime)-slotIx(b.r.deliveryTime));
+            return(
+              <div style={{margin:'0 0 8px',background:'#ecfdf5',border:'1px solid #a7f3d0',borderRadius:12,padding:'8px 10px'}}>
+                <div style={{fontWeight:900,fontSize:12,color:'#047857',marginBottom:4}}>🏁 納車（{dls.length}件）</div>
+                {dls.map((d,di)=>{
+                  const r=d.r,wl=d.wdk.split('-');
+                  const loaner=d.kind==='insp'
+                    ?(r.rentalLabel||getLoanerLabel(myLoanerRes,d.wdk,r.name,`insp-${d.wdk}-${d.ix}`,myCars)||r.loaner||'')
+                    :(r.rentalLabel||r.loaner||'');
+                  return(
+                  <div key={'dl-'+d.kind+'-'+d.wdk+'-'+(d.ix??d.sk)+'-'+di}
+                    onClick={()=>d.kind==='insp'?onOpenEdit({type:'insp',dk:d.wdk,idx:d.ix,isNew:false}):onOpenEdit({type:'sched',dk:d.wdk,slot:d.sk,isNew:false})}
+                    style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',padding:'6px 2px',borderTop:'1px dashed #a7f3d0',cursor:'pointer'}}>
+                    <span style={{fontSize:11,fontWeight:800,color:'#047857'}}>{deliverySlotLabel(r.deliveryTime||'未定')}</span>
+                    <span style={{fontWeight:800,fontSize:13}}>{r.name}</span>
+                    {r.carType&&<span style={{fontSize:11,color:'#64748b'}}>🚗{r.carType}</span>}
+                    {loaner&&<span style={{fontSize:11,color:'#0284c7'}}>🔑{loaner}</span>}
+                    <span style={{marginLeft:'auto',fontSize:10,fontWeight:800,color:'#047857',whiteSpace:'nowrap'}}>{wl[1]}/{wl[2]}{d.kind==='insp'?'車検':'予定'} → 納車 ›</span>
+                  </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
           <div style={{background:'white',borderRadius:12,overflow:'hidden',border:'1px solid #e0f2fe'}}>
             {SCHED_SLOTS.map(slot=>{
               const day=sd[dk]||{};
@@ -960,8 +1038,9 @@ const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,lo
             return(
               <div key={d} style={{width:32,minWidth:32,height:36,background:color,borderRight:'1px solid #f1f5f9',borderLeft:isTd?`2px solid ${sc}`:'none',position:'relative',overflow:'hidden'}}>
                 {isStart&&r&&(
-                  <div style={{position:'absolute',left:1,top:'50%',transform:'translateY(-50%)',fontSize:7,fontWeight:800,color:'white',textShadow:'0 1px 2px rgba(0,0,0,.7)',whiteSpace:'nowrap',overflow:'hidden',maxWidth:28,lineHeight:1}}>
-                    {(r.user||'').slice(0,4)}
+                  // セル幅は32pxのままなので、行数(2行)で文字数を稼ぐ。法人格を落として固有名だけ出す。
+                  <div style={{position:'absolute',left:1,right:1,top:'50%',transform:'translateY(-50%)',fontSize:8,fontWeight:800,color:'white',textShadow:'0 1px 2px rgba(0,0,0,.85)',lineHeight:1.1,display:'-webkit-box',WebkitBoxOrient:'vertical',WebkitLineClamp:2,overflow:'hidden',wordBreak:'break-all'}}>
+                    {shortenCorpName(r.user)}
                   </div>
                 )}
               </div>
