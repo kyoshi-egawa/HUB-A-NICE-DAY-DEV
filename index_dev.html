@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.45';
+const APP_VERSION = '1.46';
 
 
 
@@ -3675,6 +3675,12 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
   const [showDelivPicker,setShowDelivPicker]=useState(false); // 納車日ピッカー（車検・タイムスケジュール共通・任意）
   const [delivPickerMonth,setDelivPickerMonth]=useState(null);
   const [showDelivTmPk,setShowDelivTmPk]=useState(false);     // 納車時間ピッカー
+  // 入庫日／納車日カレンダーの基準日＝このモーダルが編集している日（スケジュールで選択した日）。
+  // 日付キーはゼロ詰めなし（2026-7-5）なので比較前に正規化する。
+  const normDk=s=>{const p=String(s||'').split('-');return (p.length===3&&p.every(v=>v!==''&&!isNaN(v)))?`${+p[0]}-${+p[1]}-${+p[2]}`:'';};
+  const baseDk=normDk(modalDk);
+  const baseMonth=()=>{const p=baseDk?baseDk.split('-').map(Number):null;const now=new Date();return p?{year:p[0],month:p[1]-1}:{year:now.getFullYear(),month:now.getMonth()};};
+  const baseMd=baseDk?(()=>{const p=baseDk.split('-');return `${p[1]}/${p[2]}`;})():'';
   // モーダルオープン時に元のdkを保持
   useEffect(()=>{ if(isOpen){ originalDkRef.current=''; localTargetDkRef.current=''; } },[isOpen]);
   const [pickerMonth,setPickerMonth]=useState(null);
@@ -4158,7 +4164,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
             <div style={{position:'relative'}}>
               <label style={LBL}>入庫日 <span style={{fontWeight:400,color:'#9ca3af',fontSize:10}}>事前入庫（前日・前々日など）の場合にチェック</span></label>
               <button type="button"
-                onClick={()=>{if(!entryPickerMonth){const now=new Date();const src=form.entryDate?form.entryDate.split('-').map(Number):null;setEntryPickerMonth(src?{year:src[0],month:src[1]-1}:{year:now.getFullYear(),month:now.getMonth()});}setShowEntryPicker(p=>!p);}}
+                onClick={()=>{if(!entryPickerMonth){const src=form.entryDate?form.entryDate.split('-').map(Number):null;setEntryPickerMonth(src?{year:src[0],month:src[1]-1}:baseMonth());}setShowEntryPicker(p=>!p);}}
                 style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:8,cursor:'pointer',border:`2px solid ${form.entryDate?'#9a3412':'#d1d5db'}`,background:form.entryDate?'#fff7ed':'#f9fafb'}}>
                 <span style={{width:20,height:20,borderRadius:5,border:`2px solid ${form.entryDate?'#9a3412':'#9ca3af'}`,background:form.entryDate?'#9a3412':'white',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,flexShrink:0}}>{form.entryDate?'✓':''}</span>
                 <span style={{fontWeight:700,fontSize:13,color:form.entryDate?'#9a3412':'#6b7280'}}>
@@ -4176,7 +4182,8 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
                   <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',marginBottom:2}}>
                     {['日','月','火','水','木','金','土'].map((d,i)=><div key={d} style={{textAlign:'center',fontSize:10,fontWeight:700,color:i===0?'#ef4444':i===6?'#2563eb':'#9ca3af',padding:'2px 0'}}>{d}</div>)}
                   </div>
-                  {(()=>{const yr=entryPickerMonth.year,mo=entryPickerMonth.month,first=new Date(yr,mo,1).getDay(),days=new Date(yr,mo+1,0).getDate(),cells=[];for(let i=0;i<first;i++)cells.push(<div key={'e'+i}/>);for(let d=1;d<=days;d++){const dow=new Date(yr,mo,d).getDay(),edk=`${yr}-${mo+1}-${d}`,sel=form.entryDate===edk;cells.push(<div key={d} onClick={()=>{setForm(p=>({...p,entryDate:edk}));setShowEntryPicker(false);}} style={{textAlign:'center',padding:'4px 2px',cursor:'pointer',fontSize:12,borderRadius:4,color:sel?'white':dow===0?'#ef4444':dow===6?'#2563eb':'#1f2937',fontWeight:sel?800:600,background:sel?'#9a3412':''}} onMouseOver={e=>{if(!sel)e.currentTarget.style.background='#f3f4f6';}} onMouseOut={e=>{if(!sel)e.currentTarget.style.background='';}}>{d}</div>);}return <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:1}}>{cells}</div>;})()}
+                  {(()=>{const yr=entryPickerMonth.year,mo=entryPickerMonth.month,first=new Date(yr,mo,1).getDay(),days=new Date(yr,mo+1,0).getDate(),cells=[];for(let i=0;i<first;i++)cells.push(<div key={'e'+i}/>);for(let d=1;d<=days;d++){const dow=new Date(yr,mo,d).getDay(),edk=`${yr}-${mo+1}-${d}`,sel=normDk(form.entryDate)===edk,base=baseDk===edk;cells.push(<div key={d} title={base?'選択中の日（車検日）':''} onClick={()=>{setForm(p=>({...p,entryDate:edk}));setShowEntryPicker(false);}} style={{display:'flex',alignItems:'center',justifyContent:'center',width:28,height:28,margin:'0 auto',cursor:'pointer',fontSize:12,borderRadius:'50%',boxSizing:'border-box',color:sel?'white':dow===0?'#ef4444':dow===6?'#2563eb':'#1f2937',fontWeight:(sel||base)?800:600,background:sel?'#9a3412':'',border:base?'2px solid #9a3412':'2px solid transparent'}} onMouseOver={e=>{if(!sel)e.currentTarget.style.background='#f3f4f6';}} onMouseOut={e=>{if(!sel)e.currentTarget.style.background='';}}>{d}</div>);}return <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:1}}>{cells}</div>;})()}
+                  {baseDk&&<div style={{marginTop:6,display:'flex',alignItems:'center',gap:5,fontSize:10,color:'#6b7280'}}><span style={{width:14,height:14,borderRadius:'50%',border:'2px solid #9a3412',flexShrink:0}}/>◯＝選択中の日（{baseMd} 車検日）</div>}
                   <button type="button" onClick={()=>setShowEntryPicker(false)} style={{marginTop:8,width:'100%',padding:'4px',background:'#f3f4f6',border:'none',borderRadius:6,cursor:'pointer',fontSize:11,color:'#6b7280'}}>閉じる</button>
                 </div>
               )}
@@ -4186,7 +4193,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
           <div style={{position:'relative'}}>
             <label style={LBL}>納車日 <span style={{fontWeight:400,color:'#9ca3af',fontSize:10}}>任意。決まっていれば入れておくと納車日の表に出ます</span></label>
             <button type="button"
-              onClick={()=>{if(!delivPickerMonth){const now=new Date();const src=form.deliveryDate?form.deliveryDate.split('-').map(Number):null;setDelivPickerMonth(src?{year:src[0],month:src[1]-1}:{year:now.getFullYear(),month:now.getMonth()});}setShowDelivPicker(p=>!p);}}
+              onClick={()=>{if(!delivPickerMonth){const src=form.deliveryDate?form.deliveryDate.split('-').map(Number):null;setDelivPickerMonth(src?{year:src[0],month:src[1]-1}:baseMonth());}setShowDelivPicker(p=>!p);}}
               style={{width:'100%',display:'flex',alignItems:'center',gap:10,padding:'10px 12px',borderRadius:8,cursor:'pointer',border:`2px solid ${form.deliveryDate?'#047857':'#d1d5db'}`,background:form.deliveryDate?'#ecfdf5':'#f9fafb'}}>
               <span style={{width:20,height:20,borderRadius:5,border:`2px solid ${form.deliveryDate?'#047857':'#9ca3af'}`,background:form.deliveryDate?'#047857':'white',color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,flexShrink:0}}>{form.deliveryDate?'✓':''}</span>
               <span style={{fontWeight:700,fontSize:13,color:form.deliveryDate?'#047857':'#6b7280'}}>
@@ -4204,7 +4211,8 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
                 <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',marginBottom:2}}>
                   {['日','月','火','水','木','金','土'].map((d,i)=><div key={d} style={{textAlign:'center',fontSize:10,fontWeight:700,color:i===0?'#ef4444':i===6?'#2563eb':'#9ca3af',padding:'2px 0'}}>{d}</div>)}
                 </div>
-                {(()=>{const yr=delivPickerMonth.year,mo=delivPickerMonth.month,first=new Date(yr,mo,1).getDay(),days=new Date(yr,mo+1,0).getDate(),cells=[];for(let i=0;i<first;i++)cells.push(<div key={'e'+i}/>);for(let d=1;d<=days;d++){const dow=new Date(yr,mo,d).getDay(),ddk=`${yr}-${mo+1}-${d}`,sel=form.deliveryDate===ddk;cells.push(<div key={d} onClick={()=>{setForm(p=>({...p,deliveryDate:ddk,deliveryTime:p.deliveryTime||'未定'}));setShowDelivPicker(false);}} style={{textAlign:'center',padding:'4px 2px',cursor:'pointer',fontSize:12,borderRadius:4,color:sel?'white':dow===0?'#ef4444':dow===6?'#2563eb':'#1f2937',fontWeight:sel?800:600,background:sel?'#047857':''}} onMouseOver={e=>{if(!sel)e.currentTarget.style.background='#f3f4f6';}} onMouseOut={e=>{if(!sel)e.currentTarget.style.background='';}}>{d}</div>);}return <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:1}}>{cells}</div>;})()}
+                {(()=>{const yr=delivPickerMonth.year,mo=delivPickerMonth.month,first=new Date(yr,mo,1).getDay(),days=new Date(yr,mo+1,0).getDate(),cells=[];for(let i=0;i<first;i++)cells.push(<div key={'e'+i}/>);for(let d=1;d<=days;d++){const dow=new Date(yr,mo,d).getDay(),ddk=`${yr}-${mo+1}-${d}`,sel=normDk(form.deliveryDate)===ddk,base=baseDk===ddk;cells.push(<div key={d} title={base?'選択中の日':''} onClick={()=>{setForm(p=>({...p,deliveryDate:ddk,deliveryTime:p.deliveryTime||'未定'}));setShowDelivPicker(false);}} style={{display:'flex',alignItems:'center',justifyContent:'center',width:28,height:28,margin:'0 auto',cursor:'pointer',fontSize:12,borderRadius:'50%',boxSizing:'border-box',color:sel?'white':dow===0?'#ef4444':dow===6?'#2563eb':'#1f2937',fontWeight:(sel||base)?800:600,background:sel?'#047857':'',border:base?'2px solid #047857':'2px solid transparent'}} onMouseOver={e=>{if(!sel)e.currentTarget.style.background='#f3f4f6';}} onMouseOut={e=>{if(!sel)e.currentTarget.style.background='';}}>{d}</div>);}return <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:1}}>{cells}</div>;})()}
+                {baseDk&&<div style={{marginTop:6,display:'flex',alignItems:'center',gap:5,fontSize:10,color:'#6b7280'}}><span style={{width:14,height:14,borderRadius:'50%',border:'2px solid #047857',flexShrink:0}}/>◯＝選択中の日（{baseMd}）</div>}
                 <button type="button" onClick={()=>setShowDelivPicker(false)} style={{marginTop:8,width:'100%',padding:'4px',background:'#f3f4f6',border:'none',borderRadius:6,cursor:'pointer',fontSize:11,color:'#6b7280'}}>閉じる</button>
               </div>
             )}
