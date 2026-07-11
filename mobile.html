@@ -6,6 +6,44 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
 <title>Hub a Nice Day</title>
+<script>
+  // ===== 自動アップデート検知（PC版 index と同じ方式・Service Workerなし・HTTPキャッシュのみ） =====
+  // iOSのホーム画面PWAはHTMLを長くキャッシュするため、開いたまま/再訪では旧版が残りがち。
+  // 画面復帰時と定期に自分自身をno-storeで取得し、__APP_BUILDが変わっていれば更新バナーを表示する。
+  // タップ時は cache:'reload' で新HTMLをHTTPキャッシュへ焼き直してから reload するので、確実に新版になる
+  // （アプリを消したりURLを打ち直す必要はない）。本番デプロイ時は port_to_main.js が __APP_BUILD を自動更新する。
+  window.__APP_BUILD='build-1781580000000';
+  (function(){
+    var RUNNING=window.__APP_BUILD, shown=false, checking=false;
+    function banner(){
+      if(shown||!document.body)return; shown=true;
+      var b=document.createElement('div');
+      b.textContent='🔄 新しいバージョンがあります（タップして更新）';
+      b.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:#0e7490;color:#fff;text-align:center;padding:calc(14px + env(safe-area-inset-bottom,0px)) 12px 14px;font-weight:800;font-size:15px;cursor:pointer;box-shadow:0 -2px 12px rgba(0,0,0,.35)';
+      b.onclick=async function(){
+        b.textContent='更新中…';
+        try{await fetch(location.pathname+'?_v='+Date.now(),{cache:'reload'});}catch(e){}
+        location.reload();
+      };
+      document.body.appendChild(b);
+    }
+    async function check(){
+      if(shown||checking||navigator.onLine===false)return; checking=true;
+      try{
+        var res=await fetch(location.pathname+'?_v='+Date.now(),{cache:'no-store'});
+        if(res&&res.ok){
+          var t=await res.text();
+          var m=t.match(/__APP_BUILD='(build-\d+)'/);
+          if(m&&m[1]!==RUNNING)banner();
+        }
+      }catch(e){}
+      checking=false;
+    }
+    document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')check();});
+    setTimeout(check,30000);
+    setInterval(check,15*60*1000);
+  })();
+</script>
 <script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.25.9/babel.min.js"></script>
@@ -25,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.40';
+const MOBILE_VERSION='1.41';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';

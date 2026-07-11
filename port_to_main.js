@@ -52,6 +52,10 @@ const CUST_REGEX_RULES = [
 const MOBILE_RULES = [
   ["const STOR='hub-v8-dev-';", "const STOR='hub-v8-';", 1],
 ];
+const MOBILE_REGEX_RULES = [
+  // 自動アップデート検知のビルド識別子をデプロイ毎に更新（旧タブ/旧PWAが新版を検知してバナー表示）
+  [/__APP_BUILD='build-\d+'/, "__APP_BUILD='build-" + Date.now() + "'", 1, 'APP_BUILDタイムスタンプ'],
+];
 // 変換後にあってはならない文字列（残骸チェック）
 const FORBIDDEN = ['hub-v8-dev', '[DEV]', 'テスト版（DEV）', 'DEV版警告バナー',
   'linear-gradient(140deg,#7c2d12', "header ref={headerRef} style={{background:'#EA580C'"];
@@ -96,7 +100,7 @@ function port(srcName, dstName, rules, regexRules) {
 if (!fs.existsSync(MAIN_DIR)) { console.error('本番リポジトリが見つかりません: ' + MAIN_DIR); process.exit(1); }
 port('index_dev.html', 'index_main.html', INDEX_RULES, INDEX_REGEX_RULES);
 port('customers.html', 'customers.html', CUST_RULES, CUST_REGEX_RULES);
-port('mobile.html', 'mobile.html', MOBILE_RULES, []);
+port('mobile.html', 'mobile.html', MOBILE_RULES, MOBILE_REGEX_RULES);
 
 if (failed) {
   console.error('\n★中断: 上記の✖を解消してから再実行してください（本番ファイルは書き込み済みのものだけ更新）。');
