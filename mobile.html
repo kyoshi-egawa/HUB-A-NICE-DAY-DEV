@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.41';
+const MOBILE_VERSION='1.42';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -553,14 +553,15 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
   const [carKind,setCarKind]=useState('keep');
   const [carSel,setCarSel]=useState('');
   const [carFrom,setCarFrom]=useState(form.entryDate?dkToInputDate(form.entryDate):defDate);
-  const [carTo,setCarTo]=useState(defDate);
-  // 事前入庫の手間削減: 貸出日=入庫日 / 返却日=車検作業日 を自動連動。手動で日付を触ったら以降は自動連動を止める。
+  const [carTo,setCarTo]=useState(form.deliveryDate?dkToInputDate(form.deliveryDate):defDate);
+  // 事前入庫/納車の手間削減: 貸出日=入庫日(なければ車検作業日) / 返却日=納車日(なければ車検作業日) を自動連動。
+  // ＝車を預けている全期間（入庫〜納車）が代車の期間になる。手動で日付を触ったら以降は自動連動を止める。
   const manualDatesRef=useRef(false);
   useEffect(()=>{
     if(manualDatesRef.current)return;
     setCarFrom(form.entryDate?dkToInputDate(form.entryDate):defDate);
-    setCarTo(defDate);
-  },[form.entryDate,mode.dk,carKind]);
+    setCarTo(form.deliveryDate?dkToInputDate(form.deliveryDate):defDate);
+  },[form.entryDate,form.deliveryDate,mode.dk,carKind]);
   const bk=isInsp?`insp-${mode.dk}-${mode.idx}`:`sched-${mode.dk}-${mode.slot}`;
   const currentLoanerLbl=getLoanerLabel(loanerRes,mode.dk,initial?.name,initial?.bookingKey||bk,loanerCars);
   const currentBinding=currentLoanerLbl?`🚗 ${currentLoanerLbl}`:(initial?.rentalLabel||initial?.loaner||'');
@@ -740,7 +741,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
             {(carKind==='loaner'||carKind==='rental')&&(
               <div style={{display:'flex',flexDirection:'column',gap:8}}>
                 <div style={{fontSize:10,color:'#0369a1',fontWeight:700,lineHeight:1.4}}>
-                  {form.entryDate?'自動：貸出日＝入庫日 / 返却日＝車検日。必要な時だけ下で変更':'自動：貸出日・返却日＝車検日。必要な時だけ下で変更'}
+                  {`自動：貸出日＝${form.entryDate?'入庫日':'車検日'} / 返却日＝${form.deliveryDate?'納車日':'車検日'}。必要な時だけ下で変更`}
                 </div>
                 <div style={{display:'flex',gap:8}}>
                   <div style={{flex:1}}>
@@ -748,7 +749,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
                     <input type="date" value={carFrom} onChange={e=>{manualDatesRef.current=true;setCarFrom(e.target.value);}} style={{...INP,padding:'8px 10px'}}/>
                   </div>
                   <div style={{flex:1}}>
-                    <label style={LBL}>返却日<span style={{color:'#3730a3',fontWeight:800}}>（車検日）</span></label>
+                    <label style={LBL}>返却日<span style={{color:form.deliveryDate?'#047857':'#3730a3',fontWeight:800}}>（{form.deliveryDate?'納車日':'車検日'}）</span></label>
                     <input type="date" value={carTo} onChange={e=>{manualDatesRef.current=true;setCarTo(e.target.value);}} style={{...INP,padding:'8px 10px'}}/>
                   </div>
                 </div>
