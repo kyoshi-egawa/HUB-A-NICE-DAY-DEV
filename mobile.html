@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.44';
+const MOBILE_VERSION='1.45';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -720,22 +720,30 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
           )}
           {/* 納車日（任意・車検/タイムスケジュール共通）。設定すると納車日のタイムスケジュールに派生表示される（行そのものは保存しない） */}
           <div>
-            <label style={LBL}>納車日 <span style={{fontWeight:400,color:'#94a3b8',fontSize:10}}>任意。決まっていれば入れておくと納車日の表に出ます</span></label>
-            <div style={{display:'flex',gap:8,alignItems:'center'}}>
-              <input type="date" value={dkToInputDate(form.deliveryDate)}
-                onChange={e=>{const v=inputDateToDk(e.target.value);setForm(p=>({...p,deliveryDate:v,deliveryTime:v?(p.deliveryTime||'未定'):''}));}}
-                style={{...INP,flex:1,...(form.deliveryDate?{border:'2px solid #047857',background:'#ecfdf5',color:'#047857',fontWeight:800}:{})}}/>
-              {form.deliveryDate&&<button onClick={()=>setForm(p=>({...p,deliveryDate:'',deliveryTime:''}))} style={{padding:'0 14px',background:'#f1f5f9',border:'none',borderRadius:10,fontWeight:800,color:'#64748b',fontSize:16}}>✕</button>}
-            </div>
-            {form.deliveryDate&&(
-              <div style={{marginTop:8}}>
-                <label style={LBL}>納車時間</label>
-                <select value={form.deliveryTime||'未定'} onChange={e=>setForm(p=>({...p,deliveryTime:e.target.value}))}
-                  style={{...INP,border:'2px solid #047857',color:'#047857',fontWeight:800}}>
-                  {SCHED_SLOTS.map(v=><option key={v} value={v}>{deliverySlotLabel(v)}</option>)}
-                </select>
-                {(()=>{const p=form.deliveryDate.split('-');return <div style={{fontSize:11,color:'#047857',marginTop:4,fontWeight:800}}>🏁 納車：{String(p[1]).padStart(2,'0')}/{String(p[2]).padStart(2,'0')} {deliverySlotLabel(form.deliveryTime||'未定')}</div>;})()}
-              </div>
+            <label style={LBL}>納車日 <span style={{fontWeight:400,color:'#94a3b8',fontSize:10}}>任意。既定は選択日。翌日以降なら日付を変更</span></label>
+            {!form.deliveryDate?(
+              // 未設定→ボタン。押すと選択日(mode.dk＝車検/予定の日)を既定セット。日付入力もその日を起点に開く。
+              <button onClick={()=>setForm(p=>({...p,deliveryDate:mode.dk,deliveryTime:'未定'}))}
+                style={{width:'100%',padding:'11px 12px',borderRadius:10,border:'2px dashed #6ee7b7',background:'#f0fdf9',color:'#047857',fontWeight:800,fontSize:13}}>
+                ＋ 納車日を設定する（選択日から）
+              </button>
+            ):(
+              <React.Fragment>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <input type="date" value={dkToInputDate(form.deliveryDate)}
+                    onChange={e=>{const v=inputDateToDk(e.target.value);setForm(p=>({...p,deliveryDate:v||mode.dk,deliveryTime:p.deliveryTime||'未定'}));}}
+                    style={{...INP,flex:1,border:'2px solid #047857',background:'#ecfdf5',color:'#047857',fontWeight:800}}/>
+                  <button onClick={()=>setForm(p=>({...p,deliveryDate:'',deliveryTime:''}))} style={{padding:'0 14px',background:'#f1f5f9',border:'none',borderRadius:10,fontWeight:800,color:'#64748b',fontSize:16}}>✕</button>
+                </div>
+                <div style={{marginTop:8}}>
+                  <label style={LBL}>納車時間</label>
+                  <select value={form.deliveryTime||'未定'} onChange={e=>setForm(p=>({...p,deliveryTime:e.target.value}))}
+                    style={{...INP,border:'2px solid #047857',color:'#047857',fontWeight:800}}>
+                    {SCHED_SLOTS.map(v=><option key={v} value={v}>{deliverySlotLabel(v)}</option>)}
+                  </select>
+                  {(()=>{const p=form.deliveryDate.split('-');return <div style={{fontSize:11,color:'#047857',marginTop:4,fontWeight:800}}>🏁 納車：{String(p[1]).padStart(2,'0')}/{String(p[2]).padStart(2,'0')} {deliverySlotLabel(form.deliveryTime||'未定')}</div>;})()}
+                </div>
+              </React.Fragment>
             )}
           </div>
           <div style={{border:'2px solid #e0f2fe',borderRadius:12,padding:'10px 12px',background:'#f8fdff'}}>

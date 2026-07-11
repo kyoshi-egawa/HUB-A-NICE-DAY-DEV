@@ -1,5 +1,6 @@
 // DEV→本番 移植スクリプト
-// 使い方:  node port_to_main.js
+// 使い方:  node port_to_main.js              ← 3ファイル全部
+//          node port_to_main.js mobile       ← 対象を絞る（index / customers / mobile を空白区切りで指定可）
 //
 // index_dev.html → ../hub-a-nice-day/index_main.html
 // customers.html → ../hub-a-nice-day/customers.html
@@ -98,9 +99,17 @@ function port(srcName, dstName, rules, regexRules) {
 }
 
 if (!fs.existsSync(MAIN_DIR)) { console.error('本番リポジトリが見つかりません: ' + MAIN_DIR); process.exit(1); }
-port('index_dev.html', 'index_main.html', INDEX_RULES, INDEX_REGEX_RULES);
-port('customers.html', 'customers.html', CUST_RULES, CUST_REGEX_RULES);
-port('mobile.html', 'mobile.html', MOBILE_RULES, MOBILE_REGEX_RULES);
+
+const TARGETS = ['index', 'customers', 'mobile'];
+const want = process.argv.slice(2);
+const bad = want.filter(t => !TARGETS.includes(t));
+if (bad.length) { console.error(`不明な対象: ${bad.join(', ')}（指定可能: ${TARGETS.join(' / ')}）`); process.exit(1); }
+const on = t => want.length === 0 || want.includes(t);
+if (want.length) console.log(`※ 対象を限定して移植します: ${want.join(', ')}（他のファイルは本番の現行版のまま）`);
+
+if (on('index'))     port('index_dev.html', 'index_main.html', INDEX_RULES, INDEX_REGEX_RULES);
+if (on('customers')) port('customers.html', 'customers.html', CUST_RULES, CUST_REGEX_RULES);
+if (on('mobile'))    port('mobile.html', 'mobile.html', MOBILE_RULES, MOBILE_REGEX_RULES);
 
 if (failed) {
   console.error('\n★中断: 上記の✖を解消してから再実行してください（本番ファイルは書き込み済みのものだけ更新）。');

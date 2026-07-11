@@ -124,10 +124,16 @@ const GAS_HOST = 'https://script.google.com';
   page2.on('pageerror', e => problems.push('customers JSエラー: ' + String(e).slice(0, 140)));
   console.log('customers.html を起動中...');
   await page2.goto(`http://127.0.0.1:${PORT}/customers.html`, { waitUntil: 'domcontentloaded' });
-  await page2.waitForTimeout(15000);
+  // 顧客ファイルのGAS読込は時に30秒超かかる（index_main巡回直後はGASスロットリングで特に遅い）。
+  // 固定待機だと遅延で誤検知するためポーリング（最大44秒）。
+  let custBody = '';
+  for (let i = 0; i < 22; i++) {
+    await page2.waitForTimeout(2000);
+    custBody = await page2.locator('body').innerText().catch(() => '');
+    if (custBody.includes('総件数')) break;
+  }
   await checkPage(page2, '顧客リスト');
-  const custBody = await page2.locator('body').innerText().catch(() => '');
-  if (!custBody.includes('総件数')) problems.push('顧客リスト: 画面が表示されていない');
+  if (!custBody.includes('総件数')) { problems.push('顧客リスト: 画面が表示されていない'); console.log('  [debug] custBody len=' + custBody.length + ' first120="' + custBody.slice(0, 120).replace(/\n/g, ' ') + '"'); }
   else console.log('  ✔ 顧客リスト表示');
   await page2.close();
 
