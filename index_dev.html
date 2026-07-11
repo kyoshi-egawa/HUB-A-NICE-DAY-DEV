@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.43';
+const APP_VERSION = '1.44';
 
 
 
@@ -5619,6 +5619,11 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                     const sepL=isObj&&!_sameRes(st,_leftSt);
                     const sepT=isObj&&_upSt&&typeof _upSt==='object'&&!_sameRes(st,_upSt);
                     const SEP='2px solid #1e293b';
+                    // 貸出2日以上は、その日数分のセルを1枠として名前を横に広げて表示（入りきらなければ尻切れ）。
+                    const _prevD=i>0?dateRange[i-1]:null;
+                    const showName=isObj&&(isStart||!_leftSt||(typeof _leftSt==='object'&&_leftSt.id!==st.id)||(!!_prevD&&_prevD.month!==month));
+                    let nameSpan=1;
+                    if(showName){for(let j=i+1;j<dateRange.length;j++){const s=getState(car.id,dateRange[j]);if(s&&typeof s==='object'&&s.id===st.id)nameSpan++;else break;}}
                     return (
                       <td key={i}
                         onMouseDown={e=>{
@@ -5649,28 +5654,14 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                           background:bg,
                           cursor:isBlocked?'not-allowed':isFree?'crosshair':!pickMode&&isObj?'pointer':'default',
                           padding:0,
-                          overflow:'hidden',
+                          overflow:showName?'visible':'hidden',
                           position:'relative',
                           boxSizing:'border-box'
                         }}>
-                        {/* ユーザー名を常時表示 */}
-                        {isObj&&isStart&&(
-                          <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
-                            {(()=>{const _n=shortenCorpName(st.user);return _n.length>6?_n.slice(0,6)+'…':_n;})()}
-                          </div>
-                        )}
-                        {/* 月をまたぐ場合、または前のセルが違う予約の場合も表示 */}
-                        {isObj&&!isStart&&i>0&&(()=>{
-                          const prevDate=dateRange[i-1];
-                          if(!prevDate)return false;
-                          const prevSt=getState(car.id,prevDate);
-                          // 前のセルが空 or 違う予約 or 月が変わった場合に表示
-                          const isDifferent=!prevSt||(prevSt&&typeof prevSt==='object'&&prevSt.id!==st.id);
-                          const isMonthBoundary=prevDate.month!==dateObj.month;
-                          return isDifferent||isMonthBoundary;
-                        })()&&(
-                          <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
-                            {(()=>{const _n=shortenCorpName(st.user);return _n.length>6?_n.slice(0,6)+'…':_n;})()}
+                        {/* 貸出日数分のセルを1枠として名前を表示（開始日 or 月またぎ・前が別予約の再開始位置から。尻切れ可） */}
+                        {showName&&(
+                          <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',width:nameSpan*44-6,fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
+                            {shortenCorpName(st.user)}
                           </div>
                         )}
                       </td>
@@ -5956,6 +5947,9 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                           const bg=isDrag?'#bef264':isConf?'#93c5fd':isObj?(st.color||'#86efac'):h2?'#fef08a':'white';
                           const isFree=pickMode&&!isObj&&!isDrag&&!isConf;
                           const isBlocked=pickMode&&isObj;
+                          // 貸出2日以上は日数分のセルを1枠として名前を横に広げる（尻切れ可）
+                          let rNameSpan=1;
+                          if(isObj&&isStart){for(let j=i+1;j<dateRange.length;j++){const s=getRDragState(car.id,dateRange[j]);if(s&&typeof s==='object'&&s.id===st.id)rNameSpan++;else break;}}
                           return (
                             <td key={i}
                               onMouseDown={e=>{e.preventDefault();if(!isBlocked)rHandleMD(car.id,dateObj);}}
@@ -5970,10 +5964,10 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
                                 boxShadow:isDrag?'inset 0 0 0 2px #65a30d':isConf?'inset 0 0 0 2px #2563eb':'none',
                                 background:bg,
                                 cursor:isBlocked?'not-allowed':isFree?'crosshair':!pickMode&&isObj?'pointer':'default',
-                                padding:0,overflow:'hidden',position:'relative',boxSizing:'border-box'}}>
+                                padding:0,overflow:(isObj&&isStart)?'visible':'hidden',position:'relative',boxSizing:'border-box'}}>
                               {isObj&&isStart&&(
-                                <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
-                                  {(()=>{const _n=shortenCorpName(st.user);return _n.length>6?_n.slice(0,6)+'…':_n;})()}
+                                <div style={{position:'absolute',left:3,top:'50%',transform:'translateY(-50%)',width:rNameSpan*44-6,fontSize:11,color:'white',fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'clip',textShadow:'-1px -1px 1px rgba(0,0,0,.85),1px -1px 1px rgba(0,0,0,.85),-1px 1px 1px rgba(0,0,0,.85),1px 1px 1px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.9)',zIndex:2,pointerEvents:'none'}}>
+                                  {shortenCorpName(st.user)}
                                 </div>
                               )}
                             </td>
