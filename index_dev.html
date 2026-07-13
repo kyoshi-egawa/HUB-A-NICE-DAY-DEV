@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.54';
+const APP_VERSION = '1.55';
 
 
 
@@ -256,6 +256,30 @@ const DEFAULT_STAFF_SANDA = [
 const STAFF_HONTEN = DEFAULT_STAFF_HONTEN.map(s=>({id:s.myNumber,...s}));
 const STAFF_SANDA  = DEFAULT_STAFF_SANDA.map(s=>({id:s.myNumber,...s}));
 const STAFF = [...STAFF_HONTEN, ...STAFF_SANDA];
+// 作業項目バッジ（タイムスケジュール）: 略号スクエア＋名称。色は作業のカテゴリを表す
+// 整備・修理=シアン / 点検=インディゴ / 鈑金塗装=紫 / 営業=琥珀 / 納車=緑 / その他=グレー
+// （車検のコース色 マッハ赤・クイック青・レギュラー橙 とぶつからない配色）
+const WORK_COLORS = {
+  'Q':'#0891b2',
+  '⑫':'#4f46e5','M12':'#4f46e5','M6':'#4f46e5','N1':'#4f46e5','N6':'#4f46e5',
+  'B':'#9333ea',
+  '商':'#b45309','保':'#b45309','試':'#b45309',
+  '納':'#047857',
+  '他':'#64748b',
+};
+const WorkBadge = ({id, dim}) => {
+  const w = WORKS.find(x => x.id === id);
+  if (!w) return <span style={{fontSize:13,color:'#374151'}}>{id||'—'}</span>;
+  const c = WORK_COLORS[id] || '#64748b';
+  return (
+    <span style={{display:'inline-flex',alignItems:'center',gap:6,whiteSpace:'nowrap',opacity:dim?0.6:1}}>
+      <span style={{display:'inline-flex',alignItems:'center',justifyContent:'center',minWidth:24,height:20,padding:'0 5px',
+        borderRadius:6,background:c,color:'white',fontSize:11,fontWeight:800,flexShrink:0}}>{w.id}</span>
+      <span style={{fontSize:12,fontWeight:700,color:'#475569'}}>{w.name}</span>
+    </span>
+  );
+};
+
 const COURSES = [
   {id:1,name:'マッハ車検',  color:'#b91c1c',bg:'#fca5a5',initial:'マ'},
   {id:2,name:'クイック車検',color:'#1d4ed8',bg:'#bfdbfe',initial:'ク'},
@@ -4526,7 +4550,7 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
             </div>}
       </td>
       <td style={TD}><span style={{color:'#374151',fontSize:13,fontWeight:700}}>{row.carType||'—'}</span></td>
-      <td style={TD}><span style={{fontSize:13,color:'#374151'}}>{row.work||'—'}</span></td>
+      <td style={TD}>{row.work?<WorkBadge id={row.work} dim={locked||otherStore}/>:<span style={{fontSize:13,color:'#374151'}}>—</span>}</td>
       <td style={TD}><span style={{fontSize:12,color:row.rentalLabel?'#065f46':'#374151',fontWeight:400}}>{row.rentalLabel||loanerLabel||row.loaner||'—'}</span></td>
       <td style={TD}><span style={{fontSize:13,color:'#374151'}}>{row.shimi||'—'}</span></td>
       <td style={TD}>{row.content
