@@ -85,7 +85,7 @@ const STOR='hub-v8-dev-';
 // index側の全画面オーバーレイ（iframe）内で開かれているか。埋め込み時は
 // 「スケジュールに戻る」がページ遷移ではなく親へのpostMessage（オーバーレイ閉鎖）になる。
 const IS_EMBED=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
-const APP_VERSION='1.48'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
+const APP_VERSION='1.49'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
 const CHUNK_SIZE=100;
 // ファイル名をGASキーに使える形に変換
@@ -1461,14 +1461,26 @@ const App=()=>{
       //   取得は軽量なcust-updatesのみ。保存検証中(最大6秒)や書込中でもバッジは止めない＝
       //   スケジュールでキャンセル後にリストを開いた時、バッジが出るまでのラグを最小化する。
       let arr=[];
+      // ★リストに該当する顧客がいない通知（スケジュール側で手入力された予約のキャンセル等）は
+      //   永久に適用されない。これを「反映中」に出すと消えないポップアップになる（2026-07-13の菊池）。
+      //   バッジ判定とキュー掃除の両方で使うので、この関数スコープの先頭で定義する。
+      const matchesCust=u=>(filesRef.current||[]).some(f=>(f.customers||[]).some(c=>
+        (u.custId&&u.custId===c.custId)||(u.name&&((!u.no&&u.name===c.name)||(u.no&&u.name===c.name&&String(u.no)===String(c.no))))
+      ));
       try{
         const updates=await sGet(STOR+'cust-updates');
         arr=Array.isArray(updates)?updates:[];
         if(!window.__appliedUpdTs)window.__appliedUpdTs=new Set();
         // ★「反映中」サイン：キュー上の未適用通知を行バッジ＋トーストで可視化
-        //   （反映までの数秒〜数十秒、現場で正常動作と分かるように）
+        //   （反映までの数秒〜数十秒、現場で正常動作と分かるように）。顧客ファイル読込済みのときは
+        //   一致相手がいる通知だけを出す。
+        const loaded=!!(filesRef.current&&filesRef.current.length>0);
         const pend={};
-        arr.forEach(u=>{if(u&&u.ts&&!window.__appliedUpdTs.has(u.ts))pend[u.custId||`${u.name}__${u.no}`]={name:u.name,entryDate:u.entryDate,ts:u.ts};});
+        arr.forEach(u=>{
+          if(!u||!u.ts||window.__appliedUpdTs.has(u.ts))return;
+          if(loaded&&!matchesCust(u))return; // 宛先不明 → 反映待ちではない
+          pend[u.custId||`${u.name}__${u.no}`]={name:u.name,entryDate:u.entryDate,ts:u.ts};
+        });
         setPendingSync(prev=>JSON.stringify(prev)===JSON.stringify(pend)?prev:pend);
       }catch{return;}
       if(arr.length===0)return;
@@ -1576,6 +1588,12 @@ const App=()=>{
         const remaining=arr.filter(u=>{
           if(u.ts&&verifiedTs.has(u.ts))return false;
           if(!u.ts||Date.now()-u.ts>60*24*60*60*1000)return false;
+          // 宛先の顧客がリストに存在しない通知は、10分待っても適用先が現れなければ捨てる
+          //（スケジュールで手入力された予約のキャンセル通知など。放置すると60日間キューに残り続ける）
+          if(!matchesCust(u)&&Date.now()-u.ts>10*60*1000){
+            console.warn('[SYNC] 宛先不明の通知を破棄:',u.name);
+            return false;
+          }
           return true;
         });
         if(remaining.length!==arr.length)await sSet(STOR+'cust-updates',remaining.length>0?remaining:[]);
@@ -2507,6 +2525,9 @@ const App=()=>{
               ?<span className="spinner-sm" style={{flexShrink:0,borderTopColor:'#d97706'}}/>
               :<span style={{fontSize:17,flexShrink:0}}>✅</span>}
             <span style={{flex:1,lineHeight:1.4}}>{label}</span>
+            {/* 何かの理由で反映が進まない時に手で閉じられるようにする（消えないポップアップ対策） */}
+            <button onClick={()=>{setPendingSync({});setSyncFlash(null);}}
+              style={{flexShrink:0,width:22,height:22,borderRadius:'50%',border:'none',background:'rgba(0,0,0,.08)',color:theme.fg,fontSize:12,fontWeight:800,cursor:'pointer'}}>✕</button>
           </div>
         );
       })()}
