@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.46';
+const MOBILE_VERSION='1.47';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -148,7 +148,9 @@ const DEFAULT_RENTAL_CARS=[
 const RES_COLORS=['#fca5a5','#86efac','#93c5fd','#fde68a','#c4b5fd','#f9a8d4'];
 const toNum=(y,m,d)=>y*10000+(m+1)*100+d;
 const normStore=s=>{if(!s)return'';if(s==='honten'||s==='本店')return'honten';if(s==='sanda'||s==='三田店')return'sanda';return s;};
-const getSecondTuesday=(y,m)=>{let c=0;for(let d=1;d<=31;d++){const dt=new Date(y,m,d);if(dt.getMonth()!==m)break;if(dt.getDay()===2){c++;if(c===2)return d;}}return null;};
+// 第2火曜は両店の定休（1月・5月・8月は除外）。PC版 getSecondTuesday / isSecondTuesdayHoliday と同一ルール。
+const SECOND_TUE_EXEMPT_MONTHS=new Set([0,4,7]);
+const getSecondTuesday=(y,m)=>{if(SECOND_TUE_EXEMPT_MONTHS.has(m))return null;let c=0;for(let d=1;d<=31;d++){const dt=new Date(y,m,d);if(dt.getMonth()!==m)break;if(dt.getDay()===2){c++;if(c===2)return d;}}return null;};
 // 対応可能業務のデフォルト（PC版と同一。capabilities未設定の旧スタッフデータ用）
 const getDefaultCapabilities=(badge)=>{
   if(badge==='bodywork'||badge==='assistant')return {insp_front:false,sched_front:false,insp_work:true,sched_work:true,insp_check:false};
@@ -156,17 +158,25 @@ const getDefaultCapabilities=(badge)=>{
   if(badge==='inspector')return {insp_front:true,sched_front:true,insp_work:true,sched_work:true,insp_check:true};
   return {insp_front:true,sched_front:true,insp_work:true,sched_work:true,insp_check:false};
 };
-const calIsClosed=(date,cDays=[],cDates=[],ovOpen=[],vsId='honten')=>{
+// 休業日判定（PC版 AppInner の isClosed と同一）: 店舗別の定休曜日(cdow) → 店舗別の個別休業日(cdate)
+// → 第2火曜（両店共通・override-openで通常営業に戻せる）。日付文字列はゼロ詰め（PC版の保存形式）。
+const calIsClosed=(date,cDays=[],cDates=[],ovOpen=[])=>{
   if(!date||isNaN(date))return false;
-  if(cDays.includes(date.getDay()))return true;
+  const days=Array.isArray(cDays)?cDays:[],dates=Array.isArray(cDates)?cDates:[],ov=Array.isArray(ovOpen)?ovOpen:[];
+  if(days.includes(date.getDay()))return true;
   const ds=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-  if(cDates.includes(ds))return true;
-  if(vsId==='sanda'){
-    const d2=getSecondTuesday(date.getFullYear(),date.getMonth());
-    if(d2===date.getDate()&&!ovOpen.includes(`${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`))return true;
-  }
+  if(dates.includes(ds))return true;
+  const d2=getSecondTuesday(date.getFullYear(),date.getMonth());
+  if(d2===date.getDate()&&!ov.includes(ds))return true;
   return false;
 };
+// dk（"2026-7-5" ゼロ詰めなし）を休業日判定に掛けるヘルパー
+const dkIsClosed=(dk,cDays,cDates,ovOpen)=>{
+  const p=String(dk||'').split('-').map(Number);
+  if(p.length!==3||p.some(isNaN))return false;
+  return calIsClosed(new Date(p[0],p[1]-1,p[2]),cDays,cDates,ovOpen);
+};
+const dkLabel=dk=>{const p=String(dk||'').split('-');return p.length===3?`${p[1]}/${p[2]}`:String(dk||'');};
 
 // ══ データ層（PC版 index_dev.html と互換の読み書きプロトコル）══
 const sGet=async k=>{
@@ -409,7 +419,7 @@ const CalendarView=({inspData,closedDays,closedDates,overrideOpen,vsId,onSelectD
             {wk.map((d,di)=>{
               if(!d)return <div key={di}/>;
               const date=new Date(cy,cm,d);
-              const closed=calIsClosed(date,closedDays,closedDates,overrideOpen,vsId);
+              const closed=calIsClosed(date,closedDays,closedDates,overrideOpen);
               const isToday=d===today.getDate()&&cm===today.getMonth()&&cy===today.getFullYear();
               const isSun=di===0,isSat=di===6,isHol=isHoliday(cy,cm,d);
               const info=dayCnt[d];
@@ -537,8 +547,15 @@ const DayDetailModal=({dk,y,m,d,inspData,schedDataH,schedDataS,memoDataH,memoDat
 };
 
 // ══ 予約入力モーダル（新規/編集/削除 + 代車・レンタカー紐付け）══
-const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,loanerRes,rentalRes,lockedBy,onSave,onDelete,onClose})=>{
+const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,loanerRes,rentalRes,lockedBy,isClosedDk,onSave,onDelete,onClose})=>{
   const isInsp=mode.type==='insp';
+  // 休業日には入庫・納車を入れられない（選んだ時点で弾き、元の値に戻す）
+  const closedDk=dk=>!!(isClosedDk&&isClosedDk(dk));
+  const rejectIfClosed=(dk,what)=>{
+    if(!closedDk(dk))return false;
+    alert(`🏖 ${dkLabel(dk)} は休業日です。\n${what}日には設定できません（休業日の設定はPC版で変更できます）。`);
+    return true;
+  };
   const sc=isInsp?'#3730a3':'#0e7490';
   const [form,setForm]=useState(()=>{
     const base={
@@ -682,7 +699,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
               <div>
                 <label style={LBL}>入庫日 <span style={{fontWeight:400,color:'#94a3b8',fontSize:10}}>既定は選択日。事前入庫（前日・前々日など）なら前の日付に変更</span></label>
                 <div style={{display:'flex',gap:8,alignItems:'center'}}>
-                  <input type="date" value={dkToInputDate(form.entryDate||mode.dk)} onChange={e=>setForm(p=>({...p,entryDate:inputDateToDk(e.target.value)||mode.dk}))}
+                  <input type="date" value={dkToInputDate(form.entryDate||mode.dk)} onChange={e=>{const v=inputDateToDk(e.target.value)||mode.dk;if(rejectIfClosed(v,'入庫'))return;setForm(p=>({...p,entryDate:v}));}}
                     style={{...INP,flex:1,...(isPre?{border:'2px solid #9a3412',background:'#fff7ed',color:'#9a3412',fontWeight:800}:{})}}/>
                   {isPre&&<button onClick={()=>setForm(p=>({...p,entryDate:mode.dk}))} style={{padding:'0 14px',background:'#f1f5f9',border:'none',borderRadius:10,fontWeight:800,color:'#64748b',fontSize:13}}>当日に戻す</button>}
                 </div>
@@ -723,7 +740,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
             <label style={LBL}>納車日 <span style={{fontWeight:400,color:'#94a3b8',fontSize:10}}>任意。既定は選択日。翌日以降なら日付を変更</span></label>
             {!form.deliveryDate?(
               // 未設定→ボタン。押すと選択日(mode.dk＝車検/予定の日)を既定セット。日付入力もその日を起点に開く。
-              <button onClick={()=>setForm(p=>({...p,deliveryDate:mode.dk,deliveryTime:'未定'}))}
+              <button onClick={()=>{if(rejectIfClosed(mode.dk,'納車'))return;setForm(p=>({...p,deliveryDate:mode.dk,deliveryTime:'未定'}));}}
                 style={{width:'100%',padding:'11px 12px',borderRadius:10,border:'2px dashed #6ee7b7',background:'#f0fdf9',color:'#047857',fontWeight:800,fontSize:13}}>
                 ＋ 納車日を設定する（選択日から）
               </button>
@@ -731,7 +748,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
               <React.Fragment>
                 <div style={{display:'flex',gap:8,alignItems:'center'}}>
                   <input type="date" value={dkToInputDate(form.deliveryDate)}
-                    onChange={e=>{const v=inputDateToDk(e.target.value);setForm(p=>({...p,deliveryDate:v||mode.dk,deliveryTime:p.deliveryTime||'未定'}));}}
+                    onChange={e=>{const v=inputDateToDk(e.target.value)||mode.dk;if(rejectIfClosed(v,'納車'))return;setForm(p=>({...p,deliveryDate:v,deliveryTime:p.deliveryTime||'未定'}));}}
                     style={{...INP,flex:1,border:'2px solid #047857',background:'#ecfdf5',color:'#047857',fontWeight:800}}/>
                   <button onClick={()=>setForm(p=>({...p,deliveryDate:'',deliveryTime:''}))} style={{padding:'0 14px',background:'#f1f5f9',border:'none',borderRadius:10,fontWeight:800,color:'#64748b',fontSize:16}}>✕</button>
                 </div>
@@ -826,6 +843,18 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
   const myLoanerRes=vsId==='honten'?loanerResH:loanerResS;
   const myCars=vsId==='honten'?loanerCarsH:loanerCarsS;
   const newInspIdx=(()=>{let i=0;while(i<allRows.length&&allRows[i]&&allRows[i].name)i++;return i;})();
+  // 休業日は新規予約を追加できない（PC版handleOpenModalと同じ: 既存予約の編集は休業日でも開ける）
+  const isHoliday=calIsClosed(new Date(y,m,d),closedDays||[],closedDates||[],overrideOpen||[]);
+  const blockNew=()=>alert(`🏖 ${m+1}月${d}日は休業日です。\nこの日には新規の予約を追加できません（休業日の設定はPC版で変更できます）。`);
+  const restr=(schedRestrictions||{})[dk];
+  const toMinR=t=>{const[hh,mm]=String(t).split(':').map(Number);return hh*60+mm;};
+  const isSlotRestricted=slot=>{
+    try{
+      if(!restr||!restr.startTime||!restr.endTime||isSpecialSlot(slot))return false;
+      const s=toMinR(slot);
+      return s>=toMinR(restr.startTime)&&s<toMinR(restr.endTime);
+    }catch(e){return false;}
+  };
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style={{flexShrink:0,background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #1d4ed8',padding:'10px 14px'}}
@@ -848,9 +877,18 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
         {!isToday_&&<button onClick={()=>setDs({y:today.getFullYear(),m:today.getMonth(),d:today.getDate()})} style={{width:'100%',marginTop:6,padding:'5px 0',background:'#f8fafc',border:'1px solid #e2e8f0',borderRadius:8,fontSize:11,color:'#64748b',fontWeight:600}}>今日に戻る</button>}
       </div>
       <div style={{flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
+        {isHoliday&&(
+          <div style={{margin:'10px 12px 0',display:'flex',alignItems:'center',gap:8,padding:'9px 11px',background:'#f1f5f9',border:'2px solid #cbd5e1',borderRadius:10}}>
+            <span style={{fontSize:16}}>🏖</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:900,fontSize:12,color:'#475569'}}>休業日（{vsId==='honten'?'本店':'三田店'}）</div>
+              <div style={{fontSize:10,color:'#64748b',marginTop:1}}>新規の車検・整備予約、この日への入庫・納車は登録できません</div>
+            </div>
+          </div>
+        )}
         {/* 同時刻入庫×スタッフ対応人数アラート（PC版と同じ集計: 9:00枠・9:30枠、フロント対応可の出勤者が分母） */}
         {(()=>{
-          const storeHoliday=calIsClosed(new Date(y,m,d),closedDays||[],closedDates||[],overrideOpen||[],vsId);
+          const storeHoliday=calIsClosed(new Date(y,m,d),closedDays||[],closedDates||[],overrideOpen||[]);
           if(storeHoliday)return null;
           const offs=(dayOffData||{})[dk]||[];
           const working=(staffList||[]).filter(s=>s&&s.name&&!offs.includes(s.name));
@@ -894,8 +932,8 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
           <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
             <span style={{fontWeight:900,fontSize:13,color:'#3730a3'}}>🚗 車検</span>
             <span style={{background:'#e0e7ff',color:'#3730a3',borderRadius:10,padding:'1px 8px',fontSize:11,fontWeight:700}}>{own.filter(({r})=>!r.pendingApproval).length}台</span>
-            <button onClick={()=>onOpenEdit({type:'insp',dk,idx:newInspIdx,isNew:true})}
-              style={{marginLeft:'auto',padding:'5px 12px',borderRadius:8,border:'none',background:'#3730a3',color:'white',fontSize:11,fontWeight:800}}>＋ 追加</button>
+            <button onClick={()=>isHoliday?blockNew():onOpenEdit({type:'insp',dk,idx:newInspIdx,isNew:true})}
+              style={{marginLeft:'auto',padding:'5px 12px',borderRadius:8,border:'none',background:isHoliday?'#cbd5e1':'#3730a3',color:'white',fontSize:11,fontWeight:800}}>{isHoliday?'休業日':'＋ 追加'}</button>
           </div>
           {sorted.length===0?<div style={{background:'white',borderRadius:12,padding:14,textAlign:'center',color:'#94a3b8',fontSize:12,border:'1px solid #f1f5f9'}}>予約なし</div>:
             sorted.map(({r,idx},i)=>{
@@ -1015,8 +1053,9 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
               const dks=subKeys.filter(k=>{const r=day[k];return r&&r.name;});
               const isEmpty=dks.length===0;
               const spc=isSpecialSlot(slot);
+              const restricted=isSlotRestricted(slot); // 入庫制限の時間帯（PC版と同じく整備予約のみ制限）
               return(
-                <div key={slot} style={{display:'flex',borderBottom:'1px solid #f0fdfa',background:isEmpty?(spc?'#fdfaff':'white'):(spc?'#f5f0ff':'#f0fdfa')}}>
+                <div key={slot} style={{display:'flex',borderBottom:'1px solid #f0fdfa',background:restricted?'#fee2e2':isEmpty?(spc?'#fdfaff':'white'):(spc?'#f5f0ff':'#f0fdfa')}}>
                   <div style={{width:44,flexShrink:0,padding:'8px 4px',fontSize:11,fontWeight:700,color:spc?(isEmpty?'#c4b5fd':'#9333ea'):(isEmpty?'#cbd5e1':'#0e7490'),textAlign:'center',borderRight:`2px solid ${spc?(isEmpty?'#f3e8ff':'#d8b4fe'):(isEmpty?'#f0f9ff':'#99f6e4')}`}}>{slot}</div>
                   <div style={{flex:1,padding:'5px 9px'}}>
                     {dks.map((key,ki)=>{
@@ -1036,11 +1075,12 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
                       );
                     })}
                     <div onClick={()=>{
+                        if(isHoliday){blockNew();return;}
                         const free=subKeys.find(k=>!day[k]||!day[k].name)||makeSlotKey(slot,subKeys.length);
                         onOpenEdit({type:'sched',dk,slot:free,isNew:true});
                       }}
-                      style={{color:isEmpty?'#cbd5e1':'#67e8f9',fontSize:11,cursor:'pointer',padding:'2px 0'}}>
-                      {isEmpty?'＋ タップで追加':'＋ 同時刻に追加'}
+                      style={{color:restricted?'#dc2626':isHoliday?'#cbd5e1':isEmpty?'#cbd5e1':'#67e8f9',fontSize:11,cursor:'pointer',padding:'2px 0',fontWeight:restricted?700:400}}>
+                      {isHoliday?'休業日（追加不可）':restricted?`🚫 入庫制限 ${restr.startTime}〜${restr.endTime}（制限解除の作業のみ）`:isEmpty?'＋ タップで追加':'＋ 同時刻に追加'}
                     </div>
                   </div>
                 </div>
@@ -1265,7 +1305,8 @@ const App=()=>{
   const [loanerResS,setLoanerResS]=useState({});
   const [closedDaysH,setClosedDaysH]=useState([]);
   const [closedDaysS,setClosedDaysS]=useState([3]);
-  const [closedDates,setClosedDates]=useState([]);
+  const [closedDatesH,setClosedDatesH]=useState([]);
+  const [closedDatesS,setClosedDatesS]=useState([]); // 個別休業日は店舗別（PC版と同じくcdate-honten/cdate-sanda）
   const [overrideOpen,setOverrideOpen]=useState([]);
   const [loanerCarsH,setLoanerCarsH]=useState(LOANERS_H);
   const [loanerCarsS,setLoanerCarsS]=useState(LOANERS_S);
@@ -1312,6 +1353,8 @@ const App=()=>{
   };
   const vsId=user?.store||'honten';
   const cDays=vsId==='honten'?closedDaysH:closedDaysS;
+  const cDates=vsId==='honten'?closedDatesH:closedDatesS;
+  const isClosedDk=useCallback(dk=>dkIsClosed(dk,cDays,cDates,overrideOpen),[cDays,cDates,overrideOpen]);
   const fetchAll=useCallback(async(force)=>{
     if(!force&&writeGuardRef.current>0)return; // 保存直後の古いスナップショットで上書きしない
     if(fetchBusyRef.current)return;
@@ -1322,7 +1365,7 @@ const App=()=>{
         storKey('memo','honten'),storKey('memo','sanda'),
         storKey('lres','honten'),storKey('lres','sanda'),
         storKey('cdow','honten'),storKey('cdow-v2','sanda'),
-        storKey('cdate','honten'),storKey('overrideOpen','honten'),
+        storKey('cdate','honten'),storKey('cdate','sanda'),STOR+'override-open',
         STOR+'rentalcars',STOR+'rres',
         storKey('cars','honten'),storKey('cars','sanda'),
         STOR+'inspLimits','schedRestrictions',
@@ -1331,7 +1374,7 @@ const App=()=>{
       // まとめ読み1リクエスト（GAS未対応の間は従来の並列GETへ自動フォールバック）
       let vals=await sGetMany(KEYS);
       if(!vals)vals=await Promise.all(KEYS.map(k=>sGet(k)));
-      const [insp,sh,ss,mh,ms,lh,ls,cdh,cds,cdate,ov,rcars,rres,carsH,carsS,limits,restr,doH,doS,stH,stS]=vals;
+      const [insp,sh,ss,mh,ms,lh,ls,cdh,cds,cdateH,cdateS,ov,rcars,rres,carsH,carsS,limits,restr,doH,doS,stH,stS]=vals;
       if(writeGuardRef.current>0&&!force){setLoading(false);return;} // 取得中に保存が始まった場合も反映しない
       if(isPlainObj(insp))setInspData(applyOverlays(STOR+'insp',insp));
       if(isPlainObj(sh))setSchedDataH(applyOverlays(storKey('sched','honten'),sh));
@@ -1342,7 +1385,8 @@ const App=()=>{
       if(isPlainObj(ls))setLoanerResS(applyOverlays(storKey('lres','sanda'),ls));
       if(Array.isArray(cdh))setClosedDaysH(cdh);
       if(Array.isArray(cds))setClosedDaysS(cds);
-      if(Array.isArray(cdate))setClosedDates(cdate);
+      if(Array.isArray(cdateH))setClosedDatesH(cdateH);
+      if(Array.isArray(cdateS))setClosedDatesS(cdateS);
       if(Array.isArray(ov))setOverrideOpen(ov);
       if(Array.isArray(rcars)&&rcars.length>0)setRentalCars(rcars);
       if(isPlainObj(rres))setRentalResData(applyOverlays(STOR+'rres',rres));
@@ -1654,6 +1698,10 @@ const App=()=>{
   const handleSave=useCallback((form,loanerAction)=>{
     const req=editMode;
     if(!req)return;
+    // 休業日チェック（受付前に弾く）。新規予約は休業日に作れず、入庫日・納車日にも休業日は指定できない。
+    if(req.isNew&&isClosedDk(req.dk))throw new Error(`🏖 ${dkLabel(req.dk)} は休業日です。新規予約は追加できません`);
+    if(form.entryDate&&isClosedDk(form.entryDate))throw new Error(`🏖 入庫日 ${dkLabel(form.entryDate)} は休業日です。別の日を選んでください`);
+    if(form.deliveryDate&&isClosedDk(form.deliveryDate))throw new Error(`🏖 納車日 ${dkLabel(form.deliveryDate)} は休業日です。別の日を選んでください`);
     // 入庫制限チェック（PC版handleSaveModalと同じルール。受付前に弾いてモーダル内に表示する）
     if(req.type!=='insp'){
       const restriction=schedRestrictions[req.dk];
@@ -1742,7 +1790,7 @@ const App=()=>{
         releaseLockHandle(lockHandle);
       }
     })();
-  },[editMode,user,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,loanerCarsS,inspLimits,schedRestrictions]);
+  },[editMode,user,vsId,inspData,schedDataH,schedDataS,loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,loanerCarsS,inspLimits,schedRestrictions,isClosedDk]);
 
   // 削除の本体（読み返し検証つき）。バックグラウンドで実行される
   const deleteCore=async(req)=>{
@@ -1911,8 +1959,8 @@ const App=()=>{
           schedRestrictions={schedRestrictions}
           staffList={((vsId==='honten'?staffH:staffS).length>0?(vsId==='honten'?staffH:staffS):DEFAULT_STAFF.filter(s=>s.store===vsId)).filter(s=>s.badge!=='president'&&s.myNumber!==0)}
           dayOffData={vsId==='honten'?dayOffH:dayOffS}
-          closedDays={cDays} closedDates={closedDates} overrideOpen={overrideOpen}/>}
-        {tab==='cal'&&<CalendarView inspData={inspData} closedDays={cDays} closedDates={closedDates} overrideOpen={overrideOpen} vsId={vsId}
+          closedDays={cDays} closedDates={cDates} overrideOpen={overrideOpen}/>}
+        {tab==='cal'&&<CalendarView inspData={inspData} closedDays={cDays} closedDates={cDates} overrideOpen={overrideOpen} vsId={vsId}
           onSelectDate={(dk,y,m,d)=>setDayDetail({dk,y,m,d})}/>}
         {tab==='loaner'&&<LoanerView loanerResH={loanerResH} loanerResS={loanerResS} rentalResData={rentalResData} rentalCars={rentalCars}
           loanerCarsH={loanerCarsH} loanerCarsS={loanerCarsS} vsId={vsId}/>}
@@ -1931,6 +1979,7 @@ const App=()=>{
         loanerRes={vsId==='honten'?loanerResH:loanerResS}
         rentalRes={rentalResData}
         lockedBy={editMode.lockedBy}
+        isClosedDk={isClosedDk}
         onSave={handleSave}
         onDelete={editMode.isNew?null:handleDelete}
         onClose={closeEdit}/>}
