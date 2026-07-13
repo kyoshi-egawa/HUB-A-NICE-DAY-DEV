@@ -85,25 +85,33 @@ const STOR='hub-v8-dev-';
 // index側の全画面オーバーレイ（iframe）内で開かれているか。埋め込み時は
 // 「スケジュールに戻る」がページ遷移ではなく親へのpostMessage（オーバーレイ閉鎖）になる。
 const IS_EMBED=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
-const APP_VERSION='1.38'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
+const APP_VERSION='1.48'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
 const CHUNK_SIZE=100;
 // ファイル名をGASキーに使える形に変換
 const safeName=n=>n.replace(/[^a-zA-Z0-9　-鿿゠-ヿ぀-ゟ]/g,'_').slice(0,30);
-// ファイルをチャンクに分割してGASに保存
+// ファイルをチャンクに分割してGASに保存。
+// ★prevCustomers（保存前のサーバー値）を渡すと、中身が変わったチャンクだけ書く。
+//   1行の予約で3チャンク（各40KB弱＝GASのDrive書き込み）を毎回書き直しており、GASのロック
+//   （全書き込み共通・25秒）を長時間占有して他の保存をlock_timeoutで無言failさせていた。
 let __saveCount=0;
-const saveFileChunked=async(file)=>{
+const splitChunks=custs=>{const cs=[];for(let i=0;i<custs.length;i+=CHUNK_SIZE)cs.push(custs.slice(i,i+CHUNK_SIZE));return cs;};
+const saveFileChunked=async(file,prevCustomers)=>{
   __saveCount++;
   try{
   const name=safeName(file.name);
-  const chunks=[];
-  for(let i=0;i<file.customers.length;i+=CHUNK_SIZE)
-    chunks.push(file.customers.slice(i,i+CHUNK_SIZE));
+  const chunks=splitChunks(file.customers);
+  const prev=Array.isArray(prevCustomers)?splitChunks(prevCustomers):null;
   const idx={name:file.name,total:file.customers.length,chunks:chunks.length};
-  await Promise.all([
-    sSet(STOR+'cf-'+name+'-index',idx),
-    ...chunks.map((c,i)=>sSet(STOR+'cf-'+name+'-chunk-'+i,c))
-  ]);
+  const jobs=[];
+  // インデックスは件数かチャンク数が変わった時だけ書く
+  if(!prev||prev.length!==chunks.length||prevCustomers.length!==file.customers.length)
+    jobs.push(sSet(STOR+'cf-'+name+'-index',idx));
+  chunks.forEach((c,i)=>{
+    const same=prev&&prev[i]&&JSON.stringify(prev[i])===JSON.stringify(c);
+    if(!same)jobs.push(sSet(STOR+'cf-'+name+'-chunk-'+i,c));
+  });
+  await Promise.all(jobs);
   }finally{
     setTimeout(()=>{__saveCount=Math.max(0,__saveCount-1);},70000);
   }
@@ -129,6 +137,40 @@ const deleteFileFromCache=(file)=>{
   try{localStorage.removeItem(STOR+'cf-'+sn);}catch(e){}
 };
 const RES_COLORS=['#3b82f6','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316','#e11d48','#14b8a6','#a855f7'];
+
+// ── 予約1件を insp（サーバー最新値）に適用する純関数 ──
+// ★必ず「サーバーから読んだ最新値」を base に渡すこと。以前は保存開始時に一度読んだ値を
+//   使い回して全文を書き戻していたため、その間に他PCが入れた予約を巻き添えで消していた。
+const applyBookingToInsp=(base,{customer,dkFormatted,row,inspLimits})=>{
+  const data=(base&&typeof base==='object'&&!Array.isArray(base))?{...base}:{};
+  const recalc=new Set();
+  let oldRow=null,oldDk=null;
+  for(const d of Object.keys(data)){
+    if(!Array.isArray(data[d]))continue;
+    const before=data[d].length;
+    const hit=data[d].find(r=>r&&r.custId===customer.custId&&r.bookingStatus!=='cancelled');
+    if(hit){oldRow=hit;oldDk=d;}
+    data[d]=data[d].filter(r=>r&&r.custId!==customer.custId); // 入庫日変更に対応（旧行を除去）
+    if(data[d].length!==before)recalc.add(d);
+  }
+  const sameDay=!!(oldRow&&oldDk===dkFormatted);
+  // 同じ日への再保存は予約順(seq)と手動承認(approved)を引き継ぐ。日付変更は移動先の最後尾＝新seq
+  const newRow={...row,
+    seq:(sameDay&&oldRow.seq!=null)?oldRow.seq:(row.seq||Date.now()),
+    ...(sameDay&&oldRow.approved?{approved:true}:{})};
+  if(!Array.isArray(data[dkFormatted]))data[dkFormatted]=[];
+  data[dkFormatted]=[...data[dkFormatted],newRow];
+  const idx=data[dkFormatted].length-1;
+  const bKey=`insp-${dkFormatted}-${idx}`;
+  data[dkFormatted][idx]={...newRow,bookingKey:bKey};
+  const lim=(inspLimits&&inspLimits[dkFormatted])??6;
+  data[dkFormatted]=recomputeInspApproval(data[dkFormatted],lim);
+  data[dkFormatted]=applyMahPendingRule(data[dkFormatted],idx);
+  recalc.delete(dkFormatted);
+  recalc.forEach(d=>{data[d]=recomputeInspApproval(data[d],(inspLimits&&inspLimits[d])??6);});
+  return {data,idx,bKey};
+};
+const inspHasCust=(insp,dk,custId,name)=>((insp&&insp[dk])||[]).some(r=>r&&r.bookingStatus!=='cancelled'&&(custId?r.custId===custId:r.name===name));
 
 // ── 予約順(seq)ベースの承認状態 再計算（index_dev.htmlのBLOCK-Cと同一の純関数。変更時は両方同時に）──
 // 各insp行の seq（予約順）で昇順に並べ、先着 limit 台=確定 / 超過分=承認待ち(pendingApproval=true)。
@@ -242,6 +284,36 @@ const sSet=async(k,v,retries=3)=>{
     }catch{if(i<retries-1)await new Promise(r=>setTimeout(r,1500*(i+1)));}
   }
 };
+// ★sSetはno-cors。GASが 'error: lock_timeout' を返しても成功として返るため、書けたことにならない。
+//   重要なキーは必ずこれで書く: 書く→読み返す→期待どおりでなければサーバー最新値から作り直して再送。
+//   mutate(server最新値)→保存する値 を返す関数。check(読み返した値)→true で成功。
+const writeVerified=async(key,mutate,check,tries=3)=>{
+  for(let i=0;i<tries;i++){
+    let base=null;
+    try{base=await sGet(key);}catch(e){}
+    let val;
+    try{val=mutate(base);}catch(e){return false;}
+    if(val===undefined)return true; // 変更不要
+    await sSet(key,val);
+    await new Promise(r=>setTimeout(r,1500+1500*i));
+    try{
+      const back=await sGet(key);
+      if(check(back))return true;
+    }catch(e){}
+    console.warn('[WRITE] 未反映→再送',key,'attempt',i+1);
+  }
+  console.error('[WRITE] GASに反映できませんでした:',key);
+  return false;
+};
+
+// ── 予約の意図ログ（未反映の予約を絶対に見失わないための控え）──
+// 保存を始める前に localStorage へ書き、insp への反映が確認できたら消す。残っていれば
+// 「未反映の予約」として起動時に検出し、バナーから再送できる（＝端末が落ちても消えない）。
+const PEND_KEY=STOR+'list-pending';
+const pendLoad=()=>{try{const v=JSON.parse(localStorage.getItem(PEND_KEY)||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}};
+const pendSave=list=>{try{localStorage.setItem(PEND_KEY,JSON.stringify(list.slice(-30)));}catch(e){}};
+const pendAdd=p=>{const l=pendLoad();l.push(p);pendSave(l);};
+const pendDrop=pid=>pendSave(pendLoad().filter(p=>p.pid!==pid));
 
 // ═══════════════════════════════════════════
 // ユーティリティ
@@ -1261,6 +1333,8 @@ const App=()=>{
   const [inspData,setInspData]=useState({});
   const inspWriteRef=useRef(0); // 最後にローカル書き込みした時刻
   const [syncToast,setSyncToast]=useState(null); // スケジュール反映状況トースト {status,name,retry}
+  const [pendings,setPendings]=useState([]);     // 未反映の予約（localStorageの控え。起動時にサーバーと突き合わせて残ったもの）
+  const [resending,setResending]=useState('');   // 再送中のpid
   const [pendingSync,setPendingSync]=useState({}); // スケジュール側からの変更が反映待ちの顧客 {custId|name__no:{name,entryDate,ts}}
   const [syncFlash,setSyncFlash]=useState(null);   // スケジュール変更の反映完了フラッシュ {items:[{name,entryDate}],ts}
   const [recentApplied,setRecentApplied]=useState({}); // 反映直後の行ハイライト {custId|name__no:ts}
@@ -1723,8 +1797,13 @@ const App=()=>{
   const handleBookingSave=useCallback(async(form,customer)=>{
     const{entryDate,store,bookingTime,course,tokuten,staff,note,isTemp,selCarId,selDays}=form;
     const status=isTemp?'temp':'confirm';
+    // 予約1件の保存（insp／顧客ファイル）を1つのIDで追跡し、両方の反映が確認できるまで
+    // localStorageの控え（pending）を消さない。消えていなければ起動時に「未反映の予約」として拾える。
+    const pid=`${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    const _done={insp:!(entryDate&&!isTemp),file:false};
+    const _maybeDrop=()=>{if(_done.insp&&_done.file)pendDrop(pid);};
     // ★本予約確定の瞬間に楽観的に「反映しました」を即表示（書込往復もバックグラウンド処理も待たない）。
-    //   後段の saveInspWithStatus が裏でGAS反映を検証し、万一未反映なら同じ name を「エラー」に訂正する。
+    //   後段の writeVerified が裏でGAS反映を検証し、万一未反映なら「エラー」に訂正する。
     if(entryDate&&!isTemp){
       setSyncToast({status:'done',name:customer.name});
       setTimeout(()=>setSyncToast(s=>(s&&s.status==='done'&&s.name===customer.name)?null:s),4000);
@@ -1773,37 +1852,8 @@ const App=()=>{
         const parts=dk.split('-');
         const dkFormatted=parts.length===3?`${parts[0]}-${parseInt(parts[1])}-${parseInt(parts[2])}`:dk;
 
-        // GASから最新のinspDataを取得してから予約を追加（上書き防止）
-        let newInspData;
-        try{
-          const latestInsp=await sGet(STOR+'insp');
-          newInspData=latestInsp&&typeof latestInsp==='object'?{...latestInsp}:{...inspData};
-        }catch(e){
-          newInspData={...inspData};
-        }
-        // 取得したデータでstateも更新
-        setInspData(newInspData);
-        // 既存の同一custIdを削除（入庫日変更対応）。行が減った日は後で承認を再計算する
-        //（移動元の日に承認待ちが居れば自動で繰り上がる）。元の行のseq/approvedは控えておく
-        const _recalcDays=new Set();
-        let _oldRow=null,_oldDk=null;
-        for(const d of Object.keys(newInspData)){
-          if(Array.isArray(newInspData[d])){
-            const _before=newInspData[d].length;
-            const _hit=newInspData[d].find(r=>r&&r.custId===customer.custId&&r.bookingStatus!=='cancelled');
-            if(_hit){_oldRow=_hit;_oldDk=d;}
-            newInspData[d]=newInspData[d].filter(r=>r&&r.custId!==customer.custId);
-            if(newInspData[d].length!==_before)_recalcDays.add(d);
-          }
-        }
-        const lim=(inspLimits&&inspLimits[dkFormatted])??6;
         const courseNum=Number(course)||0;
-        // 同じ日への再保存（編集）は予約順(seq)と手動承認(approved)を引き継ぐ。
-        // 日付変更は移動先の最後尾扱い＝新しいseq（スケジュール側の日付変更と同じ規則）
-        const _sameDay=!!(_oldRow&&_oldDk===dkFormatted);
-
-        // 新しい予約を追加（承認要否は下のrecomputeInspApprovalが予約順で決める）
-        const newRow={
+        const rowBase={
           name:customer.name,carType:customer.carType,
           course:courseNum,store,staff,tokuten:tokuten||'-',
           note,no:customer.no,
@@ -1811,28 +1861,30 @@ const App=()=>{
           custId:customer.custId,
           bookingTime,
           time:bookingTime||'',  // index.htmlのrow.time表示用
-          seq:(_sameDay&&_oldRow.seq!=null)?_oldRow.seq:Date.now(),
-          ...(_sameDay&&_oldRow.approved?{approved:true}:{}),
         };
-        if(!Array.isArray(newInspData[dkFormatted]))newInspData[dkFormatted]=[];
-        newInspData[dkFormatted]=[...newInspData[dkFormatted],newRow];
-        // bookingKeyを確定してrowにも付与
-        const newIdx=newInspData[dkFormatted].length-1;
-        const bKey=`insp-${dkFormatted}-${newIdx}`;
-        newInspData[dkFormatted][newIdx]={...newRow,bookingKey:bKey};
-        // ★承認の再計算（index_dev.htmlと同一ルール）: 先着lim台=確定・超過=承認待ち・
-        //   レギュラー3台。この日に古い承認待ちフラグが残っていれば繰り上げ解除も行われる
-        newInspData[dkFormatted]=recomputeInspApproval(newInspData[dkFormatted],lim);
-        newInspData[dkFormatted]=applyMahPendingRule(newInspData[dkFormatted],newIdx);
-        // 入庫日変更で行が抜けた移動元の日も再計算（承認待ちの自動繰り上げ）
-        _recalcDays.delete(dkFormatted);
-        _recalcDays.forEach(d=>{newInspData[d]=recomputeInspApproval(newInspData[d],(inspLimits&&inspLimits[d])??6);});
-        setInspData(newInspData);
-        inspWriteRef.current=Date.now(); // 書き込み時刻を記録
-        // ★スケジュール(insp)を最優先で先に・確実に書き込む（顧客ファイル等の多数のチャンク書き込みと
-        //   GASロックを奪い合って失敗するのを防ぐため await で完了を待つ）。反映状況はトーストで可視化。
-        //   verify指定で読み返し検証＋自動リトライ（無音失敗対策）。
-        await saveInspWithStatus(newInspData,customer.name,{dk:dkFormatted,custId:customer.custId,name:customer.name,no:customer.no});
+        // ★保存を始める前に「予約したという事実」を端末に残す（未反映なら起動時に検出して再送できる）
+        pendAdd({pid,ts:Date.now(),custId:customer.custId,name:customer.name,no:customer.no,
+          dk:dkFormatted,row:rowBase,cust:updCustomer,fileName:targetFile?targetFile.name:''});
+
+        // ★スケジュール(insp)を最優先で・確実に書き込む。書くたびにサーバー最新値を読み直して
+        //   適用し直すので、他PCの予約を巻き添えで消さない。読み返して入っていなければ再送。
+        let bKey=`insp-${dkFormatted}-0`;
+        let localInsp=null;
+        const inspOk=await writeVerified(STOR+'insp',
+          base=>{
+            const r=applyBookingToInsp(base,{customer,dkFormatted,row:rowBase,inspLimits});
+            bKey=r.bKey;localInsp=r.data;
+            return r.data;
+          },
+          back=>inspHasCust(back,dkFormatted,customer.custId,customer.name)
+        );
+        if(localInsp){setInspData(localInsp);inspWriteRef.current=Date.now();}
+        _done.insp=inspOk;_maybeDrop();
+        if(!inspOk){
+          setSyncToast({status:'error',name:customer.name});
+          setPendings(pendLoad());
+          alert(`⚠️ ${customer.name} の予約をスケジュールに反映できませんでした（サーバー混雑）。\n画面上部の「未反映の予約」バナーから再送できます。`);
+        }
 
         // 4. custbk（カレンダー6枠）にも保存
         // キー形式: "氏名::2026-3-16"（ゼロなし）
@@ -1856,15 +1908,15 @@ const App=()=>{
           custMonth:null,
           custRowIdx:null,
           dk:dkFormatted,
-          idx:newIdx,
+          idx:Number(String(bKey).split('-').pop())||0,
           savedAt:Date.now(),
         };
-        // 既存custbkにマージして保存（GASから取得してマージ）
-        sGet(STOR+'custbk').then(existing=>{
-          sSet(STOR+'custbk',{...(existing||{}),[bkKey]:custbkEntry});
-        }).catch(()=>{
-          sSet(STOR+'custbk',{[bkKey]:custbkEntry});
-        });
+        // custbkもサーバー最新値にマージして書き、読み返して確認する（従来は投げっぱなしで、
+        // lock_timeout時に無言で消えていた）
+        writeVerified(STOR+'custbk',
+          base=>({...((base&&typeof base==='object')?base:{}),[bkKey]:custbkEntry}),
+          back=>!!(back&&back[bkKey])
+        );
 
         // 3. 代車予約追加（bookingKey付き）
         if(selCarId&&selDays&&selDays.length>0){
@@ -1913,9 +1965,24 @@ const App=()=>{
               merged[k]=days;
             }
             if(!merged[selCarId])merged[selCarId]={};
-            merged[selCarId]={...merged[selCarId],[String(_sD.getDate())]:{...newRes,color:RES_COLORS[_ci]}};
-            sSet(resKey,merged);
+            const _resDay=String(_sD.getDate());
+            merged[selCarId]={...merged[selCarId],[_resDay]:{...newRes,color:RES_COLORS[_ci]}};
             if(carStore==='honten')setLoanerResH(merged);else setLoanerResS(merged);
+            // 代車も読み返し検証つきで書く（無言failで「車検には代車名があるのに代車表に帯が無い」状態を作らない）
+            await writeVerified(resKey,
+              base=>{
+                const b=(base&&typeof base==='object'&&!Array.isArray(base))?JSON.parse(JSON.stringify(base)):{};
+                for(const k of Object.keys(b)){
+                  const days={...(b[k]||{})};
+                  Object.keys(days).forEach(d=>{if(days[d]&&days[d].custId===customer.custId)delete days[d];});
+                  b[k]=days;
+                }
+                if(!b[selCarId])b[selCarId]={};
+                b[selCarId]={...b[selCarId],[_resDay]:{...newRes,color:RES_COLORS[_ci]}};
+                return b;
+              },
+              back=>!!(back&&back[selCarId]&&back[selCarId][_resDay]&&back[selCarId][_resDay].custId===customer.custId)
+            );
           })();
         }
       }
@@ -1933,19 +2000,23 @@ const App=()=>{
             let _merged=_base.map(c=>c.custId===customer.custId?updCustomer:c);
             if(!_merged.some(c=>c.custId===customer.custId))_merged.push(updCustomer);
             const _mf={...changedFile,customers:_merged};
-            await saveFileChunked(_mf);
+            await saveFileChunked(_mf,_base); // 変わったチャンクだけ書く
             try{localStorage.setItem(STOR+'cf-'+safeName(changedFile.name),JSON.stringify(_mf));}catch(e){}
             // 読み返し検証：保存した顧客のstatus/entryDateがGASに入ったか
             await new Promise(r=>setTimeout(r,2000));
             const _check=await loadFileChunked(changedFile.name);
             const _saved=_check&&(_check.customers||[]).find(c=>c.custId===customer.custId);
-            if(_saved&&_saved.status===updCustomer.status&&_saved.entryDate===updCustomer.entryDate)return;
+            if(_saved&&_saved.status===updCustomer.status&&_saved.entryDate===updCustomer.entryDate){
+              _done.file=true;_maybeDrop();
+              return;
+            }
             console.warn('顧客ファイル保存 未反映 retry',_attempt+1,customer.name);
           }catch(e){console.error('顧客ファイル保存エラー:',e);}
         }
-        alert(`⚠️ ${customer.name} のリスト保存がサーバーに反映できませんでした。\n通信状況を確認して、予約をやり直してください。`);
+        setPendings(pendLoad());
+        alert(`⚠️ ${customer.name} のリスト保存がサーバーに反映できませんでした。\n画面上部の「未反映の予約」バナーから再送できます。`);
       })();
-    }
+    }else{ _done.file=true;_maybeDrop(); }
     // 再予約時はcust-updatesの古いキャンセル通知を削除（cancel優先度コリジョン防止）
     sGet(STOR+'cust-updates').then(updates=>{
       if(!Array.isArray(updates)||updates.length===0)return;
@@ -1956,6 +2027,53 @@ const App=()=>{
       if(filtered.length!==updates.length)sSet(STOR+'cust-updates',filtered);
     }).catch(()=>{});
   },[loanerListH,loanerListS,saveInspWithStatus]);
+
+  // ── 未反映の予約（pending）を起動時にサーバーと突き合わせる ──
+  // 「保存できたつもりで消えていた」予約を、端末を閉じても見失わないための最後の砦。
+  // insp に入っていれば控えを消し、入っていなければバナーに出して再送できるようにする。
+  const checkPendings=useCallback(async()=>{
+    const list=pendLoad();
+    if(list.length===0){setPendings([]);return;}
+    let insp={};
+    try{insp=(await sGet(STOR+'insp'))||{};}catch(e){setPendings(list);return;}
+    const left=[];
+    for(const p of list){
+      if(!p.dk||!p.row){pendDrop(p.pid);continue;}          // 仮予約など（insp対象外）は控えを残さない
+      if(inspHasCust(insp,p.dk,p.custId,p.name))pendDrop(p.pid);
+      else left.push(p);
+    }
+    setPendings(left);
+  },[]);
+  useEffect(()=>{const t=setTimeout(checkPendings,4000);return()=>clearTimeout(t);},[checkPendings]);
+
+  // 未反映の予約を再送（スケジュール＋顧客ファイルの両方）
+  const resendPending=useCallback(async(p)=>{
+    setResending(p.pid);
+    try{
+      const ok=await writeVerified(STOR+'insp',
+        base=>applyBookingToInsp(base,{customer:{custId:p.custId,name:p.name},dkFormatted:p.dk,row:p.row,inspLimits}).data,
+        back=>inspHasCust(back,p.dk,p.custId,p.name));
+      if(!ok){alert(`⚠️ ${p.name} の再送もサーバーに届きませんでした。少し待ってからもう一度お試しください。`);return;}
+      // 顧客ファイル側（status/entryDate）も入っていなければ入れ直す
+      if(p.fileName&&p.cust){
+        const f=await loadFileChunked(p.fileName);
+        if(f&&Array.isArray(f.customers)){
+          const cur=f.customers.find(c=>c.custId===p.custId);
+          if(!cur||cur.status!==p.cust.status||cur.entryDate!==p.cust.entryDate){
+            const merged=f.customers.map(c=>c.custId===p.custId?{...c,...p.cust}:c);
+            await saveFileChunked({name:p.fileName,customers:merged},f.customers);
+          }
+        }
+      }
+      pendDrop(p.pid);
+      setInspData(await sGet(STOR+'insp')||{});
+      setSyncToast({status:'done',name:p.name});
+      setTimeout(()=>setSyncToast(s=>(s&&s.name===p.name)?null:s),4000);
+    }finally{
+      setResending('');
+      setPendings(pendLoad());
+    }
+  },[inspLimits]);
 
   const handleSyncCheck=useCallback(async()=>{
     setSyncing(true);
@@ -1968,7 +2086,7 @@ const App=()=>{
       const allFiles=await Promise.all(fileIndex.map(fi=>loadFileChunked(fi.name).catch(()=>null)));
       const allCusts=allFiles.filter(Boolean).flatMap(f=>f.customers||[]);
       const confirmedWithDate=allCusts.filter(c=>c.status==='confirm'&&c.entryDate);
-      const missing=confirmedWithDate.filter(c=>{
+      const notInInsp=c=>{
         const dk=toDk(c.entryDate);
         if(!dk)return false;
         // cancelledを除いた行で照合。custId一致 or 氏名一致（再インポートでcustIdが変わった場合の対策）
@@ -1977,8 +2095,31 @@ const App=()=>{
           (r.custId&&r.custId===c.custId)||
           (r.name&&r.name===c.name)
         );
+      };
+      const missing=confirmedWithDate.filter(notInInsp);
+      // ★顧客ファイルへの保存ごと失敗した予約は、リスト側が'confirm'にならないので上のチェックには
+      //   絶対に引っかからない（阪上さんのケース）。予約時の控え(pending)とカレンダー用のcustbkも
+      //   突き合わせ、スケジュールに無いものを未反映として拾う。
+      const seen=new Set(missing.map(c=>c.custId||c.name));
+      const extra=[];
+      const pushExtra=c=>{const k=c.custId||c.name;if(seen.has(k))return;seen.add(k);extra.push(c);};
+      pendLoad().forEach(p=>{
+        if(!p.dk||!p.row)return;
+        if(inspHasCust(latestInsp,p.dk,p.custId,p.name))return;
+        pushExtra({...(p.cust||{}),custId:p.custId,name:p.name,no:p.no,carType:p.row.carType,
+          course:p.row.course,store:p.row.store,staff:p.row.staff,tokuten:p.row.tokuten,note:p.row.note,
+          bookingTime:p.row.bookingTime,entryDate:p.cust?.entryDate||p.dk,_src:'この端末の予約控え'});
       });
-      setSyncDialog({missing,total:confirmedWithDate.length,latestInsp});
+      let custbk={};
+      try{custbk=(await sGet(STOR+'custbk'))||{};}catch(e){}
+      Object.values(custbk).forEach(e=>{
+        if(!e||e.status!=='confirmed'||!e.dk||!e.formData)return;
+        const f=e.formData;
+        if(inspHasCust(latestInsp,e.dk,f.custId,f.name))return;
+        pushExtra({custId:f.custId,name:f.name,no:f.no,carType:f.carType,course:f.course,store:f.store,
+          staff:f.staff,tokuten:f.tokuten,note:f.note,bookingTime:f.time,entryDate:e.dk,_src:'カレンダー仮登録(custbk)'});
+      });
+      setSyncDialog({missing:[...missing,...extra],total:confirmedWithDate.length+extra.length,latestInsp});
     }catch(e){alert('GASからのデータ取得に失敗しました: '+(e.message||e));}
     finally{setSyncing(false);}
   },[]);
@@ -2328,6 +2469,25 @@ const App=()=>{
           onSave={handleBookingSave}
           onClose={()=>setBookingModal(null)}
         />
+      )}
+
+      {/* ── 未反映の予約バナー（サーバーに届かなかった予約を見失わないための最後の砦） ── */}
+      {pendings.length>0&&(
+        <div style={{position:'fixed',left:16,right:16,top:64,zIndex:99999,padding:'11px 14px',borderRadius:11,
+          background:'#fef2f2',border:'2px solid #fca5a5',color:'#991b1b',boxShadow:'0 8px 24px rgba(0,0,0,.16)'}}>
+          <div style={{fontWeight:900,fontSize:13,marginBottom:6}}>⚠️ スケジュールに反映されていない予約が {pendings.length} 件あります</div>
+          {pendings.map(p=>(
+            <div key={p.pid} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',fontSize:12,fontWeight:700}}>
+              <span style={{flex:1}}>{p.name}（{String(p.dk).split('-').slice(1).join('/')} 入庫予定）</span>
+              <button onClick={()=>resendPending(p)} disabled={resending===p.pid}
+                style={{padding:'5px 12px',background:'#dc2626',color:'white',border:'none',borderRadius:7,fontWeight:800,fontSize:12,cursor:'pointer',opacity:resending===p.pid?0.6:1}}>
+                {resending===p.pid?'再送中…':'スケジュールに再送'}
+              </button>
+              <button onClick={()=>{pendDrop(p.pid);setPendings(pendLoad());}}
+                style={{padding:'5px 8px',background:'transparent',border:'none',color:'#991b1b',fontWeight:800,fontSize:14,cursor:'pointer'}}>✕</button>
+            </div>
+          ))}
+        </div>
       )}
 
       {/* ── スケジュール側からの変更 反映中／完了トースト ── */}
