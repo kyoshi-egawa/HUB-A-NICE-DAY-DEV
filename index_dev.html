@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.53';
+const APP_VERSION = '1.54';
 
 
 
@@ -4443,9 +4443,37 @@ const InspRow=memo(({row,idx,dispNo,dk,onOpenModal,lockInfo,loanerRes,loanerResH
 });
 
 // ============================================
+//  入庫制限の内容ポップアップ（入庫制限バッジのホバー・制限網掛け行のホバーで共通に使う）
+//  ※title属性のツールチップは表示まで約1秒かかるので使わない（即時表示のため自前で描画）
+// ============================================
+const RestrictionTip=({r,style})=>{
+  const ex=Array.isArray(r.exemptWorks)?r.exemptWorks:[];
+  const okWorks=WORKS.filter(w=>ex.includes(w.id));
+  const ngCount=WORKS.length-okWorks.length;
+  return(
+    <div style={{position:'absolute',zIndex:9999,width:250,background:'white',border:'2px solid #ef4444',borderRadius:10,
+      boxShadow:'0 10px 30px rgba(0,0,0,0.22)',padding:'10px 12px',pointerEvents:'none',...style}}>
+      <div style={{fontWeight:800,fontSize:12,color:'#dc2626',marginBottom:7}}>🚫 入庫制限 {r.startTime}〜{r.endTime}</div>
+      <div style={{fontSize:11,fontWeight:800,color:'#047857',marginBottom:5}}>✅ この時間帯に入庫できる作業</div>
+      {okWorks.length===0
+        ?<div style={{fontSize:11,color:'#6b7280'}}>なし（すべて入庫できません）</div>
+        :<ul style={{margin:0,paddingLeft:16,display:'flex',flexDirection:'column',gap:4}}>
+          {okWorks.map(w=>(
+            <li key={w.id} style={{color:'#047857'}}>
+              <span style={{display:'inline-block',padding:'2px 8px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:20,fontSize:10,fontWeight:800,color:'#047857'}}>{w.name}</span>
+            </li>
+          ))}
+        </ul>}
+      <div style={{marginTop:8,fontSize:10,color:'#6b7280'}}>上記以外（{ngCount}件）は入庫制限中です</div>
+    </div>
+  );
+};
+
+// ============================================
 //  SchedRow
 // ============================================
 const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loanerRes,vsId,restriction,setItems})=>{
+  const [showRestrTip,setShowRestrTip]=useState(false);
   const isEmpty=!row.name&&!row.staff&&!row.carType&&!row.work;
   const locked=lockInfo?.lockedBy;
   const isHour=(baseSlot||slot).endsWith(':00');
@@ -4465,15 +4493,6 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
   })();
 
   const contentQItems=setItems||[];
-  // 制限中の行にマウスを乗せた時の説明（入力は従来どおりできる。制限中の作業内容は保存時に止まる）
-  const restrTitle=isRestricted?(()=>{
-    const ex=Array.isArray(restriction.exemptWorks)?restriction.exemptWorks:[];
-    const ok=WORKS.filter(w=>ex.includes(w.id)).map(w=>w.name);
-    const ng=WORKS.filter(w=>!ex.includes(w.id)).map(w=>w.name);
-    return `🚫 入庫制限 ${restriction.startTime}〜${restriction.endTime}\n`
-      +`予約できない作業: ${ng.length?ng.join('・'):'なし'}\n`
-      +`✅ 制限解除（予約できる作業）: ${ok.length?ok.join('・'):'なし'}`;
-  })():undefined;
 
   // 制限時間帯でも「制限解除の作業」の予約が入っている行は、入庫時間の欄だけ制限色を残し、
   // 案件の内容は白背景にして「この予約は入庫できる案件」と一目で分かるようにする
@@ -4484,11 +4503,14 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
 
   return (
     <tr id={isFirstSub?'sched-slot-'+(baseSlot||slot).replace(':',''):undefined}
-      title={restrTitle}
+      onMouseEnter={()=>{if(isRestricted)setShowRestrTip(true);}}
+      onMouseLeave={()=>{if(isRestricted)setShowRestrTip(false);}}
       style={{background:rowBgSched,cursor:locked||otherStore?'not-allowed':'pointer'}}
       onClick={()=>{if(!locked&&!otherStore){const _e=!row.name;onOpenModal('sched',dk,null,slot,_e);}}}>
-      <td style={{...TD,background:isRestricted?'#fee2e2':undefined,fontWeight:isFirstSub&&(isHour||isSpecialSlot(baseSlot))?800:500,color:isFirstSub&&isSpecialSlot(baseSlot)?'#9333ea':(isFirstSub&&isHour?'#0891b2':'#7dd3fc'),whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isSpecialSlot(baseSlot)?11:(isFirstSub&&isHour?13:11),borderLeft:isSub?'3px solid #7dd3fc':''}}>
+      <td style={{...TD,position:'relative',background:isRestricted?'#fee2e2':undefined,fontWeight:isFirstSub&&(isHour||isSpecialSlot(baseSlot))?800:500,color:isFirstSub&&isSpecialSlot(baseSlot)?'#9333ea':(isFirstSub&&isHour?'#0891b2':'#7dd3fc'),whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isSpecialSlot(baseSlot)?11:(isFirstSub&&isHour?13:11),borderLeft:isSub?'3px solid #7dd3fc':''}}>
         {isFirstSub?(isSpecialSlot(baseSlot)?specialSlotLabel(baseSlot):slot):<span style={{fontSize:9,color:'#a5f3fc'}}>↳</span>}
+        {/* 制限網掛けの上にマウスが来たら即座に同じポップアップを出す（title属性は表示が遅いので使わない） */}
+        {isRestricted&&showRestrTip&&<RestrictionTip r={restriction} style={{top:'100%',left:0,marginTop:2}}/>}
       </td>
       <td style={TD}>
         {locked?<div style={{padding:'3px 5px'}}><div style={{fontWeight:600}}>{row.name||'—'}</div><LockBadge lockedBy={lockInfo.lockedBy}/></div>
@@ -9012,36 +9034,16 @@ function AppInner() {
                   <h3 style={SEC_TITLE('#0891b2')}>⏰ タイムスケジュール</h3>
                   {/* 入庫制限の警告アイコン。マウスを乗せると、制限中の作業と制限解除の作業が一覧で出る
                       （入力自体はこれまでどおり可能。保存時に制限解除の作業だけが通る） */}
-                  {schedRestrictions[dk]&&(()=>{
-                    const r=schedRestrictions[dk];
-                    const ex=Array.isArray(r.exemptWorks)?r.exemptWorks:[];
-                    const okWorks=WORKS.filter(w=>ex.includes(w.id));
-                    const ngWorks=WORKS.filter(w=>!ex.includes(w.id));
-                    return <div style={{position:'relative'}}
+                  {schedRestrictions[dk]&&(
+                    <div style={{position:'relative'}}
                       onMouseEnter={()=>setRestrTip(dk)} onMouseLeave={()=>setRestrTip('')}>
                       <div style={{display:'flex',alignItems:'center',gap:4,padding:'3px 8px',background:'#fee2e2',border:'2px solid #ef4444',borderRadius:6,cursor:'help'}}>
                         <span style={{fontSize:16}}>🚫</span>
-                        <span style={{fontWeight:700,color:'#dc2626',fontSize:11}}>入庫制限 {r.startTime}〜{r.endTime}</span>
+                        <span style={{fontWeight:700,color:'#dc2626',fontSize:11}}>入庫制限 {schedRestrictions[dk].startTime}〜{schedRestrictions[dk].endTime}</span>
                       </div>
-                      {restrTip===dk&&(
-                        <div style={{position:'absolute',top:'100%',left:0,marginTop:6,zIndex:9999,width:250,background:'white',
-                          border:'2px solid #ef4444',borderRadius:10,boxShadow:'0 10px 30px rgba(0,0,0,0.22)',padding:'10px 12px'}}>
-                          <div style={{fontWeight:800,fontSize:12,color:'#dc2626',marginBottom:7}}>🚫 入庫制限 {r.startTime}〜{r.endTime}</div>
-                          <div style={{fontSize:11,fontWeight:800,color:'#047857',marginBottom:5}}>✅ この時間帯に入庫できる作業</div>
-                          {okWorks.length===0
-                            ?<div style={{fontSize:11,color:'#6b7280'}}>なし（すべて入庫できません）</div>
-                            :<ul style={{margin:0,paddingLeft:16,display:'flex',flexDirection:'column',gap:4}}>
-                              {okWorks.map(w=>(
-                                <li key={w.id} style={{color:'#047857'}}>
-                                  <span style={{display:'inline-block',padding:'2px 8px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:20,fontSize:10,fontWeight:800,color:'#047857'}}>{w.name}</span>
-                                </li>
-                              ))}
-                            </ul>}
-                          <div style={{marginTop:8,fontSize:10,color:'#6b7280'}}>上記以外（{ngWorks.length}件）は入庫制限中です</div>
-                        </div>
-                      )}
-                    </div>;
-                  })()}
+                      {restrTip===dk&&<RestrictionTip r={schedRestrictions[dk]} style={{top:'100%',left:0,marginTop:6}}/>}
+                    </div>
+                  )}
                   <div style={{marginLeft:'auto',display:'flex',gap:6,alignItems:'center'}}>
                     <button onClick={()=>setSchedCollapsed(p=>!p)}
                       style={{display:'flex',alignItems:'center',gap:3,padding:'4px 10px',background:schedCollapsed?'#eff6ff':'#f0fdf4',border:`2px solid ${schedCollapsed?'#93c5fd':'#86efac'}`,borderRadius:5,cursor:'pointer',fontSize:10,color:schedCollapsed?'#1d4ed8':'#16a34a',fontWeight:700}}>
