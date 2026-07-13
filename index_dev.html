@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.49';
+const APP_VERSION = '1.50';
 
 
 
@@ -7666,8 +7666,12 @@ function AppInner() {
         const newRows=recomputeInspApproval(rows,inspLimits[modalDk]??6);
         return{...prev,[modalDk]:newRows.length>0?newRows:[]};
       });
-      // ★顧客リストのステータスをcancelに連動
-      if(cancelCustId||cancelName){
+      // ★顧客リストのステータスをcancelに連動。
+      //   ただし custId が無い手入力の予約は、同名の予約が他にも残っている場合は通知しない
+      //   （重複入力の片方を消しただけで、リスト発の予約までキャンセル扱いにしてしまうため）。
+      const _dupLeft=!cancelCustId&&cancelName&&Object.keys(inspData).some(d=>
+        (inspData[d]||[]).some((r,i)=>r&&r.name===cancelName&&r.bookingStatus!=='cancelled'&&!(d===modalDk&&i===modalIdx)));
+      if((cancelCustId||cancelName)&&!_dupLeft){
         syncCustStatus(cancelCustId,'cancel',{entryDate:'',linkedInspDate:''},cancelName,cancelNo);
       }
       // ★custbkからも即時削除（画面の見た目を即反映）
@@ -7708,28 +7712,69 @@ function AppInner() {
     if(modalType==='insp'){
       const _drow=(inspData[modalDk]||[])[modalIdx];
       const _vDk=modalDk,_vCust=_drow&&_drow.custId,_vName=_drow&&_drow.name,_vNo=_drow&&_drow.no;
+      const _vSeq=(_drow&&_drow.seq!=null)?_drow.seq:null;
+      // ★同じ日に同名の予約が2件あると（リスト発＋手入力の重複など）、氏名照合では「消したのに
+      //   残っている」と誤判定して警告を出してしまう（2026-07-13の菊池）。custId → seq(行ごとに一意)
+      //   → 氏名 の順で本人を特定し、氏名しか手掛かりが無い時は削除前の同名件数と比べて判定する。
+      const _isTarget=function(r){
+        if(!r||r.bookingStatus==='cancelled')return false;
+        if(_vCust)return r.custId===_vCust;
+        if(_vSeq!=null)return r.seq===_vSeq;
+        return r.name===_vName&&String(r.no||'')===String(_vNo||'');
+      };
+      const _nameOnly=!_vCust&&_vSeq==null;
+      const _vOthers=_nameOnly
+        ?(inspData[_vDk]||[]).filter(function(r,i){return i!==modalIdx&&r&&r.bookingStatus!=='cancelled'&&r.name===_vName&&String(r.no||'')===String(_vNo||'');}).length
+        :0;
       if(_vCust||_vName){
+        // ★検証は長めに（8→20→40→60秒）。GAS混雑時は書き込みがロック待ちで数十秒かかることがあり、
+        //   6+8+8秒しか待たない従来のままだと、実際には消えているのに「反映されていません」と
+        //   誤警告していた（2026-07-13の菊池。サーバー確認では削除は成功していた）。
+        //   再送もローカル全文の再送ではなく、サーバー最新値から対象行だけを消して書く。
+        const _DELAYS=[8000,20000,40000,60000];
         const _delVerify=async(attempt)=>{
           try{
             const remote=await sGet(STOR+'insp');
-            if(!remote||typeof remote!=='object'){if(attempt<2)setTimeout(function(){_delVerify(attempt+1);},8000);return;}
+            if(!remote||typeof remote!=='object'){
+              if(attempt<_DELAYS.length-1)setTimeout(function(){_delVerify(attempt+1);},_DELAYS[attempt+1]);
+              return;
+            }
             const rows=remote[_vDk]||[];
-            const stillThere=rows.some(function(r){return r&&r.bookingStatus!=='cancelled'&&(_vCust?r.custId===_vCust:(r.name===_vName&&String(r.no||'')===String(_vNo||'')));});
-            if(!stillThere)return;
-            if(attempt<2){setInspData(function(prev){return Object.assign({},prev);});setTimeout(function(){_delVerify(attempt+1);},8000);}
-            else{alert('警告: '+_vName+' の削除がサーバーに反映されていません。もう一度開いて削除し直してください。');}
+            const _hits=rows.filter(_isTarget).length;
+            const stillThere=_nameOnly?(_hits>_vOthers):(_hits>0);
+            if(!stillThere)return; // 消えている＝成功（警告は出さない）
+            if(attempt<_DELAYS.length-1){
+              // サーバー最新値から対象行だけを消して再送（他端末の予約を巻き添えにしない）
+              const fixed=Object.assign({},remote);
+              const kept=(fixed[_vDk]||[]).slice();
+              if(_nameOnly){
+                // 同名が複数あり得るので、消すのは1行だけ（元の位置の行、無ければ最初の一致）
+                const j=(kept[modalIdx]&&_isTarget(kept[modalIdx]))?modalIdx:kept.findIndex(_isTarget);
+                if(j>=0)kept[j]=blankInsp();
+              }else{
+                for(let i=0;i<kept.length;i++)if(_isTarget(kept[i]))kept[i]=blankInsp();
+              }
+              while(kept.length>0&&!(kept[kept.length-1]&&kept[kept.length-1].name))kept.pop();
+              fixed[_vDk]=recomputeInspApproval(kept,inspLimits[_vDk]??6);
+              await sSet(STOR+'insp',fixed);
+              setTimeout(function(){_delVerify(attempt+1);},_DELAYS[attempt+1]);
+            }
+            else alert('警告: '+_vName+' の削除がサーバーに反映されていません。もう一度開いて削除し直してください。');
           }catch(e){}
         };
-        setTimeout(function(){_delVerify(0);},6000);
+        setTimeout(function(){_delVerify(0);},_DELAYS[0]);
+        // キャンセル通知の再送確認は custId が分かっている（＝リスト発の予約）時だけ。
+        // 手入力の予約を氏名だけで再送すると、宛先のいない通知がリストのキューに溜まり
+        // 「反映中…」が消えなくなる（2026-07-13の菊池）。
         const _cancelVerify=async(attempt)=>{
           try{
             const q=await sGet(STOR+'cust-updates');
-            const found=Array.isArray(q)&&q.some(function(u){return u&&u.status==='cancel'&&(_vCust?u.custId===_vCust:(u.name===_vName&&String(u.no||'')===String(_vNo||'')));});
+            const found=Array.isArray(q)&&q.some(function(u){return u&&u.status==='cancel'&&u.custId===_vCust;});
             if(found)return;
             if(attempt<2){syncCustStatus(_vCust,'cancel',{entryDate:'',linkedInspDate:''},_vName,_vNo);setTimeout(function(){_cancelVerify(attempt+1);},3000);}
           }catch(e){}
         };
-        setTimeout(function(){_cancelVerify(0);},2500);
+        if(_vCust)setTimeout(function(){_cancelVerify(0);},2500);
       }
     }
 
