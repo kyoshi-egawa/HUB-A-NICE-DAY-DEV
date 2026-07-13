@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.50';
+const MOBILE_VERSION='1.51';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -822,7 +822,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
   );
 };
 
-const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerResH,loanerResS,loanerCarsH,loanerCarsS,vsId,initDate,onOpenEdit,schedRestrictions,staffList,dayOffData,closedDays,closedDates,overrideOpen})=>{
+const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerResH,loanerResS,loanerCarsH,loanerCarsS,vsId,initDate,onOpenEdit,schedRestrictions,staffList,dayOffData,closedDays,closedDates,overrideOpen,inspLimits})=>{
   const today=new Date();
   const [ds,setDs]=useState({y:today.getFullYear(),m:today.getMonth(),d:today.getDate()});
   useEffect(()=>{if(initDate)setDs(initDate);},[initDate]);
@@ -845,6 +845,10 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
   const newInspIdx=(()=>{let i=0;while(i<allRows.length&&allRows[i]&&allRows[i].name)i++;return i;})();
   // 休業日は新規予約を追加できない（PC版handleOpenModalと同じ: 既存予約の編集は休業日でも開ける）
   const isHoliday=calIsClosed(new Date(y,m,d),closedDays||[],closedDates||[],overrideOpen||[]);
+  // 台数制限を掛けた日で上限に達していたら車検の新規入力をブロック（制限なしの日は従来どおり7台目=承認待ち）
+  const dayLimit=(inspLimits||{})[dk];
+  const inspActive=allRows.filter(r=>r&&r.name&&r.bookingStatus!=='cancelled').length;
+  const inspLimitFull=dayLimit!=null&&inspActive>=dayLimit;
   const blockNew=()=>alert(`🏖 ${m+1}月${d}日は休業日です。\nこの日には新規の予約を追加できません（休業日の設定はPC版で変更できます）。`);
   const restr=(schedRestrictions||{})[dk];
   const toMinR=t=>{const[hh,mm]=String(t).split(':').map(Number);return hh*60+mm;};
@@ -929,11 +933,16 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
           );
         })()}
         <div style={{margin:'10px 12px 0'}}>
-          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+          <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6,flexWrap:'wrap'}}>
             <span style={{fontWeight:900,fontSize:13,color:'#3730a3'}}>🚗 車検</span>
             <span style={{background:'#e0e7ff',color:'#3730a3',borderRadius:10,padding:'1px 8px',fontSize:11,fontWeight:700}}>{own.filter(({r})=>!r.pendingApproval).length}台</span>
-            <button onClick={()=>isHoliday?blockNew():onOpenEdit({type:'insp',dk,idx:newInspIdx,isNew:true})}
-              style={{marginLeft:'auto',padding:'5px 12px',borderRadius:8,border:'none',background:isHoliday?'#cbd5e1':'#3730a3',color:'white',fontSize:11,fontWeight:800}}>{isHoliday?'休業日':'＋ 追加'}</button>
+            {dayLimit!=null&&<span style={{background:'#fee2e2',color:'#dc2626',border:'1px solid #fca5a5',borderRadius:10,padding:'1px 8px',fontSize:10,fontWeight:800}}>台数制限 最大{dayLimit}台</span>}
+            <button onClick={()=>{
+                if(isHoliday){blockNew();return;}
+                if(inspLimitFull){alert(`🚫 ${m+1}/${d} は台数制限（最大${dayLimit}台）に達しているため、車検の予約はできません。`);return;}
+                onOpenEdit({type:'insp',dk,idx:newInspIdx,isNew:true});
+              }}
+              style={{marginLeft:'auto',padding:'5px 12px',borderRadius:8,border:'none',background:(isHoliday||inspLimitFull)?'#cbd5e1':'#3730a3',color:'white',fontSize:11,fontWeight:800}}>{isHoliday?'休業日':inspLimitFull?'🚫 予約不可':'＋ 追加'}</button>
           </div>
           {sorted.length===0?<div style={{background:'white',borderRadius:12,padding:14,textAlign:'center',color:'#94a3b8',fontSize:12,border:'1px solid #f1f5f9'}}>予約なし</div>:
             sorted.map(({r,idx},i)=>{
@@ -1700,6 +1709,12 @@ const App=()=>{
     if(!req)return;
     // 休業日チェック（受付前に弾く）。新規予約は休業日に作れず、入庫日・納車日にも休業日は指定できない。
     if(req.isNew&&isClosedDk(req.dk))throw new Error(`🏖 ${dkLabel(req.dk)} は休業日です。新規予約は追加できません`);
+    // 台数制限を掛けた日の上限到達（別端末が先に埋めた場合もここで弾く）
+    if(req.isNew&&req.type==='insp'&&inspLimits[req.dk]!=null){
+      const _lim=inspLimits[req.dk];
+      const _cnt=(inspData[req.dk]||[]).filter(r=>r&&r.name&&r.bookingStatus!=='cancelled').length;
+      if(_cnt>=_lim)throw new Error(`🚫 ${dkLabel(req.dk)} は台数制限（最大${_lim}台）に達しているため、車検の予約はできません`);
+    }
     if(form.entryDate&&isClosedDk(form.entryDate))throw new Error(`🏖 入庫日 ${dkLabel(form.entryDate)} は休業日です。別の日を選んでください`);
     if(form.deliveryDate&&isClosedDk(form.deliveryDate))throw new Error(`🏖 納車日 ${dkLabel(form.deliveryDate)} は休業日です。別の日を選んでください`);
     // 入庫制限チェック（PC版handleSaveModalと同じルール。受付前に弾いてモーダル内に表示する）
@@ -1959,7 +1974,7 @@ const App=()=>{
           schedRestrictions={schedRestrictions}
           staffList={((vsId==='honten'?staffH:staffS).length>0?(vsId==='honten'?staffH:staffS):DEFAULT_STAFF.filter(s=>s.store===vsId)).filter(s=>s.badge!=='president'&&s.myNumber!==0)}
           dayOffData={vsId==='honten'?dayOffH:dayOffS}
-          closedDays={cDays} closedDates={cDates} overrideOpen={overrideOpen}/>}
+          closedDays={cDays} closedDates={cDates} overrideOpen={overrideOpen} inspLimits={inspLimits}/>}
         {tab==='cal'&&<CalendarView inspData={inspData} closedDays={cDays} closedDates={cDates} overrideOpen={overrideOpen} vsId={vsId}
           onSelectDate={(dk,y,m,d)=>setDayDetail({dk,y,m,d})}/>}
         {tab==='loaner'&&<LoanerView loanerResH={loanerResH} loanerResS={loanerResS} rentalResData={rentalResData} rentalCars={rentalCars}

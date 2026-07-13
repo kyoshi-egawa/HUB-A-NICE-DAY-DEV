@@ -85,7 +85,7 @@ const STOR='hub-v8-dev-';
 // index側の全画面オーバーレイ（iframe）内で開かれているか。埋め込み時は
 // 「スケジュールに戻る」がページ遷移ではなく親へのpostMessage（オーバーレイ閉鎖）になる。
 const IS_EMBED=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
-const APP_VERSION='1.50'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
+const APP_VERSION='1.51'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
 const CHUNK_SIZE=100;
 // ファイル名をGASキーに使える形に変換
@@ -843,10 +843,12 @@ function InspCalendarPicker({value,onChange,inspData,closedDays,closedDates,over
             for(let i=0;i<cc[2];i++)slots.push(2);
             for(let i=0;i<cc[3];i++)slots.push(3);
             while(slots.length<6)slots.push(0);
+            // 台数制限を掛けた日で上限に達していたら選べない（制限を掛けていない日は従来どおり）
+            const limitBlocked=!!(inspLimits&&inspLimits[getDk(d)]!=null&&cc.total>=lmt);
             return (
               <div key={di}
-                onClick={()=>{if(!isClosed){onChange(ds);if(onClose)onClose();}}}
-                style={{minHeight:66,padding:'3px 2px',cursor:isClosed?'not-allowed':'pointer',
+                onClick={()=>{if(isClosed)return;if(limitBlocked){alert(`🚫 ${cm+1}/${d} は台数制限（最大${lmt}台）に達しているため、予約できません。`);return;}onChange(ds);if(onClose)onClose();}}
+                style={{minHeight:66,padding:'3px 2px',cursor:(isClosed||limitBlocked)?'not-allowed':'pointer',
                   borderTop:'1px solid #f3f4f6',borderLeft:di>0?'1px solid #f3f4f6':'none',
                   background:bg,outline:isSel?'2px solid #2563eb':isToday?'2px solid #93c5fd':'none',position:'relative'}}>
                 <div style={{textAlign:'center',fontWeight:isToday?900:700,fontSize:11,
@@ -865,6 +867,7 @@ function InspCalendarPicker({value,onChange,inspData,closedDays,closedDates,over
                   </div>
                 )}
                 {isClosed&&<div style={{textAlign:'center',fontSize:9,color:'#9ca3af',marginTop:2}}>休</div>}
+                {!isClosed&&limitBlocked&&<div style={{textAlign:'center',fontSize:8,color:'#dc2626',fontWeight:800,marginTop:1}}>予約不可</div>}
                 {isSel&&<div style={{position:'absolute',top:1,right:1,width:5,height:5,borderRadius:'50%',background:'#2563eb'}}/>}
               </div>
             );
