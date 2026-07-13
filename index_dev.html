@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.52';
+const APP_VERSION = '1.53';
 
 
 
@@ -4475,12 +4475,19 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
       +`✅ 制限解除（予約できる作業）: ${ok.length?ok.join('・'):'なし'}`;
   })():undefined;
 
+  // 制限時間帯でも「制限解除の作業」の予約が入っている行は、入庫時間の欄だけ制限色を残し、
+  // 案件の内容は白背景にして「この予約は入庫できる案件」と一目で分かるようにする
+  const restrExempt=isRestricted&&!!row.name&&Array.isArray(restriction.exemptWorks)&&restriction.exemptWorks.includes(row.work);
+  const rowBgSched=restrExempt?'white'
+    :isRestricted?'#fee2e2'
+    :locked?'#fff7ed':row.store==='sanda'?'#fff0f0':row.store==='honten'?'#eff6ff':isHour?'white':'#f0feff';
+
   return (
     <tr id={isFirstSub?'sched-slot-'+(baseSlot||slot).replace(':',''):undefined}
       title={restrTitle}
-      style={{background:isRestricted?'#fee2e2':locked?'#fff7ed':row.store==='sanda'?'#fff0f0':row.store==='honten'?'#eff6ff':isHour?'white':'#f0feff',cursor:locked||otherStore?'not-allowed':'pointer'}}
+      style={{background:rowBgSched,cursor:locked||otherStore?'not-allowed':'pointer'}}
       onClick={()=>{if(!locked&&!otherStore){const _e=!row.name;onOpenModal('sched',dk,null,slot,_e);}}}>
-      <td style={{...TD,fontWeight:isFirstSub&&(isHour||isSpecialSlot(baseSlot))?800:500,color:isFirstSub&&isSpecialSlot(baseSlot)?'#9333ea':(isFirstSub&&isHour?'#0891b2':'#7dd3fc'),whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isSpecialSlot(baseSlot)?11:(isFirstSub&&isHour?13:11),borderLeft:isSub?'3px solid #7dd3fc':''}}>
+      <td style={{...TD,background:isRestricted?'#fee2e2':undefined,fontWeight:isFirstSub&&(isHour||isSpecialSlot(baseSlot))?800:500,color:isFirstSub&&isSpecialSlot(baseSlot)?'#9333ea':(isFirstSub&&isHour?'#0891b2':'#7dd3fc'),whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isSpecialSlot(baseSlot)?11:(isFirstSub&&isHour?13:11),borderLeft:isSub?'3px solid #7dd3fc':''}}>
         {isFirstSub?(isSpecialSlot(baseSlot)?specialSlotLabel(baseSlot):slot):<span style={{fontSize:9,color:'#a5f3fc'}}>↳</span>}
       </td>
       <td style={TD}>
@@ -9017,22 +9024,20 @@ function AppInner() {
                         <span style={{fontWeight:700,color:'#dc2626',fontSize:11}}>入庫制限 {r.startTime}〜{r.endTime}</span>
                       </div>
                       {restrTip===dk&&(
-                        <div style={{position:'absolute',top:'100%',left:0,marginTop:6,zIndex:9999,width:290,background:'white',
+                        <div style={{position:'absolute',top:'100%',left:0,marginTop:6,zIndex:9999,width:250,background:'white',
                           border:'2px solid #ef4444',borderRadius:10,boxShadow:'0 10px 30px rgba(0,0,0,0.22)',padding:'10px 12px'}}>
-                          <div style={{fontWeight:800,fontSize:12,color:'#dc2626',marginBottom:6}}>🚫 入庫制限 {r.startTime}〜{r.endTime}</div>
-                          <div style={{fontSize:11,fontWeight:800,color:'#b91c1c',marginBottom:3}}>この時間帯に予約できない作業</div>
-                          <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:8}}>
-                            {ngWorks.length===0
-                              ?<span style={{fontSize:11,color:'#6b7280'}}>なし（すべて制限解除）</span>
-                              :ngWorks.map(w=><span key={w.id} style={{padding:'2px 7px',background:'#fee2e2',border:'1px solid #fca5a5',borderRadius:20,fontSize:10,fontWeight:700,color:'#b91c1c'}}>{w.name}</span>)}
-                          </div>
-                          <div style={{fontSize:11,fontWeight:800,color:'#047857',marginBottom:3}}>✅ 制限解除（予約できる作業）</div>
-                          <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
-                            {okWorks.length===0
-                              ?<span style={{fontSize:11,color:'#6b7280'}}>なし</span>
-                              :okWorks.map(w=><span key={w.id} style={{padding:'2px 7px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:20,fontSize:10,fontWeight:700,color:'#047857'}}>{w.name}</span>)}
-                          </div>
-                          <div style={{marginTop:7,fontSize:10,color:'#6b7280'}}>※入力はできます。制限中の作業内容では保存時に止まります</div>
+                          <div style={{fontWeight:800,fontSize:12,color:'#dc2626',marginBottom:7}}>🚫 入庫制限 {r.startTime}〜{r.endTime}</div>
+                          <div style={{fontSize:11,fontWeight:800,color:'#047857',marginBottom:5}}>✅ この時間帯に入庫できる作業</div>
+                          {okWorks.length===0
+                            ?<div style={{fontSize:11,color:'#6b7280'}}>なし（すべて入庫できません）</div>
+                            :<ul style={{margin:0,paddingLeft:16,display:'flex',flexDirection:'column',gap:4}}>
+                              {okWorks.map(w=>(
+                                <li key={w.id} style={{color:'#047857'}}>
+                                  <span style={{display:'inline-block',padding:'2px 8px',background:'#ecfdf5',border:'1px solid #6ee7b7',borderRadius:20,fontSize:10,fontWeight:800,color:'#047857'}}>{w.name}</span>
+                                </li>
+                              ))}
+                            </ul>}
+                          <div style={{marginTop:8,fontSize:10,color:'#6b7280'}}>上記以外（{ngWorks.length}件）は入庫制限中です</div>
                         </div>
                       )}
                     </div>;
