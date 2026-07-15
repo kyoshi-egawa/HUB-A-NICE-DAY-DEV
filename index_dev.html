@@ -8362,9 +8362,11 @@ function AppInner() {
                   <Search size={12}/> 空き枠検索
                 </button>
                 <a href="./customers.html" onClick={e=>{
-                  // 全画面中はページ遷移せずオーバーレイ表示（遷移すると全画面が解除されるため）
-                  if(document.fullscreenElement||document.webkitFullscreenElement){e.preventDefault();setCustOverlay(true);return;}
-                  try{sessionStorage.setItem(STOR+'fs-restore','0');}catch(e2){}
+                  // 顧客リストは常にページ内オーバーレイで開く（遷移しないので全画面が保たれる）。
+                  // 埋め込み内の「全画面」ボタンで親を全画面化でき、閉じても全画面のまま。
+                  // Ctrl/⌘/中クリックの新規タブ起動は従来どおり許可。
+                  if(e.metaKey||e.ctrlKey||e.button===1)return;
+                  e.preventDefault();setCustOverlay(true);
                 }} style={{display:'flex',alignItems:'center',gap:4,padding:'6px 14px',borderRadius:7,fontWeight:700,fontSize:12,border:'2px solid #16a34a',background:'#dcfce7',color:'#15803d',textDecoration:'none',cursor:'pointer'}}>
                   👥 顧客リスト
                 </a>
@@ -9361,7 +9363,7 @@ function AppInner() {
       {/* -- 顧客リスト（全画面時のオーバーレイ表示。閉じるのはiframe内の「スケジュールに戻る」→postMessage） -- */}
       {custOverlay&&(
         <div style={{position:'fixed',inset:0,zIndex:100000,background:'white'}}>
-          <iframe src="./customers.html" title="顧客リスト" style={{width:'100%',height:'100%',border:'none',display:'block'}}/>
+          <iframe src="./customers.html" title="顧客リスト" allow="fullscreen" allowFullScreen style={{width:'100%',height:'100%',border:'none',display:'block'}}/>
         </div>
       )}
 
