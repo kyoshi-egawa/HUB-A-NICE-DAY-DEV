@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.59';
+const APP_VERSION = '1.60';
 
 
 
@@ -4584,7 +4584,7 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
       onMouseLeave={()=>{if(isRestricted)setShowRestrTip(false);}}
       style={{background:rowBgSched,cursor:locked||otherStore?'not-allowed':'pointer'}}
       onClick={()=>{if(!locked&&!otherStore){const _e=!row.name;onOpenModal('sched',dk,null,slot,_e);}}}>
-      <td style={{...TD,position:'relative',background:isRestricted?'#fee2e2':undefined,fontWeight:isFirstSub&&(isHour||isSpecialSlot(baseSlot))?800:500,color:isFirstSub&&isSpecialSlot(baseSlot)?'#9333ea':(isFirstSub&&isHour?'#0891b2':'#7dd3fc'),whiteSpace:'nowrap',paddingLeft:10,fontSize:isFirstSub&&isSpecialSlot(baseSlot)?11:(isFirstSub&&isHour?13:11),borderLeft:isSub?'3px solid #7dd3fc':''}}>
+      <td style={{...TD,position:'relative',width:50,maxWidth:50,background:isRestricted?'#fee2e2':undefined,fontWeight:isFirstSub&&(isHour||isSpecialSlot(baseSlot))?800:500,color:isFirstSub&&isSpecialSlot(baseSlot)?'#9333ea':(isFirstSub&&isHour?'#0891b2':'#7dd3fc'),whiteSpace:isSpecialSlot(baseSlot)?'normal':'nowrap',lineHeight:isSpecialSlot(baseSlot)?1.12:undefined,paddingLeft:6,paddingRight:3,fontSize:isFirstSub&&isSpecialSlot(baseSlot)?10:(isFirstSub&&isHour?13:11),borderLeft:isSub?'3px solid #7dd3fc':''}}>
         {isFirstSub?(isSpecialSlot(baseSlot)?specialSlotLabel(baseSlot):slot):<span style={{fontSize:9,color:'#a5f3fc'}}>↳</span>}
         {/* 制限網掛けの上にマウスが来たら即座に同じポップアップを出す（title属性は表示が遅いので使わない） */}
         {isRestricted&&showRestrTip&&<RestrictionTip r={restriction} style={{top:'100%',left:0,marginTop:2}}/>}
@@ -9156,9 +9156,9 @@ function AppInner() {
                 </div>
               <div id={SEC_SCHED} style={{flex:1,minHeight:0,overflow:'auto'}}>
                 <div style={{minWidth:'max-content'}}>
-                  <table style={{...TBL,width:'100%'}}>
-                    <thead><tr style={{background:'linear-gradient(90deg,#0e7490,#0891b2)',color:'white',position:'sticky',top:0,zIndex:5}}>
-                      {['時間','氏名','車種','作業','代車・レンタカー','指・見','内容'].map(h=><th key={h} style={{padding:'7px 8px',textAlign:'left',fontSize:12,fontWeight:600,whiteSpace:'nowrap'}}>{h}</th>)}
+                  <table style={{...TBL,width:'100%',overflow:'visible'}}>
+                    <thead><tr>
+                      {['時間','氏名','車種','作業','代車・レンタカー','指・見','内容'].map(h=><th key={h} style={{padding:h==='時間'?'7px 4px':'7px 8px',textAlign:'left',fontSize:12,fontWeight:600,whiteSpace:'nowrap',position:'sticky',top:0,zIndex:6,background:'linear-gradient(90deg,#0e7490,#0891b2)',color:'white',...(h==='時間'?{width:50,minWidth:50,maxWidth:50}:{})}}>{h}</th>)}
                     </tr></thead>
                     <tbody>
                       {(()=>{
@@ -9239,18 +9239,25 @@ function AppInner() {
                             {(_doBySlot[slot]||[]).map(({r,wdk,ix})=>{
                               const wl=wdk.split('-');
                               const dl=getLoanerLabel(loanerRes,wdk,r.name,`insp-${wdk}-${ix}`);
-                              const loaner=r.rentalLabel||dl||r.loaner||'';
+                              const loaner=r.rentalLabel||dl||'';
                               return(
                                 <tr key={'do-'+wdk+'-'+ix} onClick={()=>handleOpenModal('insp',wdk,ix,null,false)}
                                   style={{background:'#fff7ed',cursor:'pointer'}} title="事前入庫の車検（クリックで車検を編集）">
-                                  <td style={{...TD,paddingLeft:10,whiteSpace:'nowrap',color:'#9a3412',fontWeight:700,fontSize:11,borderLeft:'3px solid #ea580c'}}>{isSpecialSlot(slot)?specialSlotLabel(slot):slot}</td>
-                                  <td style={TD} colSpan={6}>
-                                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                                      <span style={{fontSize:10,fontWeight:800,color:'white',background:'#ea580c',borderRadius:20,padding:'1px 8px',whiteSpace:'nowrap'}}>🚗 事前入庫</span>
-                                      <span style={{fontWeight:700,color:'#7c2d12'}}>{r.name}</span>
-                                      {r.carType&&<span style={{fontSize:12,color:'#6b7280'}}>{r.carType}</span>}
-                                      {loaner&&<span style={{fontSize:11,color:'#065f46',fontWeight:700}}>🔑 {loaner}</span>}
-                                      <span style={{fontSize:11,color:'#9a3412',fontWeight:700,whiteSpace:'nowrap'}}>→ {wl[1]}/{wl[2]} 車検</span>
+                                  <td style={{...TD,width:50,maxWidth:50,paddingLeft:6,paddingRight:3,whiteSpace:isSpecialSlot(slot)?'normal':'nowrap',lineHeight:isSpecialSlot(slot)?1.12:undefined,color:'#9a3412',fontWeight:700,fontSize:isSpecialSlot(slot)?10:11,borderLeft:'3px solid #ea580c'}}>{isSpecialSlot(slot)?specialSlotLabel(slot):slot}</td>
+                                  <td style={TD}>
+                                    <div style={{lineHeight:1.25}}>
+                                      <span style={{fontSize:10,fontWeight:800,color:'white',background:'#ea580c',borderRadius:20,padding:'1px 7px',whiteSpace:'nowrap'}}>🚗 事前入庫</span>
+                                      <div style={{fontWeight:800,color:'#7c2d12',marginTop:2}}>{r.name}</div>
+                                    </div>
+                                  </td>
+                                  <td style={TD}><span style={{fontWeight:700,color:'#374151',fontSize:13}}>{r.carType||'—'}</span></td>
+                                  <td style={TD}><span style={{color:'#9ca3af'}}>—</span></td>
+                                  <td style={TD}>{loaner?<span style={{fontSize:11,color:'#065f46',fontWeight:700}}>🔑 {loaner}</span>:<span style={{color:'#9ca3af'}}>—</span>}</td>
+                                  <td style={TD}><span style={{color:'#9ca3af'}}>—</span></td>
+                                  <td style={TD}>
+                                    <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                                      <span style={{fontSize:10,color:'#9a3412',fontWeight:700,whiteSpace:'nowrap',background:'#ffedd5',border:'1px solid #fdba74',borderRadius:20,padding:'1px 7px'}}>→ {wl[1]}/{wl[2]} 車検</span>
+                                      {r.note&&<span style={{fontSize:12,color:'#374151'}}>{r.note}</span>}
                                     </div>
                                   </td>
                                 </tr>
@@ -9267,9 +9274,9 @@ function AppInner() {
                                 <tr key={'dl-'+d.kind+'-'+d.wdk+'-'+(d.ix??d.sk)+'-'+di}
                                   onClick={()=>d.kind==='insp'?handleOpenModal('insp',d.wdk,d.ix,null,false):handleOpenModal('sched',d.wdk,null,d.sk,false)}
                                   style={{background:'#ecfdf5',cursor:'pointer'}} title="納車予定（クリックで元の予約を編集）">
-                                  <td style={{...TD,paddingLeft:10,whiteSpace:'nowrap',color:'#065f46',fontWeight:700,fontSize:11,borderLeft:'3px solid #059669'}}>{isSpecialSlot(slot)?specialSlotLabel(slot):slot}</td>
+                                  <td style={{...TD,width:50,maxWidth:50,paddingLeft:6,paddingRight:3,whiteSpace:isSpecialSlot(slot)?'normal':'nowrap',lineHeight:isSpecialSlot(slot)?1.12:undefined,color:'#065f46',fontWeight:700,fontSize:isSpecialSlot(slot)?10:11,borderLeft:'3px solid #059669'}}>{isSpecialSlot(slot)?specialSlotLabel(slot):slot}</td>
                                   <td style={{...TD,fontWeight:700,color:'#064e3b',whiteSpace:'nowrap'}}>{r.name}</td>
-                                  <td style={{...TD,fontSize:12,color:'#6b7280'}}>{r.carType||''}</td>
+                                  <td style={TD}><span style={{fontWeight:700,color:'#374151',fontSize:13}}>{r.carType||'—'}</span></td>
                                   <td style={TD}></td>
                                   <td style={TD}>{loaner&&<span style={{fontSize:11,color:'#065f46',fontWeight:700}}>🔑 {loaner}</span>}</td>
                                   <td style={TD}></td>
@@ -9286,7 +9293,7 @@ function AppInner() {
                             {/* +ボタン行：畳んでいない時のみ表示・入庫制限時間帯は非表示 */}
                             {!schedCollapsed&&lastHasData&&!isSlotRestricted&&(
                               <tr style={{background:'#f0feff'}}>
-                                <td style={{...TD,paddingLeft:10,borderLeft:'3px solid #7dd3fc'}}>
+                                <td style={{...TD,width:50,maxWidth:50,paddingLeft:6,paddingRight:3,whiteSpace:isSpecialSlot(slot)?'normal':'nowrap',lineHeight:1.12,borderLeft:'3px solid #7dd3fc'}}>
                                   <span style={{fontSize:10,color:'#7dd3fc',fontWeight:500}}>{specialSlotLabel(slot)}</span>
                                 </td>
                                 <td colSpan={6} style={TD}>
