@@ -85,7 +85,7 @@ const STOR='hub-v8-dev-';
 // index側の全画面オーバーレイ（iframe）内で開かれているか。埋め込み時は
 // 「スケジュールに戻る」がページ遷移ではなく親へのpostMessage（オーバーレイ閉鎖）になる。
 const IS_EMBED=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
-const APP_VERSION='1.56'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
+const APP_VERSION='1.58'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
 const CHUNK_SIZE=100;
 // ファイル名をGASキーに使える形に変換
@@ -1300,23 +1300,26 @@ const App=()=>{
     document.addEventListener('fullscreenchange',h);
     document.addEventListener('webkitfullscreenchange',h);
     window.addEventListener('pagehide',onHide);
+    // 全画面はページ遷移で必ず解除される。ブラウザ仕様上、遷移先で自動復帰はできず「ユーザー操作」が要る。
+    // そこで最初の操作すべて（クリック・タッチ・スクロール・キー）で復帰させ、実質ワンアクションで全画面に戻す。
     let restore=null;
+    const RESTORE_EVENTS=['pointerdown','touchstart','keydown','wheel'];
     try{
       if(!IS_EMBED&&sessionStorage.getItem(STOR+'fs-restore')==='1'&&!(document.fullscreenElement||document.webkitFullscreenElement)){
         restore=()=>{
-          document.removeEventListener('pointerdown',restore,true);restore=null;
+          RESTORE_EVENTS.forEach(ev=>document.removeEventListener(ev,restore,true));restore=null;
           const el=document.documentElement;
           const req=el.requestFullscreen||el.webkitRequestFullscreen;
           if(req)Promise.resolve(req.call(el)).catch(()=>{});
         };
-        document.addEventListener('pointerdown',restore,true);
+        RESTORE_EVENTS.forEach(ev=>document.addEventListener(ev,restore,true));
       }
     }catch(e){}
     return()=>{
       document.removeEventListener('fullscreenchange',h);
       document.removeEventListener('webkitfullscreenchange',h);
       window.removeEventListener('pagehide',onHide);
-      if(restore)document.removeEventListener('pointerdown',restore,true);
+      if(restore)RESTORE_EVENTS.forEach(ev=>document.removeEventListener(ev,restore,true));
     };
   },[]);
   const toggleFullscreen=useCallback(()=>{
