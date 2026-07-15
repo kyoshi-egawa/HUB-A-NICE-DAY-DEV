@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.58';
+const MOBILE_VERSION='1.59';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -586,7 +586,25 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
   },[form.entryDate,form.deliveryDate,mode.dk,carKind]);
   const bk=isInsp?`insp-${mode.dk}-${mode.idx}`:`sched-${mode.dk}-${mode.slot}`;
   const currentLoanerLbl=getLoanerLabel(loanerRes,mode.dk,initial?.name,initial?.bookingKey||bk,loanerCars);
-  const currentBinding=currentLoanerLbl?`🚗 ${currentLoanerLbl}`:(initial?.rentalLabel||initial?.loaner||'');
+  const currentBinding=currentLoanerLbl?`🚗 ${currentLoanerLbl}`:(initial?.rentalLabel||'');
+  // 代車期間チェック：スケジュール期間（入庫日→納車日）と代車の貸出期間の不一致を検出（PC版と同方針：アラートのみ・手動修正）。
+  const loanerMismatch=(()=>{
+    const dkToNum=s=>{const p=String(s||'').split('-').map(Number);return (p.length===3&&!p.some(isNaN))?toNum(p[0],p[1]-1,p[2]):null;};
+    let lf=null,lt=null;
+    if(carKind==='loaner'){ lf=dkToNum(carFrom); lt=dkToNum(carTo); }
+    else if(carKind==='keep'){
+      for(const cid of Object.keys(loanerRes||{})){
+        const hit=Object.values(loanerRes[cid]||{}).find(r=>r&&r.bookingKey===bk);
+        if(hit){ lf=toNum(hit.fy,hit.fm,hit.fd); lt=toNum(hit.ty,hit.tm,hit.td); break; }
+      }
+    }
+    if(lf==null||lt==null)return null; // なし/レンタカー/代車未割当 → 対象外
+    const sf=dkToNum(form.entryDate||mode.dk), st=dkToNum(form.deliveryDate||mode.dk);
+    if(sf==null||st==null)return null;
+    if(lf===sf&&lt===st)return null; // 一致
+    return {sf,st,lf,lt};
+  })();
+  const mmFmt=n=>n==null?'—':`${Math.floor(n/100)%100}/${n%100}`;
   const parseD=s=>{const [y,m,d]=String(s).split('-').map(Number);return{y,m0:m-1,d};};
   const availabilityOf=(kind,carId)=>{
     const from=parseD(carFrom),to=parseD(carTo);
@@ -616,6 +634,7 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
       if(busy){setErr(`その期間は使用中です（${busy}）`);return;}
       loanerAction={kind:carKind,carId:carSel,from,to};
     }
+    if(loanerMismatch&&!window.confirm(`⚠ 代車の期間がスケジュールと一致していません。\n\nスケジュール（入庫日→納車日）：${mmFmt(loanerMismatch.sf)}〜${mmFmt(loanerMismatch.st)}\n代車の貸出期間　　　　　　：${mmFmt(loanerMismatch.lf)}〜${mmFmt(loanerMismatch.lt)}\n\nこのまま保存しますか？\n（代車を合わせるには「代車」を選び直し、不要なら「なし」にしてください）`))return;
     setErr('');
     // 受付は即時（モーダルはonSave側で閉じる）。サーバー保存はバックグラウンドで継続し、
     // 結果は画面上部のバナーで通知される。ここで捕まえるのは事前チェック（入庫制限等）のみ。
@@ -766,6 +785,13 @@ const EditModal=({mode,initial,vsId,currentUser,staffList,loanerCars,rentalCars,
           <div style={{border:'2px solid #e0f2fe',borderRadius:12,padding:'10px 12px',background:'#f8fdff'}}>
             <div style={{fontSize:12,fontWeight:800,color:'#0369a1',marginBottom:6}}>🔑 代車・レンタカー</div>
             {currentBinding&&carKind==='keep'&&<div style={{fontSize:12,color:'#0c4a6e',marginBottom:6,fontWeight:700}}>現在: {currentBinding}</div>}
+            {loanerMismatch&&(
+              <div style={{margin:'0 0 8px',padding:'8px 10px',borderRadius:8,background:'#fffbeb',border:'2px solid #f59e0b',color:'#92400e',fontSize:11,lineHeight:1.5,fontWeight:700}}>
+                ⚠ 代車の期間がスケジュールと一致しません<br/>
+                スケジュール（入庫日→納車日）：{mmFmt(loanerMismatch.sf)}〜{mmFmt(loanerMismatch.st)} ／ 代車：{mmFmt(loanerMismatch.lf)}〜{mmFmt(loanerMismatch.lt)}<br/>
+                <span style={{fontWeight:500}}>「代車」を選び直すと期間が自動で揃います（不要なら「なし」／イレギュラーはこのまま保存OK）。</span>
+              </div>
+            )}
             <div style={{display:'flex',gap:5,marginBottom:8}}>
               {[['keep','変更なし'],['none','なし'],['loaner','代車'],['rental','レンタカー']].map(([k,label])=>(
                 <button key={k} onClick={()=>{setCarKind(k);setCarSel('');}}
@@ -955,7 +981,7 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
               const isOther=normStore(r.store)&&normStore(r.store)!==vsId;
               // PC版と同じ解決順（rentalLabel → 代車予約(lres) → 行が持つloaner文字列）。
               // 代車予約が無く loaner 文字列だけ持つ行があるため、r.loaner へのフォールバックは必須。
-              const loaner=getLoanerLabel(myLoanerRes,dk,r.name,r.bookingKey||`insp-${dk}-${idx}`,myCars)||r.loaner||'';
+              const loaner=getLoanerLabel(myLoanerRes,dk,r.name,r.bookingKey||`insp-${dk}-${idx}`,myCars)||'';
               return(
                 <div key={idx} onClick={()=>!isOther&&onOpenEdit({type:'insp',dk,idx,isNew:false})}
                   style={{background:'white',borderRadius:12,padding:'10px 12px',marginBottom:5,borderLeft:`4px solid ${isOther?'#94a3b8':r.pendingApproval?'#f59e0b':sc}`,boxShadow:'0 1px 4px rgba(0,0,0,.06)',opacity:isOther?0.72:1,cursor:isOther?'default':'pointer'}}>
@@ -1030,7 +1056,7 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
                 <div style={{fontWeight:900,fontSize:12,color:'#c2410c',marginBottom:4}}>🚗 事前入庫（{dos.length}件）</div>
                 {dos.map(({r,wdk,ix})=>{
                   const wl=wdk.split('-');
-                  const loaner=r.rentalLabel||getLoanerLabel(myLoanerRes,wdk,r.name,r.bookingKey||`insp-${wdk}-${ix}`,myCars)||r.loaner||'';
+                  const loaner=r.rentalLabel||getLoanerLabel(myLoanerRes,wdk,r.name,r.bookingKey||`insp-${wdk}-${ix}`,myCars)||'';
                   return(
                   <div key={wdk+'-'+ix} onClick={()=>onOpenEdit({type:'insp',dk:wdk,idx:ix,isNew:false})}
                     style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',padding:'6px 2px',borderTop:'1px dashed #fed7aa',cursor:'pointer'}}>
@@ -1071,8 +1097,8 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
                 {dls.map((d,di)=>{
                   const r=d.r,wl=d.wdk.split('-');
                   const loaner=d.kind==='insp'
-                    ?(r.rentalLabel||getLoanerLabel(myLoanerRes,d.wdk,r.name,`insp-${d.wdk}-${d.ix}`,myCars)||r.loaner||'')
-                    :(r.rentalLabel||r.loaner||'');
+                    ?(r.rentalLabel||getLoanerLabel(myLoanerRes,d.wdk,r.name,`insp-${d.wdk}-${d.ix}`,myCars)||'')
+                    :(r.rentalLabel||getLoanerLabel(myLoanerRes,d.wdk,r.name,`sched-${d.wdk}-${d.sk}`,myCars)||'');
                   return(
                   <div key={'dl-'+d.kind+'-'+d.wdk+'-'+(d.ix??d.sk)+'-'+di}
                     onClick={()=>d.kind==='insp'?onOpenEdit({type:'insp',dk:d.wdk,idx:d.ix,isNew:false}):onOpenEdit({type:'sched',dk:d.wdk,slot:d.sk,isNew:false})}

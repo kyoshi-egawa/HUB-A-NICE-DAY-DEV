@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.58';
+const APP_VERSION = '1.59';
 
 
 
@@ -3681,7 +3681,7 @@ const InspCalendarPicker=memo(({form,setForm,bmInspData,bmClosedDays,bmClosedDat
   );
 });
 
-const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSlot,onSave,onDelete,onDateChange,onOpenLoanerPicker,pendingLoanerId,pendingRentalId,pendingRentalRec,rentalCarsData,loanerRes,modalDk,modalIdx:modalIdxProp,onDeleteLoaner,onToggleLoanerLock,currentUser,setItems,onOpenSetItemEdit,allCars,fromCustList,savedModalData,inspData:bmInspData,closedDays:bmClosedDays,closedDates:bmClosedDates,overrideOpenDates:bmOverrideOpen,inspLimits:bmInspLimits})=>{
+const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSlot,onSave,onDelete,onDateChange,onOpenLoanerPicker,pendingLoanerId,pendingLoanerData,pendingRentalId,pendingRentalRec,rentalCarsData,loanerRes,modalDk,modalIdx:modalIdxProp,onDeleteLoaner,onToggleLoanerLock,currentUser,setItems,onOpenSetItemEdit,allCars,fromCustList,savedModalData,inspData:bmInspData,closedDays:bmClosedDays,closedDates:bmClosedDates,overrideOpenDates:bmOverrideOpen,inspLimits:bmInspLimits})=>{
   const [form,setForm]=useState(initialData);
   const [staffInput,setStaffInput]=useState('');
   const [showStaff,setShowStaff]=useState(false);
@@ -3854,6 +3854,46 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
   };
   // ──────────────────────────────────────────────────────────
 
+  // 代車期間チェック：スケジュール期間（入庫日→納車日）と代車の貸出期間の不一致を返す。
+  // 一致・代車無し（代車削除でチェック解除）・レンタカーの場合は null。バナー表示と保存時確認で共用。
+  const computeLoanerMismatch=()=>{
+    if(pendingRentalId!=null)return null; // レンタカーは対象外
+    const _idx=type==='insp'?(modalIdxProp??initialData?._idx??0):null;
+    const curBk=type==='insp'?`insp-${modalDk}-${_idx}`:`sched-${modalDk}-${timeSlot}`;
+    const origDk=originalDkRef.current;
+    const origBk=(origDk&&origDk!==modalDk)?(type==='insp'?`insp-${origDk}-${_idx}`:`sched-${origDk}-${timeSlot}`):null;
+    let loanFrom=null,loanTo=null;
+    if(pendingLoanerData&&pendingLoanerId!=null){
+      // ピック直後（未保存）＝ピッカーで選んだ期間
+      const pd=pendingLoanerData;
+      loanFrom=toNum(pd.startYear,pd.startMonth,pd.startDay);
+      loanTo=toNum(pd.startYear,pd.startMonth,pd.endDay);
+    }else{
+      // 保存済み予約＝現在キー or 元キー（日付変更で移動する前）に一致する予約
+      const wantKeys=[curBk,origBk].filter(Boolean);
+      let r=null;
+      for(const cid of Object.keys(loanerRes||{})){
+        r=Object.values(loanerRes[cid]||{}).find(x=>wantKeys.includes(x.bookingKey));
+        if(r)break;
+      }
+      if(r){loanFrom=toNum(r.fy,r.fm,r.fd);loanTo=toNum(r.ty,r.tm,r.td);}
+    }
+    if(loanFrom==null)return null; // 代車無し＝チェック対象外（代車削除で解除）
+    const dkNum=s=>{const t=normDk(s);if(!t)return null;const p=t.split('-').map(Number);return toNum(p[0],p[1]-1,p[2]);};
+    const schFrom=dkNum(form.entryDate)??dkNum(modalDk);
+    const schTo=dkNum(form.deliveryDate)??dkNum(modalDk);
+    if(schFrom==null||schTo==null)return null;
+    if(loanFrom===schFrom&&loanTo===schTo)return null; // 一致
+    return {schFrom,schTo,loanFrom,loanTo};
+  };
+  const _mmFmt=n=>n==null?'—':`${Math.floor(n/100)%100}/${n%100}`;
+  // 保存前に代車期間のズレを確認（アラートのみ方針：同じ代車が空いているとは限らないため自動同期はしない）
+  const confirmLoanerMismatch=()=>{
+    const mm=computeLoanerMismatch();
+    if(!mm)return true;
+    return window.confirm(`⚠ 代車の期間がスケジュールと一致していません。\n\nスケジュール（入庫日→納車日）：${_mmFmt(mm.schFrom)}〜${_mmFmt(mm.schTo)}\n代車の貸出期間　　　　　　：${_mmFmt(mm.loanFrom)}〜${_mmFmt(mm.loanTo)}\n\nこのまま保存しますか？\n（代車を合わせるには「選択」で選び直し、代車が不要なら「削除」で外してください）`);
+  };
+
   const handleSave=()=>{
     if(!form.name){alert('氏名を入力してください');nameRef.current?.focus();return;}
     if(!form.carType){alert('車種を入力してください');carRef.current?.focus();return;}
@@ -3863,6 +3903,7 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
     }else{
       if(!form.work){alert('作業内容を選択してください');workRef.current?.focus();return;}
     }
+    if(!confirmLoanerMismatch())return; // ズレたまま保存の最終確認でキャンセル→中断
     onSave({...form, _targetDk: localTargetDkRef.current||'', _originalDk: originalDkRef.current||''});
   };
   // 顧客リストからの仮予約/本予約ボタン用
@@ -3873,6 +3914,8 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
       if(!form.carType){alert('車種を入力してください');carRef.current?.focus();return;}
       if(!form.course){alert('コースを選択してください');return;}
     }
+    // 本予約時のみ代車期間のズレを確認（仮予約は代車を確定しないためスキップ）
+    if(status==='confirmed'&&!confirmLoanerMismatch())return;
     // 仮予約はモーダルを閉じない（_keepOpen フラグで制御）
     onSave({...form, bookingStatus:status, _keepOpen: status==='provisional'});
   };
@@ -4110,6 +4153,18 @@ const BookingModal=memo(({isOpen,onClose,type,initialData,isNew,dateLabel,timeSl
               })()}
             </div>
           </div>
+          {/* 代車期間チェック：スケジュール期間（入庫日→納車日）と代車予約期間の不一致を警告（非ブロッキング・手動修正） */}
+          {(()=>{
+            const mm=computeLoanerMismatch();
+            if(!mm)return null;
+            return(
+              <div style={{marginTop:-2,marginBottom:2,padding:'8px 11px',borderRadius:8,background:'#fffbeb',border:'2px solid #f59e0b',color:'#92400e',fontSize:12,lineHeight:1.55}}>
+                <div style={{fontWeight:800,color:'#b45309'}}>⚠ 代車の期間がスケジュールと一致しません</div>
+                <div style={{fontWeight:700,marginTop:2}}>スケジュール（入庫日→納車日）：{_mmFmt(mm.schFrom)}〜{_mmFmt(mm.schTo)}<br/>代車の貸出期間：{_mmFmt(mm.loanFrom)}〜{_mmFmt(mm.loanTo)}</div>
+                <div style={{fontWeight:500,marginTop:3,color:'#a16207'}}>「選択」から代車を選び直すと期間を合わせられます（代車が不要なら「削除」で外してください／イレギュラーはこのまま保存OK）。</div>
+              </div>
+            );
+          })()}
           {/* 特典（車検） */}
           {isInsp&&(
             <div>
@@ -4447,7 +4502,7 @@ const InspRow=memo(({row,idx,dispNo,dk,onOpenModal,lockInfo,loanerRes,loanerResH
       </td>
       <td style={TD}><span style={{color:pending||isOverLimit||isCancelled?'#6b7280':'#374151',fontSize:13,fontWeight:700}}>{row.carType||'—'}</span></td>
       <td style={TD}>{cObj&&<span style={{display:'inline-flex',alignItems:'center',gap:4,padding:'2px 8px',borderRadius:20,background:cObj.bg,color:cObj.color,fontWeight:700,fontSize:11,opacity:pending||isOverLimit||isCancelled?0.4:1}}><span style={{width:16,height:16,borderRadius:'50%',background:cObj.color,color:'white',display:'flex',alignItems:'center',justifyContent:'center',fontSize:9,fontWeight:900}}>{cObj.initial}</span>{cObj.name}</span>}</td>
-      <td style={TD}><span style={{fontSize:12,color:row.rentalLabel?(pending||isOverLimit||isCancelled?'#6b7280':'#065f46'):(pending||isOverLimit||isCancelled?'#6b7280':'#374151'),fontWeight:400}}>{row.rentalLabel||loanerLabel||row.loaner||'—'}</span></td>
+      <td style={TD}><span style={{fontSize:12,color:row.rentalLabel?(pending||isOverLimit||isCancelled?'#6b7280':'#065f46'):(pending||isOverLimit||isCancelled?'#6b7280':'#374151'),fontWeight:400}}>{row.rentalLabel||loanerLabel||'—'}</span></td>
       <td style={TD}><span style={{fontSize:13,color:pending||isOverLimit||isCancelled?'#6b7280':'#374151'}}>{row.tokuten||'—'}</span></td>
       <td style={TD}>{(row.entryDate&&row.entryDate!==dk)?(()=>{const p=row.entryDate.split('-');const mmdd=String(p[1]).padStart(2,'0')+'/'+String(p[2]).padStart(2,'0');return <span title="事前入庫（入庫日）" style={{display:'inline-flex',flexDirection:'column',lineHeight:1.15}}><span style={{fontWeight:800,fontSize:12,color:pending||isOverLimit||isCancelled?'#9ca3af':'#c2410c',whiteSpace:'nowrap'}}>🚗{mmdd}</span>{row.time&&<span style={{fontSize:10,color:'#9ca3af'}}>{specialSlotLabel(row.time)}</span>}</span>;})():<span style={{fontWeight:600,fontSize:13,color:pending||isOverLimit||isCancelled?'#6b7280':'#374151'}}>{row.time||'—'}</span>}</td>
       <td style={TD}>{row.note
@@ -4549,7 +4604,7 @@ const SchedRow=memo(({row,slot,baseSlot,isFirstSub,dk,onOpenModal,lockInfo,loane
       </td>
       <td style={TD}><span style={{color:'#374151',fontSize:13,fontWeight:700}}>{row.carType||'—'}</span></td>
       <td style={TD}>{row.work?<WorkBadge id={row.work} dim={locked||otherStore}/>:<span style={{fontSize:13,color:'#374151'}}>—</span>}</td>
-      <td style={TD}><span style={{fontSize:12,color:row.rentalLabel?'#065f46':'#374151',fontWeight:400}}>{row.rentalLabel||loanerLabel||row.loaner||'—'}</span></td>
+      <td style={TD}><span style={{fontSize:12,color:row.rentalLabel?'#065f46':'#374151',fontWeight:400}}>{row.rentalLabel||loanerLabel||'—'}</span></td>
       <td style={TD}><span style={{fontSize:13,color:'#374151'}}>{row.shimi||'—'}</span></td>
       <td style={TD}>{row.content
         ?<div style={{display:'flex',flexWrap:'wrap',gap:3,alignItems:'center'}}>
@@ -9422,6 +9477,7 @@ function AppInner() {
         dateLabel={dateLabel} timeSlot={modalSlot}
         onSave={handleSaveModal} onDelete={handleDeleteModal} onDateChange={handleDateChangeModal}
         modalIdx={modalIdx} onOpenLoanerPicker={handleOpenLoanerPicker} pendingLoanerId={pendingLoanerId}
+        pendingLoanerData={pendingLoanerData}
         pendingRentalId={pendingRentalId} pendingRentalRec={pendingRentalRec}
         rentalCarsData={dynRentalCars}
         loanerRes={loanerRes} modalDk={modalDk}
