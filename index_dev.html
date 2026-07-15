@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.55';
+const APP_VERSION = '1.56';
 
 
 
@@ -267,16 +267,14 @@ const WORK_COLORS = {
   '納':'#047857',
   '他':'#64748b',
 };
+// 略号スクエアのみ（作業名は幅を取るので出さない。マウスを乗せると名称がツールチップで出る）
 const WorkBadge = ({id, dim}) => {
   const w = WORKS.find(x => x.id === id);
   if (!w) return <span style={{fontSize:13,color:'#374151'}}>{id||'—'}</span>;
   const c = WORK_COLORS[id] || '#64748b';
   return (
-    <span style={{display:'inline-flex',alignItems:'center',gap:6,whiteSpace:'nowrap',opacity:dim?0.6:1}}>
-      <span style={{display:'inline-flex',alignItems:'center',justifyContent:'center',minWidth:24,height:20,padding:'0 5px',
-        borderRadius:6,background:c,color:'white',fontSize:11,fontWeight:800,flexShrink:0}}>{w.id}</span>
-      <span style={{fontSize:12,fontWeight:700,color:'#475569'}}>{w.name}</span>
-    </span>
+    <span title={w.name} style={{display:'inline-flex',alignItems:'center',justifyContent:'center',minWidth:24,height:20,padding:'0 5px',
+      borderRadius:6,background:c,color:'white',fontSize:11,fontWeight:800,whiteSpace:'nowrap',opacity:dim?0.6:1}}>{w.id}</span>
   );
 };
 
