@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.62';
+const APP_VERSION = '1.63';
 
 
 
@@ -6249,10 +6249,11 @@ const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
   const [done,setDone]=useState(false);
   const [drillDate,setDrillDate]=useState(null);  // 詳しい中身→日付タップで開くその日の明細
   const [added,setAdded]=useState({});            // 部分復旧で足した予約(sig→true)。即時反映用
+  const [elapsed,setElapsed]=useState(0);         // 全体復旧の経過秒（進捗表示用）
 
   useEffect(()=>{
     if(!isOpen)return;
-    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);setDrillDate(null);setAdded({});
+    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);setDrillDate(null);setAdded({});setElapsed(0);
     snapList().then(a=>{ setList(a); if(a.length) setSel(a[0]); });
   },[isOpen]);
 
@@ -6275,9 +6276,12 @@ const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
   const loadDetail = async()=>{ if(!sel)return; setDetailLoading(true); const d=await snapRead(sel.file); setDetail(d); setDetailLoading(false); };
   const doRestore = async()=>{
     if(!sel||!allowed)return;
-    setRestoring(true);
+    setRestoring(true); setElapsed(0);
+    const t0=Date.now();
+    const iv=setInterval(()=>setElapsed(Math.round((Date.now()-t0)/1000)),1000); // 経過秒を1秒ごとに更新
     await snapRestore(sel.file);
     await new Promise(r=>setTimeout(r,3500)); // no-corsで応答不可→待ってからリロード
+    clearInterval(iv);
     setDone(true);
     setTimeout(()=>location.reload(),1500);
   };
@@ -6418,14 +6422,28 @@ const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
                      </div>}
                   </div>;
                 })()}
+              </> : restoring ? <>
+                {/* 復旧の進捗。no-corsで実際の残り時間は取れないため、経過秒＋目安バーで「進行中」を示す */}
+                <div style={{background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:12,padding:'18px 18px 16px',textAlign:'center'}}>
+                  <div style={{fontSize:15,fontWeight:800,color:'#173da8'}}>復旧しています…</div>
+                  <div style={{fontSize:12,color:'#475569',margin:'4px 0 14px'}}>全データを書き戻しています。<b>画面はそのままで</b>お待ちください（終わると自動で切り替わります）。</div>
+                  <div style={{height:9,borderRadius:999,background:'#dbe6fb',overflow:'hidden'}}>
+                    <div style={{height:'100%',width:`${Math.min(95,Math.round(elapsed/90*100))}%`,background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',borderRadius:999,transition:'width 1s linear'}}/>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',fontSize:12,fontWeight:700,color:'#64748b',marginTop:8}}>
+                    <span>経過 {elapsed}秒</span>
+                    <span>目安 1〜2分</span>
+                  </div>
+                  {elapsed>=120&&<div style={{fontSize:11.5,color:'#94a3b8',marginTop:9}}>データが大きいと少し長くかかります。まだ処理中です。もうしばらくお待ちください。</div>}
+                </div>
               </> : <>
                 <div style={{background:'#fdece9',border:'1px solid #f3b4ab',borderRadius:10,padding:'12px 14px'}}>
                   <div style={{fontWeight:800,color:'#d33a2c',fontSize:14,marginBottom:3}}>⚠️ {sel.tsText} の状態に戻します</div>
-                  <div style={{fontSize:12,color:'#475569'}}>現在のデータは、この時点の内容で上書きされます。全端末に反映されます。</div>
+                  <div style={{fontSize:12,color:'#475569'}}>現在のデータは、この時点の内容で上書きされます。全端末に反映されます。<b>1〜2分ほどかかります。</b></div>
                 </div>
                 <div style={{display:'flex',gap:8,marginTop:12}}>
-                  <button onClick={doRestore} disabled={restoring} style={{flex:1,border:'none',borderRadius:9,padding:'12px',fontWeight:800,fontSize:14,color:'white',background:restoring?'#94a3b8':'#d33a2c',cursor:restoring?'default':'pointer'}}>{restoring?'復旧中…（そのままお待ちください）':'はい、この時点に戻す'}</button>
-                  <button onClick={()=>setConfirming(false)} disabled={restoring} style={{border:'1px solid #e5e7eb',background:'white',borderRadius:9,padding:'12px 18px',fontWeight:700,fontSize:13,color:'#475569',cursor:restoring?'default':'pointer'}}>やめる</button>
+                  <button onClick={doRestore} style={{flex:1,border:'none',borderRadius:9,padding:'12px',fontWeight:800,fontSize:14,color:'white',background:'#d33a2c',cursor:'pointer'}}>はい、この時点に戻す</button>
+                  <button onClick={()=>setConfirming(false)} style={{border:'1px solid #e5e7eb',background:'white',borderRadius:9,padding:'12px 18px',fontWeight:700,fontSize:13,color:'#475569',cursor:'pointer'}}>やめる</button>
                 </div>
               </>}
              </>}
