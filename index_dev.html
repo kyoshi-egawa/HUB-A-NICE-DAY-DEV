@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.61';
+const APP_VERSION = '1.62';
 
 
 
@@ -1636,6 +1636,14 @@ const snapRestore = async (file) => {
   await fetch(GAS_URL, {
     method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'},
     body: JSON.stringify({action:'snapRestore', prefix:STOR, file, apiKey:GAS_API_KEY}),
+  });
+};
+// 部分復旧: 指定日に「消えた予約(rows)」だけを足す（サーバーがロック内で最新値に追記。丸ごと上書きしない）
+const snapAddBack = async (date, rows) => {
+  if(!GAS_READY) return;
+  await fetch(GAS_URL, {
+    method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'snapAddBack', prefix:STOR, date, rows, apiKey:GAS_API_KEY}),
   });
 };
 
@@ -6231,7 +6239,7 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
 // ============================================
 //  RestoreModal — 時点復旧（4名のみ・GAS v10スナップショット）
 // ============================================
-const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
+const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
   const [list,setList]=useState(null);         // null=読込中, []=なし
   const [sel,setSel]=useState(null);           // 選択中のエントリ
   const [detail,setDetail]=useState(null);     // 詳しい中身(snapRead)
@@ -6240,12 +6248,21 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
   const [restoring,setRestoring]=useState(false);
   const [done,setDone]=useState(false);
   const [drillDate,setDrillDate]=useState(null);  // 詳しい中身→日付タップで開くその日の明細
+  const [added,setAdded]=useState({});            // 部分復旧で足した予約(sig→true)。即時反映用
 
   useEffect(()=>{
     if(!isOpen)return;
-    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);setDrillDate(null);
+    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);setDrillDate(null);setAdded({});
     snapList().then(a=>{ setList(a); if(a.length) setSel(a[0]); });
   },[isOpen]);
+
+  // 予約の同一判定シグネチャ（位置番号はズレるので中身で照合。GAS snapAddBack と同じ規則）
+  const rowSig=(r)=>[String((r&&r.name)||''),String((r&&r.time)||''),String((r&&r.carType)||'')].join('|');
+  // 部分復旧: この予約1件だけを今のデータに足す（サーバーがロック内で安全に追記）
+  const doAddBack=async(date,r)=>{
+    await snapAddBack(date,[r]);
+    setAdded(a=>({...a,[rowSig(r)]:true}));
+  };
 
   if(!isOpen) return null;
   const allowed = canRestore(currentUser);
@@ -6254,7 +6271,7 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
   const dailyList = (list||[]).filter(e=>e.kind==='daily');
   const sum = sel&&sel.summary?sel.summary:{insp:0,sched:0,loaner:0,memo:0};
 
-  const pick=(e)=>{ setSel(e); setDetail(null); setConfirming(false); setDrillDate(null); };
+  const pick=(e)=>{ setSel(e); setDetail(null); setConfirming(false); setDrillDate(null); setAdded({}); };
   const loadDetail = async()=>{ if(!sel)return; setDetailLoading(true); const d=await snapRead(sel.file); setDetail(d); setDetailLoading(false); };
   const doRestore = async()=>{
     if(!sel||!allowed)return;
@@ -6352,6 +6369,11 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
                   if(drillDate){
                     const DOWJ=['日','月','火','水','木','金','土'];
                     const rows=(insp[drillDate]||[]).filter(r=>r&&r.name&&r.bookingStatus!=='cancelled');
+                    // 今のデータ(inspData=生きている値)にある予約のシグネチャ集合。位置でなく中身で照合。
+                    const liveHave={};
+                    ((inspData&&inspData[drillDate])||[]).forEach(r=>{ if(r&&r.name&&r.bookingStatus!=='cancelled') liveHave[rowSig(r)]=true; });
+                    const isHere=(r)=> !!(liveHave[rowSig(r)]||added[rowSig(r)]);
+                    const missCnt=rows.filter(r=>!isHere(r)).length;
                     const p=drillDate.split('-').map(Number);
                     const dw=DOWJ[new Date(p[0],p[1]-1,p[2]).getDay()];
                     return <div style={{marginTop:12,border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 13px'}}>
@@ -6360,21 +6382,31 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
                         <div style={{fontSize:15,fontWeight:800}}>{p[1]}/{p[2]}（{dw}）</div>
                         <div style={{marginLeft:'auto',fontSize:12,fontWeight:700,color:'#64748b'}}>車検 {rows.length}台</div>
                       </div>
+                      {missCnt>0&&<div style={{background:'#fbeed5',border:'1px solid #e6c98a',borderRadius:9,padding:'8px 11px',marginBottom:9,fontSize:12,color:'#7a4d06',fontWeight:700,display:'flex',gap:7}}>
+                        <span>⚠️</span><div>この時点にあった予約のうち <b>{missCnt}件</b> が今のデータにありません。「足す」なら<b>今の予約を消さずに</b>その分だけ戻せます。</div>
+                      </div>}
                       {rows.length===0?<div style={{fontSize:12,color:'#94a3b8'}}>予約なし</div>:
                        <div style={{display:'flex',flexDirection:'column',gap:7}}>
                          {rows.map((r,i)=>{
                            const isConf=r.bookingStatus==='confirmed'&&!r.pendingApproval;
-                           return <div key={i} style={{border:'1px solid #eef2f8',borderRadius:9,padding:'8px 11px',display:'flex',gap:10,alignItems:'flex-start'}}>
+                           const here=isHere(r);
+                           const justAdded=!!added[rowSig(r)];
+                           return <div key={i} style={{border:`1px solid ${here?'#eef2f8':'#e6c98a'}`,borderRadius:9,padding:'8px 11px',display:'flex',gap:10,alignItems:'flex-start',background:here?'white':'#fffaf0'}}>
                              <div style={{fontSize:14,fontWeight:800,color:'#173da8',width:46,flexShrink:0}}>{r.time||'—'}</div>
                              <div style={{flex:1,minWidth:0}}>
                                <div style={{fontSize:13.5,fontWeight:800}}>{r.name}</div>
                                {r.carType&&<div style={{fontSize:12,color:'#64748b'}}>{r.carType}</div>}
                                {r.loaner&&<div style={{fontSize:11.5,color:'#0e9d58',fontWeight:700,marginTop:2}}>🔑 代車：{r.loaner}</div>}
                              </div>
-                             <span style={{fontSize:10.5,fontWeight:800,padding:'2px 8px',borderRadius:999,alignSelf:'center',whiteSpace:'nowrap',background:isConf?'#e4f6ec':'#fbeed5',color:isConf?'#0e9d58':'#c9760a'}}>{r.pendingApproval?'承認待ち':isConf?'確定':'仮予約'}</span>
+                             {here
+                               ? (justAdded
+                                   ? <span style={{fontSize:10.5,fontWeight:800,padding:'2px 8px',borderRadius:999,alignSelf:'center',whiteSpace:'nowrap',background:'#e4f6ec',color:'#0e9d58'}}>✓ 足しました</span>
+                                   : <span style={{fontSize:10.5,fontWeight:800,padding:'2px 8px',borderRadius:999,alignSelf:'center',whiteSpace:'nowrap',background:isConf?'#e4f6ec':'#fbeed5',color:isConf?'#0e9d58':'#c9760a'}}>{isConf?'確定':(r.pendingApproval?'承認待ち':'仮予約')}</span>)
+                               : <button onClick={()=>doAddBack(drillDate,r)} style={{alignSelf:'center',flexShrink:0,fontSize:11.5,fontWeight:800,padding:'5px 13px',borderRadius:999,border:'none',background:'#1d4ed8',color:'white',cursor:'pointer',whiteSpace:'nowrap'}}>＋ 足す</button>}
                            </div>;
                          })}
                        </div>}
+                      <div style={{marginTop:9,fontSize:11,color:'#94a3b8'}}>「足す」は消えた予約だけを今のデータに追加します（他は上書きしません）。反映まで数秒かかることがあります。</div>
                     </div>;
                   }
                   const dates=Object.keys(insp).filter(d=>(insp[d]||[]).some(r=>r&&r.name&&r.bookingStatus!=='cancelled')).sort();
@@ -9542,7 +9574,7 @@ function AppInner() {
         vsStore={vsStore}/>
 
       {/* -- データ復旧（4名のみ） -- */}
-      <RestoreModal isOpen={showRestore} onClose={()=>setShowRestore(false)} currentUser={currentUser}/>
+      <RestoreModal isOpen={showRestore} onClose={()=>setShowRestore(false)} currentUser={currentUser} inspData={inspData}/>
 
       {/* -- 休日スタッフモーダル -- */}
       <DayOffModal

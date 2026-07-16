@@ -9,6 +9,7 @@
 //  - doGet ?action=snapList  … その環境の保存時点の一覧（新しい順・要約件数つき）
 //  - doGet ?action=snapRead  … 指定した時点の中身（プレビュー用）
 //  - doPost action=snapRestore … 指定した時点に全データを戻す（実行直前に現状も自動保存＝やり直し可）
+//  - doPost action=snapAddBack  … 指定日に「消えた予約だけ」を追記（部分復旧・丸ごと上書きしない）
 //  - 30分ごとの保存は48時間分、日次は90日分を保持し、超過分は自動削除。
 //  ※既存の毎朝2時 dailyBackup（シート丸ごとコピー）はそのまま残す（従来の安全網）。
 //    ただしシートコピーは大きいデータ(Drive保管)の実体を含まないため、復旧は必ずスナップショットを使うこと。
@@ -274,6 +275,18 @@ function doPost(e) {
     if (SNAP_ENV_PREFIXES.indexOf(pfxN) < 0) return makeResponse('error: bad prefix');
     try { return makeResponse(snapCreate(pfxN, 'manual', String(body.label || ''))); }
     catch (erN) { return makeResponse('error: ' + erN.message); }
+  }
+  // v10: 部分復旧（消えた予約だけ insp に足す。丸ごと上書きしない＝新データを壊さない）
+  if (body.action === 'snapAddBack') {
+    var lockA = LockService.getScriptLock();
+    var lockedA = false;
+    try { lockA.waitLock(25000); lockedA = true; } catch (leA) { return makeResponse('error: lock_timeout'); }
+    try {
+      var pfxA = String(body.prefix || '');
+      if (SNAP_ENV_PREFIXES.indexOf(pfxA) < 0) return makeResponse('error: bad prefix');
+      return makeResponse(snapAddBack(pfxA, String(body.date || ''), body.rows));
+    } catch (erA) { return makeResponse('error: ' + erA.message); }
+    finally { if (lockedA) lockA.releaseLock(); }
   }
 
   var lock = LockService.getScriptLock();
@@ -579,6 +592,42 @@ function snapRestore(prefix, fname) {
     restored++;
   }
   return 'ok: restored ' + restored + ' keys';
+}
+
+// 部分復旧: 指定日の insp に「消えていた予約(rows)」だけを追加する。
+// 既にある予約（氏名+時間+車種が一致・非cancelled）は足さない＝今入っている新データを壊さない。
+// ロック内で「サーバー最新値を読む→追記→書き戻す」ので、no-cors無音失敗や後勝ち上書きが起きない。
+function snapAddBack(prefix, date, rows) {
+  if (!date || !rows || !rows.length) return 'error: no rows';
+  var sheet = getSheet();
+  var cache = CacheService.getScriptCache();
+  var key = prefix + 'insp';
+  var raw = readOneValue(sheet, cache, key, -2);
+  var insp;
+  try { insp = (raw && raw !== 'null') ? JSON.parse(raw) : {}; } catch (e) { insp = {}; }
+  if (!insp[date]) insp[date] = [];
+  var day = insp[date];
+  function sig(r) { return [String((r && r.name) || ''), String((r && r.time) || ''), String((r && r.carType) || '')].join('|'); }
+  var have = {};
+  for (var i = 0; i < day.length; i++) {
+    if (day[i] && day[i].name && day[i].bookingStatus !== 'cancelled') have[sig(day[i])] = true;
+  }
+  var added = 0;
+  for (var j = 0; j < rows.length; j++) {
+    var r = rows[j];
+    if (!r || !r.name) continue;
+    if (have[sig(r)]) continue;      // 既にある＝スキップ（新データ保護）
+    day.push(r);
+    have[sig(r)] = true;
+    added++;
+  }
+  if (added === 0) return 'ok: added 0';
+  var str = JSON.stringify(insp);
+  var now = new Date().toLocaleString('ja-JP');
+  if (str.length <= BIG_THRESHOLD) { writeRow(sheet, key, str, now); }
+  else { driveWrite(key, str); writeRow(sheet, key, FILE_MARKER, now); }
+  invalidateCache(key);
+  return 'ok: added ' + added;
 }
 
 // 30分ごとトリガーの本体（本番・DEV両方）
