@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.60';
+const APP_VERSION = '1.61';
 
 
 
@@ -6239,10 +6239,11 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
   const [confirming,setConfirming]=useState(false);
   const [restoring,setRestoring]=useState(false);
   const [done,setDone]=useState(false);
+  const [drillDate,setDrillDate]=useState(null);  // 詳しい中身→日付タップで開くその日の明細
 
   useEffect(()=>{
     if(!isOpen)return;
-    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);
+    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);setDrillDate(null);
     snapList().then(a=>{ setList(a); if(a.length) setSel(a[0]); });
   },[isOpen]);
 
@@ -6253,7 +6254,7 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
   const dailyList = (list||[]).filter(e=>e.kind==='daily');
   const sum = sel&&sel.summary?sel.summary:{insp:0,sched:0,loaner:0,memo:0};
 
-  const pick=(e)=>{ setSel(e); setDetail(null); setConfirming(false); };
+  const pick=(e)=>{ setSel(e); setDetail(null); setConfirming(false); setDrillDate(null); };
   const loadDetail = async()=>{ if(!sel)return; setDetailLoading(true); const d=await snapRead(sel.file); setDetail(d); setDetailLoading(false); };
   const doRestore = async()=>{
     if(!sel||!allowed)return;
@@ -6347,12 +6348,41 @@ const RestoreModal = memo(({isOpen, onClose, currentUser})=>{
                 </div>
                 {detail && detail.keys && (()=>{
                   let insp={}; try{insp=JSON.parse(detail.keys[STOR+'insp']||'{}')||{};}catch(e){}
-                  const dates=Object.keys(insp).filter(d=>(insp[d]||[]).some(r=>r&&r.name)).sort();
+                  // 日付を押した先：その日の予約明細（確認用）
+                  if(drillDate){
+                    const DOWJ=['日','月','火','水','木','金','土'];
+                    const rows=(insp[drillDate]||[]).filter(r=>r&&r.name&&r.bookingStatus!=='cancelled');
+                    const p=drillDate.split('-').map(Number);
+                    const dw=DOWJ[new Date(p[0],p[1]-1,p[2]).getDay()];
+                    return <div style={{marginTop:12,border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 13px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:9,marginBottom:10}}>
+                        <button onClick={()=>setDrillDate(null)} style={{width:28,height:28,borderRadius:8,border:'1px solid #d7dbe2',background:'white',cursor:'pointer',color:'#64748b',fontSize:15,lineHeight:1}}>‹</button>
+                        <div style={{fontSize:15,fontWeight:800}}>{p[1]}/{p[2]}（{dw}）</div>
+                        <div style={{marginLeft:'auto',fontSize:12,fontWeight:700,color:'#64748b'}}>車検 {rows.length}台</div>
+                      </div>
+                      {rows.length===0?<div style={{fontSize:12,color:'#94a3b8'}}>予約なし</div>:
+                       <div style={{display:'flex',flexDirection:'column',gap:7}}>
+                         {rows.map((r,i)=>{
+                           const isConf=r.bookingStatus==='confirmed'&&!r.pendingApproval;
+                           return <div key={i} style={{border:'1px solid #eef2f8',borderRadius:9,padding:'8px 11px',display:'flex',gap:10,alignItems:'flex-start'}}>
+                             <div style={{fontSize:14,fontWeight:800,color:'#173da8',width:46,flexShrink:0}}>{r.time||'—'}</div>
+                             <div style={{flex:1,minWidth:0}}>
+                               <div style={{fontSize:13.5,fontWeight:800}}>{r.name}</div>
+                               {r.carType&&<div style={{fontSize:12,color:'#64748b'}}>{r.carType}</div>}
+                               {r.loaner&&<div style={{fontSize:11.5,color:'#0e9d58',fontWeight:700,marginTop:2}}>🔑 代車：{r.loaner}</div>}
+                             </div>
+                             <span style={{fontSize:10.5,fontWeight:800,padding:'2px 8px',borderRadius:999,alignSelf:'center',whiteSpace:'nowrap',background:isConf?'#e4f6ec':'#fbeed5',color:isConf?'#0e9d58':'#c9760a'}}>{r.pendingApproval?'承認待ち':isConf?'確定':'仮予約'}</span>
+                           </div>;
+                         })}
+                       </div>}
+                    </div>;
+                  }
+                  const dates=Object.keys(insp).filter(d=>(insp[d]||[]).some(r=>r&&r.name&&r.bookingStatus!=='cancelled')).sort();
                   return <div style={{marginTop:12,border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 13px'}}>
-                    <div style={{fontSize:12,fontWeight:800,color:'#334155',marginBottom:6}}>車検予約が入っていた日（{dates.length}日分）</div>
+                    <div style={{fontSize:12,fontWeight:800,color:'#334155',marginBottom:6}}>車検予約が入っていた日（{dates.length}日分・日付を押すと明細）</div>
                     {dates.length===0?<div style={{fontSize:12,color:'#94a3b8'}}>なし</div>:
                      <div style={{display:'flex',flexWrap:'wrap',gap:5,maxHeight:120,overflowY:'auto'}}>
-                       {dates.map(d=>{const c=(insp[d]||[]).filter(r=>r&&r.name).length;return <span key={d} style={{fontSize:11,background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:14,padding:'2px 8px',color:'#1e40af',fontWeight:600}}>{d}：{c}台</span>;})}
+                       {dates.map(d=>{const c=(insp[d]||[]).filter(r=>r&&r.name&&r.bookingStatus!=='cancelled').length;return <button key={d} onClick={()=>setDrillDate(d)} style={{fontSize:11,background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:14,padding:'2px 8px',color:'#1e40af',fontWeight:600,cursor:'pointer'}}>{d}：{c}台</button>;})}
                      </div>}
                   </div>;
                 })()}
