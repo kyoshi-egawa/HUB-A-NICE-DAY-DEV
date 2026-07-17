@@ -18,8 +18,9 @@
 // v10 追加（inspスリム化）:
 //  - archiveOldInsp/archiveOldInspAll … 今日−14日より古い日付を insp→insp-arch(保管箱)へ退避（毎日3時トリガー）。
 //    保管箱は永久保持。フロントは「読み=insp+insp-arch合体／書き=insp(hot)だけ（古い日付を除去）」で対応。
-//  ※スリム化を始めるには：setupSnapshotTriggers() を再実行（archiveトリガー登録）→ runInitialArchive() を1回手動実行（初回仕分け）。
-//    ※フロント側のスリム化対応(合体読み＋hot書き)を先に配信してから runInitialArchive() すること（順番厳守）。
+//  ※スリム化を始める順番（厳守）：①フロント v1.64 を配信（済）→ ②このGASを再デプロイ →
+//    ③ setupSnapshotTriggers() を再実行（archiveトリガー登録）→ ④ runInitialArchiveDev() でDEVを仕分け →
+//    DEV実機で表示・保存を確認 → ⑤ runInitialArchiveMain() で本番を仕分け。各実行前に自動で控えを取る。
 
 const SHEET_NAME = 'hubdata';
 const BACKUP_SHEET_PREFIX = 'backup_';
@@ -697,11 +698,18 @@ function archiveOldInspAll() {
   } finally { lock.releaseLock(); }
 }
 
-// 初回の手動仕分け（GASエディタから1回実行）。本番/DEV両方を仕分ける。実行前にdailySnapshotを取ると安全。
-function runInitialArchive() {
-  try { dailySnapshot(); } catch (e) {}   // 念のため直前の控え
-  archiveOldInspAll();
+// 初回の手動仕分け（GASエディタから実行）。実行前にその環境のスナップショットを取ってから仕分ける。
+// ★推奨順: まず runInitialArchiveDev() でDEVを仕分け→DEV実機で表示・保存を確認→問題なければ runInitialArchiveMain()。
+function _initialArchiveOne(prefix) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(25000); } catch (e) { Logger.log('lock timeout'); return; }
+  try {
+    try { snapCreate(prefix, 'manual', 'pre-archive（初回仕分け直前の控え）'); } catch (e) {}
+    Logger.log(prefix + ': ' + archiveOldInsp(prefix));
+  } finally { lock.releaseLock(); }
 }
+function runInitialArchiveDev()  { _initialArchiveOne('hub-v8-dev-'); }   // DEVだけ仕分け（先にこちら）
+function runInitialArchiveMain() { _initialArchiveOne('hub-v8-'); }       // 本番だけ仕分け（DEV確認後）
 
 // 30分ごとトリガーの本体（本番・DEV両方）
 function intradaySnapshot() {
