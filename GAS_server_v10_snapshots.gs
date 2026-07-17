@@ -14,6 +14,12 @@
 //  ※既存の毎朝2時 dailyBackup（シート丸ごとコピー）はそのまま残す（従来の安全網）。
 //    ただしシートコピーは大きいデータ(Drive保管)の実体を含まないため、復旧は必ずスナップショットを使うこと。
 //  ※初回のみ setupSnapshotTriggers() をGASエディタから1回実行してトリガー登録が必要。DriveApp権限の再承認も要る。
+//
+// v10 追加（inspスリム化）:
+//  - archiveOldInsp/archiveOldInspAll … 今日−14日より古い日付を insp→insp-arch(保管箱)へ退避（毎日3時トリガー）。
+//    保管箱は永久保持。フロントは「読み=insp+insp-arch合体／書き=insp(hot)だけ（古い日付を除去）」で対応。
+//  ※スリム化を始めるには：setupSnapshotTriggers() を再実行（archiveトリガー登録）→ runInitialArchive() を1回手動実行（初回仕分け）。
+//    ※フロント側のスリム化対応(合体読み＋hot書き)を先に配信してから runInitialArchive() すること（順番厳守）。
 
 const SHEET_NAME = 'hubdata';
 const BACKUP_SHEET_PREFIX = 'backup_';
@@ -494,6 +500,7 @@ function snapTargetKeys(sheet, prefix, full) {
       if (k.indexOf('__chunk') >= 0) continue;             // レガシー分割行は除外（indexから辿るので不要）
       if (k === prefix + 'snap-index') continue;           // インデックス自身は保存しない
       if (!full && k.indexOf(prefix + 'cf-') === 0) continue; // 大きい顧客ファイルは日次(full)のみ
+      if (!full && k === prefix + 'insp-arch') continue;   // 保管箱は大きいので日次(full)のみ
       out.push(k);
     }
   }
@@ -630,6 +637,72 @@ function snapAddBack(prefix, date, rows) {
   return 'ok: added ' + added;
 }
 
+// ============================================================
+//  v10: inspスリム化（古い日付を insp → insp-arch へ退避）
+//  ねらい: 毎回書き戻す insp を今日以降＋バッファ日数だけに保ち、書き込みを軽く・詰まりを減らす。
+//  過去日は insp-arch（保管箱）へ。永久保持（このコードは削除しない）。
+// ============================================================
+var ARCHIVE_BUFFER_DAYS = 14;   // 今日からこの日数より古い日付をアーカイブへ（境界）
+
+// "YYYY-M-D"（ゼロ詰めなし）を Date に変換。不正なら null。
+function parseDateKey(k) {
+  var pp = String(k).split('-');
+  if (pp.length !== 3) return null;
+  var y = parseInt(pp[0], 10), m = parseInt(pp[1], 10), d = parseInt(pp[2], 10);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+// 値を書く（30KB超はDriveへ。既存の書き込みと同じ規則）
+function putValue(sheet, key, str) {
+  var now = new Date().toLocaleString('ja-JP');
+  if (str.length <= BIG_THRESHOLD) { writeRow(sheet, key, str, now); }
+  else { driveWrite(key, str); writeRow(sheet, key, FILE_MARKER, now); }
+  invalidateCache(key);
+}
+
+// hotのinspから「今日−ARCHIVE_BUFFER_DAYS」より古い日付を insp-arch へ移す。1プレフィックス分。
+// arch を先に保存してから hot を削るので、途中で失敗してもデータは失われない（最悪は一時的な重複だけ）。
+function archiveOldInsp(prefix) {
+  var sheet = getSheet();
+  var cache = CacheService.getScriptCache();
+  var hotKey = prefix + 'insp', archKey = prefix + 'insp-arch';
+  var hotRaw = readOneValue(sheet, cache, hotKey, -2);
+  var hot; try { hot = (hotRaw && hotRaw !== 'null') ? JSON.parse(hotRaw) : {}; } catch (e) { return 'error: hot parse'; }
+  var cutoff = new Date(); cutoff.setHours(0, 0, 0, 0);
+  cutoff.setDate(cutoff.getDate() - ARCHIVE_BUFFER_DAYS);
+  var moved = {}, cnt = 0;
+  for (var k in hot) {
+    var dt = parseDateKey(k);
+    if (dt && dt.getTime() < cutoff.getTime()) { moved[k] = hot[k]; delete hot[k]; cnt++; }
+  }
+  if (cnt === 0) return 'ok: moved 0';
+  var archRaw = readOneValue(sheet, cache, archKey, -2);
+  var arch; try { arch = (archRaw && archRaw !== 'null') ? JSON.parse(archRaw) : {}; } catch (e) { arch = {}; }
+  for (var mk in moved) { arch[mk] = moved[mk]; }   // 日付単位でマージ（hot優先＝編集済みを反映）
+  putValue(sheet, archKey, JSON.stringify(arch));    // 先に保管箱を保存
+  putValue(sheet, hotKey, JSON.stringify(hot));      // その後hotを軽くする
+  return 'ok: moved ' + cnt + ' dates (arch=' + Object.keys(arch).length + ' / hot=' + Object.keys(hot).length + ')';
+}
+
+// 毎日3時トリガーの本体（本番・DEV両方）。ロックを取って通常書き込みと直列化する。
+function archiveOldInspAll() {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(25000); } catch (e) { Logger.log('archive lock timeout'); return; }
+  try {
+    for (var i = 0; i < SNAP_ENV_PREFIXES.length; i++) {
+      try { Logger.log(SNAP_ENV_PREFIXES[i] + ': ' + archiveOldInsp(SNAP_ENV_PREFIXES[i])); }
+      catch (e) { Logger.log('archive fail ' + SNAP_ENV_PREFIXES[i] + ': ' + e.message); }
+    }
+  } finally { lock.releaseLock(); }
+}
+
+// 初回の手動仕分け（GASエディタから1回実行）。本番/DEV両方を仕分ける。実行前にdailySnapshotを取ると安全。
+function runInitialArchive() {
+  try { dailySnapshot(); } catch (e) {}   // 念のため直前の控え
+  archiveOldInspAll();
+}
+
 // 30分ごとトリガーの本体（本番・DEV両方）
 function intradaySnapshot() {
   for (var i = 0; i < SNAP_ENV_PREFIXES.length; i++) {
@@ -650,11 +723,12 @@ function dailySnapshot() {
 function setupSnapshotTriggers() {
   ScriptApp.getProjectTriggers().forEach(function(t) {
     var f = t.getHandlerFunction();
-    if (f === 'intradaySnapshot' || f === 'dailySnapshot') ScriptApp.deleteTrigger(t);
+    if (f === 'intradaySnapshot' || f === 'dailySnapshot' || f === 'archiveOldInspAll') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('intradaySnapshot').timeBased().everyMinutes(30).create();
   ScriptApp.newTrigger('dailySnapshot').timeBased().everyDays(1).atHour(2).create();
-  Logger.log('snapshot triggers registered');
+  ScriptApp.newTrigger('archiveOldInspAll').timeBased().everyDays(1).atHour(3).create(); // 日次スナップショット(2時)の後に仕分け
+  Logger.log('snapshot + archive triggers registered');
 }
 
 // 動作確認用：DEVプレフィックスで手動スナップショット→一覧を確認（GASエディタから実行）

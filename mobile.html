@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.63';
+const MOBILE_VERSION='1.64';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -1367,7 +1367,11 @@ const App=()=>{
   const [gasOk,setGasOk]=useState(null);
   const [dayDetail,setDayDetail]=useState(null);
   const [schedInitDate,setSchedInitDate]=useState(null);
-  const [inspData,setInspData]=useState({});
+  const [hotInsp,setInspData]=useState({});   // hot=今日以降＋直近。保存はサーバー最新(hot)から構築
+  const [inspArch,setInspArch]=useState({});  // 保管箱（過去日）。起動時に1回読むだけ・書き換えない
+  useEffect(()=>{ sGet(STOR+'insp-arch').then(v=>{ if(v&&typeof v==='object'&&!Array.isArray(v)) setInspArch(v); }).catch(()=>{}); },[]);
+  // 表示用＝hotと保管箱の合体（同じ日付はhot優先）。過去日も表示できる。書き込みには hotInsp を使う。
+  const inspData=useMemo(()=> (inspArch&&Object.keys(inspArch).length)?{...inspArch,...hotInsp}:hotInsp, [inspArch,hotInsp]);
   const [schedDataH,setSchedDataH]=useState({});
   const [schedDataS,setSchedDataS]=useState({});
   const [memoDataH,setMemoDataH]=useState({});
@@ -1709,7 +1713,7 @@ const App=()=>{
       const bkFinal=`insp-${req.dk}-${req.idx}`;
       const entry=await applyLoanerAction({...form},loanerAction,bkFinal,userName);
       let placedPending=false,placedSeq=null;
-      await writeShared(STOR+'insp',inspData,base=>{
+      await writeShared(STOR+'insp',hotInsp,base=>{
         const rows=((base[req.dk]||[]).map(r=>r||blankInsp()));
         while(rows.length<=req.idx)rows.push(blankInsp());
         const prevRow=rows[req.idx];
@@ -1877,7 +1881,7 @@ const App=()=>{
     const deletedSeq=req.initial?.seq;
     const deletedName=req.initial?.name;
     if(req.type==='insp'){
-      await writeShared(STOR+'insp',inspData,base=>{
+      await writeShared(STOR+'insp',hotInsp,base=>{
         const rows=((base[req.dk]||[]).map(r=>r||blankInsp()));
         if(req.idx<rows.length)rows[req.idx]=blankInsp();
         while(rows.length>0&&!rows[rows.length-1]?.name)rows.pop();

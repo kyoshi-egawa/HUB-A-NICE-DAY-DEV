@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.63';
+const APP_VERSION = '1.64';
 
 
 
@@ -6622,8 +6622,14 @@ function AppInner() {
   // iframeオーバーレイで重ねて表示する（全画面が一瞬も切れない）。通常時は従来どおり遷移。
   const [custOverlay,setCustOverlay]=useState(false);
 
-  // 車検は両店舗共通
-  const [inspData,   setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},15000);
+  // 車検は両店舗共通。hot(insp)=今日以降＋直近。過去は保管箱(insp-arch)から合体して表示する。
+  const [hotInsp,    setInspData, updateLocalInspData]  =useShared(STOR+'insp',{},15000);
+  const [inspArch, setInspArch] = useState({});          // 保管箱（過去日）。起動時に1回読むだけ・書き換えない
+  useEffect(()=>{ // 保管箱を1回読み込む（以降ほぼ変わらないのでポーリングしない）
+    sGet(STOR+'insp-arch').then(v=>{ if(v&&typeof v==='object'&&!Array.isArray(v)) setInspArch(v); }).catch(()=>{});
+  },[]);
+  // 表示用＝hot と 保管箱 の合体（同じ日付は hot 優先）。書き込みは常に setInspData(=hot) 経由なので保管箱は汚れない。
+  const inspData = useMemo(()=> (inspArch && Object.keys(inspArch).length) ? {...inspArch, ...hotInsp} : hotInsp, [inspArch, hotInsp]);
   // 顧客リストからの仮予約（スケジュール未登録）専用ストレージ
   // キー: "名前::YYYY-M-D"  値: {status:'provisional', formData:{...}, custMonth, custRowIdx, savedAt}
   const [custBookings, setCustBookings]=useShared(STOR+'custbk',{},15000);

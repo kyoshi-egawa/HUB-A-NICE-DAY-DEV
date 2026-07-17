@@ -85,7 +85,7 @@ const STOR='hub-v8-dev-';
 // index側の全画面オーバーレイ（iframe）内で開かれているか。埋め込み時は
 // 「スケジュールに戻る」がページ遷移ではなく親へのpostMessage（オーバーレイ閉鎖）になる。
 const IS_EMBED=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
-const APP_VERSION='1.63'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
+const APP_VERSION='1.64'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
 const CHUNK_SIZE=100;
 // ファイル名をGASキーに使える形に変換
@@ -1341,7 +1341,11 @@ const App=()=>{
   },[]);
   const [bgSyncing,setBgSyncing]=useState(false); // GASバックグラウンド同期中（キャッシュ表示中の読み込みアピール）
   const [importing,setImporting]=useState(false);
-  const [inspData,setInspData]=useState({});
+  const [hotInsp,setInspData]=useState({});   // hot=今日以降＋直近。書き込みは全てサーバー最新(hot)から構築
+  const [inspArch,setInspArch]=useState({});  // 保管箱（過去日）。起動時に1回読むだけ・書き換えない
+  useEffect(()=>{ sGet(STOR+'insp-arch').then(v=>{ if(v&&typeof v==='object'&&!Array.isArray(v)) setInspArch(v); }).catch(()=>{}); },[]);
+  // 表示用＝hotと保管箱の合体（同じ日付はhot優先）。カレンダーの過去月も正しく出る。書き込みには使わない。
+  const inspData=useMemo(()=> (inspArch&&Object.keys(inspArch).length)?{...inspArch,...hotInsp}:hotInsp, [inspArch,hotInsp]);
   const inspWriteRef=useRef(0); // 最後にローカル書き込みした時刻
   const [syncToast,setSyncToast]=useState(null); // スケジュール反映状況トースト {status,name,retry}
   const [pendings,setPendings]=useState([]);     // 未反映の予約（localStorageの控え。起動時にサーバーと突き合わせて残ったもの）
