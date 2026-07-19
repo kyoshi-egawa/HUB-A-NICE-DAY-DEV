@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.64';
+const APP_VERSION = '1.65';
 
 
 
@@ -1644,6 +1644,14 @@ const snapAddBack = async (date, rows) => {
   await fetch(GAS_URL, {
     method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'},
     body: JSON.stringify({action:'snapAddBack', prefix:STOR, date, rows, apiKey:GAS_API_KEY}),
+  });
+};
+// 店別復旧: 指定店(honten/sanda)の整備・メモ・整備代車だけを戻す（車検と他店には触らない）
+const snapRestoreStore = async (file, store) => {
+  if(!GAS_READY) return;
+  await fetch(GAS_URL, {
+    method:'POST', mode:'no-cors', headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body: JSON.stringify({action:'snapRestoreStore', prefix:STOR, file, store, apiKey:GAS_API_KEY}),
   });
 };
 
@@ -6249,11 +6257,12 @@ const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
   const [done,setDone]=useState(false);
   const [drillDate,setDrillDate]=useState(null);  // 詳しい中身→日付タップで開くその日の明細
   const [added,setAdded]=useState({});            // 部分復旧で足した予約(sig→true)。即時反映用
-  const [elapsed,setElapsed]=useState(0);         // 全体復旧の経過秒（進捗表示用）
+  const [elapsed,setElapsed]=useState(0);         // 復旧の経過秒（進捗表示用）
+  const [restoreScope,setRestoreScope]=useState('all'); // 'all'=両店舗全部 / 'honten' / 'sanda'
 
   useEffect(()=>{
     if(!isOpen)return;
-    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);setDrillDate(null);setAdded({});setElapsed(0);
+    setList(null);setSel(null);setDetail(null);setConfirming(false);setRestoring(false);setDone(false);setDrillDate(null);setAdded({});setElapsed(0);setRestoreScope('all');
     snapList().then(a=>{ setList(a); if(a.length) setSel(a[0]); });
   },[isOpen]);
 
@@ -6272,14 +6281,16 @@ const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
   const dailyList = (list||[]).filter(e=>e.kind==='daily');
   const sum = sel&&sel.summary?sel.summary:{insp:0,sched:0,loaner:0,memo:0};
 
-  const pick=(e)=>{ setSel(e); setDetail(null); setConfirming(false); setDrillDate(null); setAdded({}); };
+  const pick=(e)=>{ setSel(e); setDetail(null); setConfirming(false); setDrillDate(null); setAdded({}); setRestoreScope('all'); };
+  const startScope=(sc)=>{ setRestoreScope(sc); setConfirming(true); };
   const loadDetail = async()=>{ if(!sel)return; setDetailLoading(true); const d=await snapRead(sel.file); setDetail(d); setDetailLoading(false); };
   const doRestore = async()=>{
     if(!sel||!allowed)return;
     setRestoring(true); setElapsed(0);
     const t0=Date.now();
     const iv=setInterval(()=>setElapsed(Math.round((Date.now()-t0)/1000)),1000); // 経過秒を1秒ごとに更新
-    await snapRestore(sel.file);
+    if(restoreScope==='all') await snapRestore(sel.file);                 // 両店舗すべて（車検含む）
+    else                     await snapRestoreStore(sel.file,restoreScope); // その店の整備・メモ・整備代車だけ
     await new Promise(r=>setTimeout(r,3500)); // no-corsで応答不可→待ってからリロード
     clearInterval(iv);
     setDone(true);
@@ -6362,8 +6373,12 @@ const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
               </div>
 
               {!confirming ? <>
-                <button onClick={()=>setConfirming(true)} style={{width:'100%',border:'none',borderRadius:11,padding:'13px',fontSize:15,fontWeight:800,color:'white',background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',cursor:'pointer'}}>↩ この時点（{sel.tsText}）に戻す</button>
-                <button onClick={loadDetail} disabled={detailLoading} style={{width:'100%',marginTop:8,border:'1px solid #e5e7eb',borderRadius:11,padding:'11px',fontSize:13,fontWeight:700,color:'#475569',background:'white',cursor:'pointer'}}>{detailLoading?'読み込み中…':'🔍 詳しい中身を見る'}</button>
+                <div style={{fontSize:12,fontWeight:800,color:'#334155',margin:'2px 2px 7px'}}>戻す範囲を選ぶ</div>
+                <button onClick={()=>startScope('honten')} style={{width:'100%',border:'1px solid #c7d7f5',borderRadius:11,padding:'11px 13px',fontSize:13.5,fontWeight:800,color:'#173da8',background:'#eff4ff',cursor:'pointer',textAlign:'left'}}>🔵 本店だけ戻す<div style={{fontSize:11,fontWeight:600,color:'#64748b',marginTop:2}}>整備・メモ・整備の代車のみ／車検と三田は変わりません</div></button>
+                <button onClick={()=>startScope('sanda')} style={{width:'100%',marginTop:7,border:'1px solid #f3b4ab',borderRadius:11,padding:'11px 13px',fontSize:13.5,fontWeight:800,color:'#b91c1c',background:'#fdf0ee',cursor:'pointer',textAlign:'left'}}>🔴 三田店だけ戻す<div style={{fontSize:11,fontWeight:600,color:'#64748b',marginTop:2}}>整備・メモ・整備の代車のみ／車検と本店は変わりません</div></button>
+                <button onClick={()=>startScope('all')} style={{width:'100%',marginTop:7,border:'none',borderRadius:11,padding:'11px 13px',fontSize:13.5,fontWeight:800,color:'white',background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',cursor:'pointer',textAlign:'left'}}>⚠️ 両店舗すべてを戻す（車検を含む全部）<div style={{fontSize:11,fontWeight:600,color:'#dbe6fb',marginTop:2}}>本店・三田の車検・整備・代車・メモが全部この時点に戻ります</div></button>
+                <div style={{marginTop:9,fontSize:11,color:'#94a3b8',lineHeight:1.6}}>車検（車検予約）は本店・三田が1つにまとまった作りのため、店別では戻せません。車検を戻すなら「両店舗すべて」を、1〜2件だけなら下の「詳しい中身を見る」→「足す」をお使いください。</div>
+                <button onClick={loadDetail} disabled={detailLoading} style={{width:'100%',marginTop:10,border:'1px solid #e5e7eb',borderRadius:11,padding:'11px',fontSize:13,fontWeight:700,color:'#475569',background:'white',cursor:'pointer'}}>{detailLoading?'読み込み中…':'🔍 詳しい中身を見る（1件ずつ足す）'}</button>
                 <div style={{marginTop:13,background:'#e6f6ec',border:'1px solid #b7e4c7',borderRadius:10,padding:'10px 13px',fontSize:12,color:'#334155',display:'flex',gap:9}}>
                   <span>🛡️</span><div><b>戻す操作も取り消せます。</b> 復旧の直前に「今の状態」も自動で1つ保存するので、間違えてもすぐ元に戻せます。</div>
                 </div>
@@ -6437,12 +6452,19 @@ const RestoreModal = memo(({isOpen, onClose, currentUser, inspData})=>{
                   {elapsed>=120&&<div style={{fontSize:11.5,color:'#94a3b8',marginTop:9}}>データが大きいと少し長くかかります。まだ処理中です。もうしばらくお待ちください。</div>}
                 </div>
               </> : <>
-                <div style={{background:'#fdece9',border:'1px solid #f3b4ab',borderRadius:10,padding:'12px 14px'}}>
-                  <div style={{fontWeight:800,color:'#d33a2c',fontSize:14,marginBottom:3}}>⚠️ {sel.tsText} の状態に戻します</div>
-                  <div style={{fontSize:12,color:'#475569'}}>現在のデータは、この時点の内容で上書きされます。全端末に反映されます。<b>1〜2分ほどかかります。</b></div>
-                </div>
+                {restoreScope==='all' ? (
+                  <div style={{background:'#fdece9',border:'1px solid #f3b4ab',borderRadius:10,padding:'12px 14px'}}>
+                    <div style={{fontWeight:800,color:'#d33a2c',fontSize:14,marginBottom:3}}>⚠️ 両店舗すべてが {sel.tsText} に戻ります</div>
+                    <div style={{fontSize:12,color:'#475569'}}><b>本店・三田の車検・整備・代車・メモが全部</b>この時点で上書きされます（全端末に反映）。<b>1〜2分ほどかかります。</b></div>
+                  </div>
+                ) : (
+                  <div style={{background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:10,padding:'12px 14px'}}>
+                    <div style={{fontWeight:800,color:'#173da8',fontSize:14,marginBottom:3}}>{restoreScope==='honten'?'🔵 本店':'🔴 三田店'}だけを {sel.tsText} に戻します</div>
+                    <div style={{fontSize:12,color:'#475569'}}>この店の<b>整備・メモ・整備の代車だけ</b>戻します。<b>車検と、もう片方の店は一切変わりません。</b></div>
+                  </div>
+                )}
                 <div style={{display:'flex',gap:8,marginTop:12}}>
-                  <button onClick={doRestore} style={{flex:1,border:'none',borderRadius:9,padding:'12px',fontWeight:800,fontSize:14,color:'white',background:'#d33a2c',cursor:'pointer'}}>はい、この時点に戻す</button>
+                  <button onClick={doRestore} style={{flex:1,border:'none',borderRadius:9,padding:'12px',fontWeight:800,fontSize:14,color:'white',background:restoreScope==='all'?'#d33a2c':'#1d4ed8',cursor:'pointer'}}>はい、{restoreScope==='all'?'両店舗すべて':restoreScope==='honten'?'本店だけ':'三田店だけ'}戻す</button>
                   <button onClick={()=>setConfirming(false)} style={{border:'1px solid #e5e7eb',background:'white',borderRadius:9,padding:'12px 18px',fontWeight:700,fontSize:13,color:'#475569',cursor:'pointer'}}>やめる</button>
                 </div>
               </>}

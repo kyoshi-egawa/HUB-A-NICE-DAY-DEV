@@ -63,11 +63,21 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.64';
+const MOBILE_VERSION='1.65';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
+
+// ── データ復旧（GAS v10スナップショット）。PC版と同じ4名のみ ──
+const RESTORE_ALLOWED=[{uid:'h0',name:'見取勇一'},{uid:'h1',name:'見取大介'},{uid:'s10',name:'藤原昭人'},{uid:'h7',name:'江川京志'}];
+const canRestore=(u)=>!!u&&RESTORE_ALLOWED.some(a=>(u.uid&&a.uid===u.uid)||(u.name&&a.name===u.name));
+const snapList=async()=>{ try{ const r=await fetch(`${GAS_URL}?action=snapList&prefix=${encodeURIComponent(STOR)}&apiKey=${encodeURIComponent(GAS_API_KEY)}`,{cache:'no-store'}); const t=await r.text(); if(!t||t.startsWith('error'))return []; const a=JSON.parse(t); return Array.isArray(a)?a:[]; }catch{ return []; } };
+const snapRead=async(file)=>{ try{ const r=await fetch(`${GAS_URL}?action=snapRead&prefix=${encodeURIComponent(STOR)}&file=${encodeURIComponent(file)}&apiKey=${encodeURIComponent(GAS_API_KEY)}`,{cache:'no-store'}); const t=await r.text(); if(!t||t.startsWith('error'))return null; return JSON.parse(t); }catch{ return null; } };
+const snapPost=async(body)=>{ await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({...body,prefix:STOR,apiKey:GAS_API_KEY})}); };
+const snapRestore=async(file)=>snapPost({action:'snapRestore',file});
+const snapRestoreStore=async(file,store)=>snapPost({action:'snapRestoreStore',file,store});
+const snapAddBack=async(date,rows)=>snapPost({action:'snapAddBack',date,rows});
 const COURSES=[
   {id:1,name:'マッハ車検',  short:'マ',color:'#b91c1c',bg:'#fca5a5'},
   {id:2,name:'クイック車検',short:'ク',color:'#1d4ed8',bg:'#bfdbfe'},
@@ -1359,6 +1369,132 @@ const MailModal=({user,onClose,onSaveEmail})=>{
   );
 };
 
+// ── データ復旧モーダル（モバイル・ボトムシート。PC版と同じ機能：店別/全体/足す） ──
+const MobileRestoreModal=({user,onClose,inspData})=>{
+  const [list,setList]=useState(null);
+  const [sel,setSel]=useState(null);
+  const [detail,setDetail]=useState(null);
+  const [detailLoading,setDetailLoading]=useState(false);
+  const [drillDate,setDrillDate]=useState(null);
+  const [added,setAdded]=useState({});
+  const [scope,setScope]=useState(null);      // null=選択画面 / 'all'|'honten'|'sanda'=確認
+  const [restoring,setRestoring]=useState(false);
+  const [elapsed,setElapsed]=useState(0);
+  const [done,setDone]=useState(false);
+  const allowed=canRestore(user);
+  useEffect(()=>{ snapList().then(a=>{ setList(a); if(a.length)setSel(a[0]); }); },[]);
+  const rowSig=(r)=>[String((r&&r.name)||''),String((r&&r.time)||''),String((r&&r.carType)||'')].join('|');
+  const kindLabel=(k)=>k==='daily'?'日次':k==='pre-restore'?'復旧前':k==='manual'?'手動':'自動';
+  const pick=(e)=>{ setSel(e); setDetail(null); setDrillDate(null); setScope(null); setAdded({}); };
+  const loadDetail=async()=>{ if(!sel)return; setDetailLoading(true); const d=await snapRead(sel.file); setDetail(d); setDetailLoading(false); };
+  const doAddBack=async(date,r)=>{ await snapAddBack(date,[r]); setAdded(a=>({...a,[rowSig(r)]:true})); };
+  const doRestore=async()=>{
+    if(!sel||!allowed)return;
+    setRestoring(true); setElapsed(0);
+    const t0=Date.now(); const iv=setInterval(()=>setElapsed(Math.round((Date.now()-t0)/1000)),1000);
+    if(scope==='all') await snapRestore(sel.file); else await snapRestoreStore(sel.file,scope);
+    await new Promise(r=>setTimeout(r,3500)); clearInterval(iv); setDone(true); setTimeout(()=>location.reload(),1500);
+  };
+  const sum=(sel&&sel.summary)||{insp:0,sched:0,loaner:0,memo:0};
+  const sheet={background:'white',borderRadius:'16px 16px 0 0',maxHeight:'92vh',display:'flex',flexDirection:'column',boxShadow:'0 -8px 30px rgba(0,0,0,.3)'};
+  const srow=(active)=>({display:'flex',alignItems:'center',gap:9,padding:'9px 11px',border:`1px solid ${active?'#1d4ed8':'#eef2f8'}`,borderRadius:10,marginBottom:6,cursor:'pointer',background:active?'#eff4ff':'white'});
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.55)',zIndex:500,display:'flex',flexDirection:'column',justifyContent:'flex-end'}} onClick={restoring?undefined:onClose}>
+      <div style={sheet} onClick={e=>e.stopPropagation()}>
+        <div style={{background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',color:'white',padding:'12px 16px',display:'flex',alignItems:'center',gap:9,borderRadius:'16px 16px 0 0',flexShrink:0}}>
+          <span style={{fontSize:17}}>🕒</span>
+          <div style={{flex:1}}><div style={{fontSize:15,fontWeight:800}}>データ復旧</div><div style={{fontSize:10,opacity:.85}}>保存時点を選んで戻せます</div></div>
+          <button onClick={onClose} disabled={restoring} style={{background:'rgba(255,255,255,.18)',border:'none',borderRadius:'50%',width:28,height:28,color:'white',fontSize:14,cursor:restoring?'default':'pointer'}}>✕</button>
+        </div>
+        <div style={{overflowY:'auto',padding:'13px 14px 20px'}}>
+          {!allowed ? (
+            <div style={{padding:'34px 16px',textAlign:'center',color:'#64748b'}}><div style={{fontSize:28,marginBottom:8}}>🔒</div><div style={{fontWeight:700,color:'#334155'}}>この操作は許可されていません</div><div style={{fontSize:12,marginTop:6}}>復旧は担当者のみ実行できます。</div></div>
+          ) : done ? (
+            <div style={{padding:'40px 16px',textAlign:'center'}}><div style={{fontSize:32,marginBottom:10}}>✅</div><div style={{fontSize:15,fontWeight:800,color:'#0f9d58'}}>復旧しました</div><div style={{fontSize:12,color:'#64748b',marginTop:6}}>最新を読み込むため再読み込みします…</div></div>
+          ) : restoring ? (
+            <div style={{background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:12,padding:'18px 16px',textAlign:'center'}}>
+              <div style={{fontSize:15,fontWeight:800,color:'#173da8'}}>復旧しています…</div>
+              <div style={{fontSize:12,color:'#475569',margin:'4px 0 13px'}}>画面はそのままでお待ちください（自動で切り替わります）。</div>
+              <div style={{height:9,borderRadius:999,background:'#dbe6fb',overflow:'hidden'}}><div style={{height:'100%',width:`${Math.min(95,Math.round(elapsed/90*100))}%`,background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',borderRadius:999,transition:'width 1s linear'}}/></div>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:12,fontWeight:700,color:'#64748b',marginTop:8}}><span>経過 {elapsed}秒</span><span>目安 1〜2分</span></div>
+            </div>
+          ) : scope ? (
+            <>
+              {scope==='all' ? (
+                <div style={{background:'#fdece9',border:'1px solid #f3b4ab',borderRadius:10,padding:'12px 14px'}}><div style={{fontWeight:800,color:'#d33a2c',fontSize:14,marginBottom:3}}>⚠️ 両店舗すべてが {sel&&sel.tsText} に戻ります</div><div style={{fontSize:12,color:'#475569'}}><b>本店・三田の車検・整備・代車・メモが全部</b>この時点で上書きされます。1〜2分ほどかかります。</div></div>
+              ) : (
+                <div style={{background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:10,padding:'12px 14px'}}><div style={{fontWeight:800,color:'#173da8',fontSize:14,marginBottom:3}}>{scope==='honten'?'🔵 本店':'🔴 三田店'}だけを {sel&&sel.tsText} に戻します</div><div style={{fontSize:12,color:'#475569'}}>この店の<b>整備・メモ・整備の代車だけ</b>戻します。車検と、もう片方の店は変わりません。</div></div>
+              )}
+              <div style={{display:'flex',gap:8,marginTop:12}}>
+                <button onClick={doRestore} style={{flex:1,border:'none',borderRadius:9,padding:'13px',fontWeight:800,fontSize:14,color:'white',background:scope==='all'?'#d33a2c':'#1d4ed8'}}>はい、{scope==='all'?'すべて':scope==='honten'?'本店だけ':'三田だけ'}戻す</button>
+                <button onClick={()=>setScope(null)} style={{border:'1px solid #e5e7eb',background:'white',borderRadius:9,padding:'13px 18px',fontWeight:700,fontSize:13,color:'#475569'}}>やめる</button>
+              </div>
+            </>
+          ) : (
+            <>
+              {list===null ? <div style={{padding:'20px',textAlign:'center',color:'#94a3b8',fontSize:13}}>読み込み中…</div>
+               : list.length===0 ? <div style={{padding:'20px',textAlign:'center',color:'#94a3b8',fontSize:13}}>保存された時点がまだありません<br/>（30分ごとに自動で貯まります）</div>
+               : <>
+                <div style={{fontSize:11,fontWeight:800,color:'#94a3b8',margin:'0 2px 7px'}}>戻したい時点を選ぶ</div>
+                <div style={{maxHeight:150,overflowY:'auto',marginBottom:12}}>
+                  {list.map(e=>(
+                    <div key={e.file} style={srow(sel&&sel.file===e.file)} onClick={()=>pick(e)}>
+                      <span style={{width:28,height:28,borderRadius:8,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,background:e.kind==='daily'?'#eff4ff':'#e6f6ec'}}>{e.kind==='daily'?'📅':'🕒'}</span>
+                      <div style={{flex:1,minWidth:0}}><div style={{fontWeight:700,fontSize:12.5}}>{e.tsText}<span style={{fontSize:9,color:'#94a3b8',marginLeft:5,fontWeight:600}}>{kindLabel(e.kind)}</span></div><div style={{fontSize:10.5,color:'#64748b'}}>車検{e.summary?e.summary.insp:0}・整備{e.summary?e.summary.sched:0}</div></div>
+                    </div>
+                  ))}
+                </div>
+                {sel&&<>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7,marginBottom:12}}>
+                    {[['🚗車検',sum.insp],['⏰整備',sum.sched],['🔑代車',sum.loaner],['📝メモ',sum.memo]].map(([l,n])=>(<div key={l} style={{border:'1px solid #e5e7eb',borderRadius:9,padding:'7px 10px',background:'#f8fafc'}}><div style={{fontSize:18,fontWeight:800,color:'#1d4ed8',lineHeight:1.1}}>{n}</div><div style={{fontSize:10,color:'#64748b',fontWeight:700}}>{l}</div></div>))}
+                  </div>
+                  <div style={{fontSize:11,fontWeight:800,color:'#334155',margin:'2px 2px 7px'}}>戻す範囲を選ぶ</div>
+                  <button onClick={()=>setScope('honten')} style={{width:'100%',border:'1px solid #c7d7f5',borderRadius:10,padding:'10px 12px',fontSize:13,fontWeight:800,color:'#173da8',background:'#eff4ff',textAlign:'left'}}>🔵 本店だけ戻す<div style={{fontSize:10,fontWeight:600,color:'#64748b',marginTop:1}}>整備・メモ・整備の代車のみ／車検と三田は変わりません</div></button>
+                  <button onClick={()=>setScope('sanda')} style={{width:'100%',marginTop:6,border:'1px solid #f3b4ab',borderRadius:10,padding:'10px 12px',fontSize:13,fontWeight:800,color:'#b91c1c',background:'#fdf0ee',textAlign:'left'}}>🔴 三田店だけ戻す<div style={{fontSize:10,fontWeight:600,color:'#64748b',marginTop:1}}>整備・メモ・整備の代車のみ／車検と本店は変わりません</div></button>
+                  <button onClick={()=>setScope('all')} style={{width:'100%',marginTop:6,border:'none',borderRadius:10,padding:'10px 12px',fontSize:13,fontWeight:800,color:'white',background:'linear-gradient(135deg,#1e3a8a,#1d4ed8)',textAlign:'left'}}>⚠️ 両店舗すべてを戻す（車検を含む全部）<div style={{fontSize:10,fontWeight:600,color:'#dbe6fb',marginTop:1}}>本店・三田の全データがこの時点に戻ります</div></button>
+                  <div style={{margin:'8px 2px 0',fontSize:10.5,color:'#94a3b8',lineHeight:1.6}}>車検は本店・三田が1つの作りのため店別では戻せません。1〜2件だけなら下の「詳しい中身」→「足す」で。</div>
+                  <button onClick={loadDetail} disabled={detailLoading} style={{width:'100%',marginTop:9,border:'1px solid #e5e7eb',borderRadius:10,padding:'10px',fontSize:12.5,fontWeight:700,color:'#475569',background:'white'}}>{detailLoading?'読み込み中…':'🔍 詳しい中身を見る（1件ずつ足す）'}</button>
+                  {detail&&detail.keys&&(()=>{
+                    let insp={}; try{insp=JSON.parse(detail.keys[STOR+'insp']||'{}')||{};}catch(e){}
+                    if(drillDate){
+                      const DOWJ=['日','月','火','水','木','金','土'];
+                      const rows=(insp[drillDate]||[]).filter(r=>r&&r.name&&r.bookingStatus!=='cancelled');
+                      const liveHave={}; ((inspData&&inspData[drillDate])||[]).forEach(r=>{ if(r&&r.name&&r.bookingStatus!=='cancelled') liveHave[rowSig(r)]=true; });
+                      const isHere=(r)=>!!(liveHave[rowSig(r)]||added[rowSig(r)]);
+                      const missCnt=rows.filter(r=>!isHere(r)).length;
+                      const p=drillDate.split('-').map(Number); const dw=DOWJ[new Date(p[0],p[1]-1,p[2]).getDay()];
+                      return <div style={{marginTop:10,border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 12px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:9}}><button onClick={()=>setDrillDate(null)} style={{width:26,height:26,borderRadius:7,border:'1px solid #d7dbe2',background:'white',color:'#64748b',fontSize:14}}>‹</button><div style={{fontSize:14,fontWeight:800}}>{p[1]}/{p[2]}（{dw}）</div><div style={{marginLeft:'auto',fontSize:11,fontWeight:700,color:'#64748b'}}>車検 {rows.length}台</div></div>
+                        {missCnt>0&&<div style={{background:'#fbeed5',border:'1px solid #e6c98a',borderRadius:9,padding:'8px 10px',marginBottom:8,fontSize:11.5,color:'#7a4d06',fontWeight:700}}>⚠️ {missCnt}件が今のデータにありません。「足す」で今の予約を消さずに戻せます。</div>}
+                        {rows.length===0?<div style={{fontSize:12,color:'#94a3b8'}}>予約なし</div>:
+                         <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                           {rows.map((r,i)=>{ const isConf=r.bookingStatus==='confirmed'&&!r.pendingApproval; const here=isHere(r); const just=!!added[rowSig(r)];
+                             return <div key={i} style={{border:`1px solid ${here?'#eef2f8':'#e6c98a'}`,borderRadius:9,padding:'7px 10px',display:'flex',gap:9,alignItems:'flex-start',background:here?'white':'#fffaf0'}}>
+                               <div style={{fontSize:13,fontWeight:800,color:'#173da8',width:42,flexShrink:0}}>{r.time||'—'}</div>
+                               <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:800}}>{r.name}</div>{r.carType&&<div style={{fontSize:11,color:'#64748b'}}>{r.carType}</div>}{r.loaner&&<div style={{fontSize:10.5,color:'#0e9d58',fontWeight:700,marginTop:1}}>🔑 {r.loaner}</div>}</div>
+                               {here?(just?<span style={{fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:999,alignSelf:'center',whiteSpace:'nowrap',background:'#e4f6ec',color:'#0e9d58'}}>✓足しました</span>:<span style={{fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:999,alignSelf:'center',whiteSpace:'nowrap',background:isConf?'#e4f6ec':'#fbeed5',color:isConf?'#0e9d58':'#c9760a'}}>{isConf?'確定':r.pendingApproval?'承認待ち':'仮'}</span>):<button onClick={()=>doAddBack(drillDate,r)} style={{alignSelf:'center',flexShrink:0,fontSize:11,fontWeight:800,padding:'5px 12px',borderRadius:999,border:'none',background:'#1d4ed8',color:'white'}}>＋足す</button>}
+                             </div>;
+                           })}
+                         </div>}
+                      </div>;
+                    }
+                    const dates=Object.keys(insp).filter(d=>(insp[d]||[]).some(r=>r&&r.name&&r.bookingStatus!=='cancelled')).sort();
+                    return <div style={{marginTop:10,border:'1px solid #e5e7eb',borderRadius:10,padding:'10px 12px'}}>
+                      <div style={{fontSize:11.5,fontWeight:800,color:'#334155',marginBottom:6}}>車検予約が入っていた日（{dates.length}日分・押すと明細）</div>
+                      {dates.length===0?<div style={{fontSize:12,color:'#94a3b8'}}>なし</div>:
+                       <div style={{display:'flex',flexWrap:'wrap',gap:5,maxHeight:120,overflowY:'auto'}}>{dates.map(d=>{const c=(insp[d]||[]).filter(r=>r&&r.name&&r.bookingStatus!=='cancelled').length;return <button key={d} onClick={()=>setDrillDate(d)} style={{fontSize:11,background:'#eff4ff',border:'1px solid #c7d7f5',borderRadius:14,padding:'2px 8px',color:'#1e40af',fontWeight:600}}>{d}：{c}台</button>;})}</div>}
+                    </div>;
+                  })()}
+                </>}
+               </>}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App=()=>{
   const [user,setUser]=useState(null);
   const [fadeIn,setFadeIn]=useState(false);
@@ -1396,6 +1532,7 @@ const App=()=>{
   const [editMode,setEditMode]=useState(null); // {type,dk,idx?,slot?,isNew,initial,lockedBy}
   const [saveBanners,setSaveBanners]=useState([]); // 保存状況バナー [{pid,phase:'saving'|'done'|'fail',label,detail,ts}]
   const [mailModal,setMailModal]=useState(false);
+  const [restoreModal,setRestoreModal]=useState(false);
   const inflightRef=useRef(new Set()); // このセッションで進行中の保存pid（起動時チェックの誤検出防止）
   const writeGuardRef=useRef(0);   // 書き込み後70秒はポーリング反映を止める（PC版useSharedと同じ考え方）
   const fetchBusyRef=useRef(false); // 前回の取得が未完了なら次を撃たない（GAS同時実行の積み上がり防止）
@@ -1995,6 +2132,8 @@ const App=()=>{
               style={{padding:'3px 10px',background:'rgba(255,255,255,.15)',border:'none',borderRadius:6,color:'white',fontSize:10,fontWeight:700,cursor:'pointer'}}> {loading?'⏳':'🔄'} </button>
             <button onClick={()=>setMailModal(true)}
               style={{padding:'3px 8px',background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,color:'rgba(255,255,255,.7)',fontSize:10,cursor:'pointer'}}> ✉ </button>
+            {canRestore(user)&&<button onClick={()=>setRestoreModal(true)} title="データ復旧"
+              style={{padding:'3px 8px',background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,color:'rgba(255,255,255,.7)',fontSize:10,cursor:'pointer'}}> 🕒 </button>}
             <button onClick={()=>setUser(null)}
               style={{padding:'3px 8px',background:'rgba(255,255,255,.1)',border:'none',borderRadius:6,color:'rgba(255,255,255,.7)',fontSize:10,cursor:'pointer'}}> ↩ </button>
           </div>
@@ -2067,6 +2206,7 @@ const App=()=>{
         onDelete={editMode.isNew?null:handleDelete}
         onClose={closeEdit}/>}
       {mailModal&&<MailModal user={user} onClose={()=>setMailModal(false)} onSaveEmail={saveNotifyEmail}/>}
+      {restoreModal&&<MobileRestoreModal user={user} onClose={()=>setRestoreModal(false)} inspData={inspData}/>}
     </div>
   );
 };

@@ -10,6 +10,7 @@
 //  - doGet ?action=snapRead  … 指定した時点の中身（プレビュー用）
 //  - doPost action=snapRestore … 指定した時点に全データを戻す（実行直前に現状も自動保存＝やり直し可）
 //  - doPost action=snapAddBack  … 指定日に「消えた予約だけ」を追記（部分復旧・丸ごと上書きしない）
+//  - doPost action=snapRestoreStore … 店別復旧。指定店の整備/メモ/整備代車だけ戻す（車検と他店には触らない）
 //  - 30分ごとの保存は48時間分、日次は90日分を保持し、超過分は自動削除。
 //  ※既存の毎朝2時 dailyBackup（シート丸ごとコピー）はそのまま残す（従来の安全網）。
 //    ただしシートコピーは大きいデータ(Drive保管)の実体を含まないため、復旧は必ずスナップショットを使うこと。
@@ -294,6 +295,18 @@ function doPost(e) {
       return makeResponse(snapAddBack(pfxA, String(body.date || ''), body.rows));
     } catch (erA) { return makeResponse('error: ' + erA.message); }
     finally { if (lockedA) lockA.releaseLock(); }
+  }
+  // v10: 店別復旧（本店だけ／三田だけ。整備・メモ・“整備に紐づく代車”のみ戻し、車検と他店には触らない）
+  if (body.action === 'snapRestoreStore') {
+    var lockS = LockService.getScriptLock();
+    var lockedS = false;
+    try { lockS.waitLock(25000); lockedS = true; } catch (leS) { return makeResponse('error: lock_timeout'); }
+    try {
+      var pfxS = String(body.prefix || '');
+      if (SNAP_ENV_PREFIXES.indexOf(pfxS) < 0) return makeResponse('error: bad prefix');
+      return makeResponse(snapRestoreStore(pfxS, String(body.file || ''), String(body.store || '')));
+    } catch (erS) { return makeResponse('error: ' + erS.message); }
+    finally { if (lockedS) lockS.releaseLock(); }
   }
 
   var lock = LockService.getScriptLock();
@@ -636,6 +649,61 @@ function snapAddBack(prefix, date, rows) {
   else { driveWrite(key, str); writeRow(sheet, key, FILE_MARKER, now); }
   invalidateCache(key);
   return 'ok: added ' + added;
+}
+
+// bookingKey の種類判定（reservationの.bookingKey優先、無ければmapキー）
+function _bkStarts(res, mapKey, pre) {
+  var bk = String((res && res.bookingKey) || mapKey || '');
+  return bk.indexOf(pre) === 0;
+}
+
+// 店別復旧: 指定店の「整備(sched)・メモ(memo)・整備に紐づく代車(sched-のlres)」だけを snapshot に戻す。
+// 車検(insp)・車検に紐づく代車(insp-のlres)・もう片方の店・共有キー(rres/custbk等)には一切触らない。
+// これにより「整備の世界」だけを一貫して戻し、紐付けのズレを起こさない。実行直前にpre-restore控えを取る。
+function snapRestoreStore(prefix, fname, store) {
+  if (store !== 'honten' && store !== 'sanda') return 'error: bad store';
+  var folder = snapFolder();
+  var it = folder.getFilesByName(fname);
+  if (!it.hasNext()) return 'error: snapshot not found';
+  try { snapCreate(prefix, 'pre-restore', '店別復旧(' + store + ')直前の自動保存'); } catch (e) {}
+  var payload;
+  try { payload = JSON.parse(it.next().getBlob().getDataAsString()); } catch (pe) { return 'error: broken snapshot'; }
+  if (!payload || payload.prefix !== prefix || !payload.keys) return 'error: prefix mismatch';
+  var sheet = getSheet();
+  var cache = CacheService.getScriptCache();
+  var restored = [];
+
+  // 整備・メモ: その店のキーを丸ごと戻す（スロット/日付管理・位置番号に依存しない）
+  ['-sched', '-memo'].forEach(function (suf) {
+    var k = prefix + store + suf;
+    if (!payload.keys.hasOwnProperty(k)) return;
+    putValue(sheet, k, String(payload.keys[k] == null ? '' : payload.keys[k]));
+    restored.push(store + suf);
+  });
+
+  // 代車(lres): 整備に紐づく代車(sched-)だけ snapshot に戻し、車検に紐づく代車(insp-)は今のまま残す。
+  var lresKey = prefix + store + '-lres';
+  if (payload.keys.hasOwnProperty(lresKey)) {
+    var snapLres = {}, curLres = {};
+    try { snapLres = JSON.parse(payload.keys[lresKey] || '{}') || {}; } catch (e) {}
+    var curRaw = readOneValue(sheet, cache, lresKey, -2);
+    try { curLres = (curRaw && curRaw !== 'null') ? JSON.parse(curRaw) : {}; } catch (e) {}
+    var carIds = {}, cx;
+    for (cx in curLres) carIds[cx] = 1;
+    for (cx in snapLres) carIds[cx] = 1;
+    var merged = {};
+    for (var car in carIds) {
+      var out = {}, bk;
+      var cur = curLres[car] || {};
+      for (bk in cur) { if (_bkStarts(cur[bk], bk, 'insp-')) out[bk] = cur[bk]; }   // 車検代車=現状維持
+      var snp = snapLres[car] || {};
+      for (bk in snp) { if (_bkStarts(snp[bk], bk, 'sched-')) out[bk] = snp[bk]; }   // 整備代車=snapshotへ
+      if (Object.keys(out).length) merged[car] = out;
+    }
+    putValue(sheet, lresKey, JSON.stringify(merged));
+    restored.push(store + '-lres(整備分のみ)');
+  }
+  return 'ok: ' + store + ' restored [' + restored.join(', ') + ']';
 }
 
 // ============================================================
