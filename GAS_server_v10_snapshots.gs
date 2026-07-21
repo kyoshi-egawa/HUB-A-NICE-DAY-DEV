@@ -358,6 +358,9 @@ function dailyBackup() {
   if (existing) ss.deleteSheet(existing);
   var copy = source.copyTo(ss);
   copy.setName(sheetName);
+  // トリガー実行にはアクティブシートが無く、moveActiveSheet だけだと
+  // "Please select an active sheet first." で落ちて cleanupOldBackups に到達しない。
+  ss.setActiveSheet(copy);
   ss.moveActiveSheet(ss.getSheets().length);
   cleanupOldBackups();
   Logger.log('backup done: ' + sheetName);
