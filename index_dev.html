@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.68';
+const APP_VERSION = '1.69';
 
 
 
@@ -1679,6 +1679,20 @@ const writeVerified=async(key,mutate,check,tries=3)=>{
   }
   console.error('[WRITE] GASに反映できませんでした:',key);
   return false;
+};
+
+// ── 保存/削除が最終的に失敗した時に通知メールを送る（GASの notifyFail アクション）──
+//   宛先は共有キー ${STOR}notify-emails の {スタッフ名: アドレス} マップ。mobile.html と同じ仕組み。
+//   未対応デプロイ／宛先未設定なら GAS 側で無視される（フロントは失敗しても害なし）。
+//   ※これまで PC(index) は失敗をアラートするだけでメールを出していなかった。運用者が席を外していると
+//     気づけないため、mobile と同様にメール通知を出す（2026-07-29 追加）。
+const notifyFailMail = async (detail, user)=>{
+  try{
+    const body=JSON.stringify({action:'notifyFail',apiKey:GAS_API_KEY,emailsKey:STOR+'notify-emails',user:user||'',env:STOR==='hub-v8-'?'本番':'DEV',detail:String(detail||'')});
+    await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body});
+  }catch(e){
+    try{await new Promise(r=>setTimeout(r,1500));await fetch(GAS_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'notifyFail',apiKey:GAS_API_KEY,emailsKey:STOR+'notify-emails',user:user||'',env:STOR==='hub-v8-'?'本番':'DEV',detail:String(detail||'')})});}catch(e2){}
+  }
 };
 
 // ===========================================================
@@ -6831,10 +6845,14 @@ function AppInner() {
         try{ const fresh=await sGet(STOR+'insp'); if(fresh&&typeof fresh==='object'&&!Array.isArray(fresh)) updateLocalInspData(fresh); }catch(e){}
       }else if(o.alert!==false){
         alert(`⚠️ ${o.name?o.name+' の':''}${o.verb||'変更'}がサーバーに反映されていません。\nもう一度お試しください。`);
+        // ★真の失敗（3回書いても着地せず）は運用者にメール通知（席を外していても気づける）。
+        const _dk=o.dk?String(o.dk):'';const _dp=_dk.split('-');
+        const _when=_dp.length===3?`${_dp[0]}年${_dp[1]}月${_dp[2]}日`:_dk;
+        notifyFailMail(`${_when?_when+' の':''}車検予約「${o.name||''}」の${o.verb||'変更'}がサーバーに保存できていない可能性があります（PC・${currentUser?.name||'不明'}）。アプリで該当日を確認し、反映されていなければもう一度操作してください。`, currentUser?.name);
       }
       if(typeof o.onDone==='function')o.onDone(ok);
     })();
-  },[updateLocalInspData]);
+  },[updateLocalInspData,currentUser]);
   // 顧客リストからの仮予約（スケジュール未登録）専用ストレージ
   // キー: "名前::YYYY-M-D"  値: {status:'provisional', formData:{...}, custMonth, custRowIdx, savedAt}
   const [custBookings, setCustBookings]=useShared(STOR+'custbk',{},15000);
@@ -7465,7 +7483,7 @@ function AppInner() {
       persistInsp(
         base=>removeInspBooking(base,dk,_tgt),
         back=>!inspBookingPresent(back,dk,_tgt),
-        {name:delName,verb:'削除'}
+        {name:delName,verb:'削除',dk}
       );
       // entryDate・linkedInspDateもクリア、matchName/matchNoも渡してcustId不在時も対応
       if(delCustId||delName) syncCustStatus(delCustId,'cancel',{entryDate:'',linkedInspDate:''},delName,delNo);
@@ -7563,7 +7581,7 @@ function AppInner() {
     persistInsp(
       base=>patchInspBooking(base,dk,_tgt,{bookingStatus:newStatus}),
       back=>{ const rows=(back&&back[dk])||[]; const j=rows.findIndex(_idOf); return j>=0 && rows[j].bookingStatus===newStatus; },
-      {name:cur.name,verb:'状態変更'}
+      {name:cur.name,verb:'状態変更',dk}
     );
   },[inspData,inspLimits,persistInsp]);
 
@@ -7603,7 +7621,7 @@ function AppInner() {
         persistInsp(
           base=>removeInspBooking(base,dk,_cTgt),
           back=>!inspBookingPresent(back,dk,_cTgt),
-          {name:matchName,verb:'キャンセル'}
+          {name:matchName,verb:'キャンセル',dk}
         );
         // customers-filesのステータスをcancelに更新（チャンク方式）
         // custIdがなくてもname+noでマッチング
@@ -7689,7 +7707,7 @@ function AppInner() {
       persistInsp(
         base=>{ const b=buildInspSave(base,_clParams); _clPending=b.pendingNow; return b.result; },
         back=>{ const rows=(back&&back[dk])||[]; return rows.some(r=>r&&r.bookingStatus!=='cancelled'&&(cs.custId?r.custId===cs.custId:(r.name===cs.name&&String(r.no||'')===String(cs.no||'')))); },
-        {name:cs.name,verb:'保存'}
+        {name:cs.name,verb:'保存',dk}
       );
       if(_clPending){
         const lim=inspLimits[dk]??6;
@@ -7951,6 +7969,9 @@ function AppInner() {
                 try{ const fresh=await sGet(STOR+'insp'); if(fresh&&typeof fresh==='object'&&!Array.isArray(fresh)) updateLocalInspData(fresh); }catch(e){}
               }else{
                 alert(`⚠️ ${_vName} の予約保存がサーバーに反映されていません。\nもう一度開いて保存し直してください。`);
+                // ★真の失敗は運用者にメール通知（控えは残るので起動時チェックでも再検出される）。
+                const _wp=String(_vDk).split('-');const _ww=_wp.length===3?`${_wp[0]}年${_wp[1]}月${_wp[2]}日`:_vDk;
+                notifyFailMail(`${_ww} の車検予約「${_vName}」の保存がサーバーに反映されていません（PC・${currentUser?.name||'不明'}）。アプリで該当日を確認し、無ければもう一度保存し直してください。`, currentUser?.name);
               }
             })();
           }
@@ -8087,7 +8108,7 @@ function AppInner() {
       persistInsp(
         base=>removeInspBooking(base,modalDk,_delTgt),
         back=>!inspBookingPresent(back,modalDk,_delTgt),
-        {name:cancelName,verb:'削除'}
+        {name:cancelName,verb:'削除',dk:modalDk}
       );
       // ★顧客リストのステータスをcancelに連動。
       //   ただし custId が無い手入力の予約は、同名の予約が他にも残っている場合は通知しない
@@ -8162,7 +8183,7 @@ function AppInner() {
     persistInsp(
       base=>patchInspBooking(base,dk,_tgt,{approved:true,pendingApproval:undefined}),
       back=>{ const rows=(back&&back[dk])||[]; const j=rows.findIndex(_inspMatcher(_tgt)); return j>=0 && rows[j].approved===true && !rows[j].pendingApproval; },
-      {name:cur.name,verb:'承認'}
+      {name:cur.name,verb:'承認',dk}
     );
   },[inspData,inspLimits,persistInsp]);
 

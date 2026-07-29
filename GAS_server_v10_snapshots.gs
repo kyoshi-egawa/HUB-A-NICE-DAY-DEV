@@ -1,4 +1,11 @@
-// Hub a Nice Day - GAS server v10 (snapshots / restore)
+// Hub a Nice Day - GAS server v10 (snapshots / restore)  ※v11 追記あり（下記）
+// v11 追加（2026-07-29・要再デプロイ／すべて追加のみで既存経路は不変）:
+//  - doGet ?action=caps … 使える機能を返す（フロントが起動時に検出して経路を切り替えるため）。
+//  - doPost action=patchInsp … insp の「指定した日付キーだけ」をロック内で原子的にマージ（差分書き込み）。
+//    body.dates={ "YYYY-M-D":[行...] | null }。null の日付は削除。insp 全体を送らずに済む。
+//  - 通常書き込み(doPost)に「write key=… len=…」の実行ログを追加（どのキーが重いか診断用）。
+//  ※フロントの patchInsp 利用は caps 検出でオプトインする段階的移行（未デプロイ環境では従来の全文書き込み）。
+//
 // Big values are stored as Google Drive files (not spreadsheet cells),
 // so the sheet stays small and every write is fast. Small values stay in the sheet.
 // Backward compatible: still reads old single-cell and old __CHUNKED__ row data.
@@ -185,6 +192,12 @@ function doGet(e) {
       return makeResponse(itR.next().getBlob().getDataAsString());
     }
 
+    // v11: 機能検出。フロントは起動時に1回だけ読み、使える機能に応じて経路を切り替える。
+    //   （通常のGETなので応答を読める。POSTはno-corsで応答が読めないため能力検出はGETで行う）
+    if (e.parameter.action === 'caps') {
+      return makeResponse(JSON.stringify({ patchInsp: true, notifyFail: true, snapshots: true, ver: 'v11' }));
+    }
+
     // 一括読み: ?keys=a,b,c → {"a":"<値文字列|null>", ...} のJSON。
     // フロントのポーリングを21リクエスト→1リクエストにするための同時実行数対策。
     if (e.parameter.keys) {
@@ -309,6 +322,47 @@ function doPost(e) {
     finally { if (lockedS) lockS.releaseLock(); }
   }
 
+  // v11: insp の差分書き込み（指定した日付キーだけをロック内で原子的にマージする）。
+  //   body.dates = { "2026-7-27":[行...], "2026-7-28":null, ... }。値が null の日付は削除。
+  //   フロントが insp 全体（4KB前後）を送らず変更した日付だけ送れるようにするための経路。
+  //   ★サーバー側で read→merge→write をロック内で完結するので、指定日以外の日付は絶対に触らない。
+  //     ただし「指定した日付の中身」はフロントが渡したもので上書きするので、フロントは必ず
+  //     サーバー最新値を読んでからその日を組み立てて送ること（＝writeVerified/persistInsp と同じ規約）。
+  if (body.action === 'patchInsp') {
+    var lockP = LockService.getScriptLock();
+    var lockedP = false;
+    try { lockP.waitLock(25000); lockedP = true; } catch (leP) { return makeResponse('error: lock_timeout'); }
+    try {
+      var pfxP = String(body.prefix || '');
+      if (SNAP_ENV_PREFIXES.indexOf(pfxP) < 0) return makeResponse('error: bad prefix');
+      var datesP = body.dates;
+      if (!datesP || typeof datesP !== 'object') return makeResponse('error: no dates');
+      var keyP = pfxP + 'insp';
+      var sheetP = getSheet();
+      var cacheP = CacheService.getScriptCache();
+      var rawP = readOneValue(sheetP, cacheP, keyP, -2);
+      var objP;
+      try { objP = (rawP && rawP !== 'null') ? JSON.parse(rawP) : {}; } catch (peP) { objP = {}; }
+      if (!objP || typeof objP !== 'object' || objP instanceof Array) objP = {};
+      var changedP = 0;
+      for (var dkP in datesP) {
+        if (!Object.prototype.hasOwnProperty.call(datesP, dkP)) continue;
+        var valP = datesP[dkP];
+        if (valP === null) { if (dkP in objP) { delete objP[dkP]; changedP++; } }
+        else { objP[dkP] = valP; changedP++; }
+      }
+      var strP = JSON.stringify(objP);
+      var nowP = new Date().toLocaleString('ja-JP');
+      if (strP.length <= BIG_THRESHOLD) { writeRow(sheetP, keyP, strP, nowP); }
+      else { driveWrite(keyP, strP); writeRow(sheetP, keyP, FILE_MARKER, nowP); }
+      deleteChunks(sheetP, keyP);
+      invalidateCache(keyP);
+      Logger.log('patchInsp ' + keyP + ' dates=' + Object.keys(datesP).join(',') + ' changed=' + changedP + ' len=' + strP.length);
+      return makeResponse('ok');
+    } catch (erP) { return makeResponse('error: ' + erP.message); }
+    finally { if (lockedP) lockP.releaseLock(); }
+  }
+
   var lock = LockService.getScriptLock();
   var locked = false;
   try { lock.waitLock(25000); locked = true; } catch (le) {
@@ -322,6 +376,9 @@ function doPost(e) {
     var sheet = getSheet();
     var now = new Date().toLocaleString('ja-JP');
     var str = (value === null || value === undefined) ? '' : String(value);
+
+    // v11: どのキーに何バイト書いたかを実行ログに残す（どのキーが重いか診断できるように）。
+    Logger.log('write key=' + key + ' len=' + str.length);
 
     // Write new data FIRST, then clean up old chunk rows last.
     // This way, if anything fails midway, the old data is still readable.
