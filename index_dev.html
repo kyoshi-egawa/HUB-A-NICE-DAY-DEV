@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.69';
+const APP_VERSION = '1.70';
 
 
 
@@ -1659,6 +1659,58 @@ const patchInspBooking = (base, dk, target, patch)=>{
   data[dk]=recomputeInspApproval(rows,(target.limit!=null)?target.limit:6);
   return data;
 };
+
+// ── 代車(lres)/レンタカー(rres)予約をサーバー最新値ベースで変更する純関数群 ──
+//   構造は {carId:{キー:予約}}。キー名自体に意味はなく、予約は id / bookingKey で特定する。
+//   どれも base を壊さずに新しいオブジェクトを返す（base には毎回サーバー最新値が渡される）。
+const _resObj = b => (b&&typeof b==='object'&&!Array.isArray(b))?b:{};
+// 指定 bookingKey（複数可）の予約を全車から取り除く
+const removeResByBk=(base,bks)=>{
+  const want=(Array.isArray(bks)?bks:[bks]).filter(Boolean);
+  const src=_resObj(base);
+  if(!want.length)return src;
+  const out={};
+  for(const cid of Object.keys(src)){
+    const days={...(src[cid]||{})};
+    Object.keys(days).forEach(k=>{ if(days[k]&&want.includes(days[k].bookingKey))delete days[k]; });
+    out[cid]=days;
+  }
+  return out;
+};
+// 指定車の予約を id で取り除く
+const removeResById=(base,carId,resId)=>{
+  const src=_resObj(base),days={...(src[carId]||{})};
+  Object.keys(days).forEach(k=>{ if(days[k]&&days[k].id===resId)delete days[k]; });
+  return{...src,[carId]:days};
+};
+// 予約1件を置く。希望キー（＝開始日）が別予約で埋まっていたらサフィックスを付けて逃がす
+//   （従来は開始日をキーに無条件で上書きしていたため、同じ代車・同じ開始日の予約が無言で消えていた）
+const putResRec=(base,carId,wantKey,rec)=>{
+  const src=_resObj(base),days={...(src[carId]||{})};
+  let k=String(wantKey);
+  if(days[k]&&days[k].id!==rec.id)k=`${wantKey}_${rec.id}`;
+  days[k]={...rec};
+  return{...src,[carId]:days};
+};
+// 指定車の予約1件を id で探して差し替える（期間編集など。bookingKey等の既存フィールドは残す）
+const patchResRec=(base,carId,resId,patch)=>{
+  const src=_resObj(base),days={...(src[carId]||{})};
+  Object.keys(days).forEach(k=>{ if(days[k]&&days[k].id===resId)days[k]={...days[k],...patch}; });
+  return{...src,[carId]:days};
+};
+// 予約の移動に追従して bookingKey を付け替える
+const retagResBk=(base,oldBk,newBk)=>{
+  const src=_resObj(base),out={};
+  for(const cid of Object.keys(src)){
+    const days={...(src[cid]||{})};
+    Object.keys(days).forEach(k=>{ if(days[k]&&days[k].bookingKey===oldBk)days[k]={...days[k],bookingKey:newBk}; });
+    out[cid]=days;
+  }
+  return out;
+};
+// 着地確認用
+const resHasBk =(base,bk)=>Object.values(_resObj(base)).some(days=>Object.values(days||{}).some(r=>r&&r.bookingKey===bk));
+const resHasRec=(base,carId,resId)=>Object.values(_resObj(base)[carId]||{}).some(r=>r&&r.id===resId);
 
 // ── 重要キーを「サーバー最新値ベース」で確実に書く（customers.html の同名関数と同じ仕組み）──
 //   mutate(サーバー最新値)→保存する値 を返す。書く→少し待つ→読み返して check(読み返し値)=true なら成功。
@@ -5522,7 +5574,7 @@ const LoanerSettingsModal = memo(({isOpen, onClose, listH, listS, onSaveH, onSav
 // ============================================
 //  代車管理グリッド（閲覧専用 + モーダル編集）
 // ============================================
-const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRes,onUndo,selDate,onBack,onPickLoaner,pickMode,locks,currentUser,onLockCar,onUnlockCar,savedModalData,inspData,schedData,onOpenBooking,pinnedRes,setPinnedRes,hoverRes,setHoverRes,storeLoaners,storeInfo,rentalCars,rentalRes,onAddRentalRes,onDeleteRentalRes,onReplaceRentalRes,onPickRental,onOpenSettings,tireData,locationData,onOpenTireEdit,onOpenLocationEdit,onApplyOptimize,pendingDeleteBk=''})=>{
+const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRes,onReplaceRes,onUndo,selDate,onBack,onPickLoaner,pickMode,locks,currentUser,onLockCar,onUnlockCar,savedModalData,inspData,schedData,onOpenBooking,pinnedRes,setPinnedRes,hoverRes,setHoverRes,storeLoaners,storeInfo,rentalCars,rentalRes,onAddRentalRes,onDeleteRentalRes,onReplaceRentalRes,onPickRental,onOpenSettings,tireData,locationData,onOpenTireEdit,onOpenLocationEdit,onApplyOptimize,pendingDeleteBk=''})=>{
   const LOANERS_LOCAL=storeLoaners||LOANERS;
   const RENTAL_LOCAL=rentalCars||DEFAULT_RENTAL_CARS;
   const rentalResLocal=rentalRes||{};
@@ -5765,9 +5817,11 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRe
       return ns<=re&&ne>=rs;
     });
     if(conflict){alert('その期間は他の予約と重複しています');return;}
+    // 1回のatomic更新で既存レコードを差し替える（delete+addの競合を防ぐ。レンタカー側と同じ作法）。
+    // ★従来は delete→add で作り直していたため bookingKey / carName / carNum / locked が消え、
+    //   期間を編集しただけで予約との紐付けが切れていた（代車管理には出るが予約から辿れない）。
     const prev=Object.values(loanerRes[editModal.carId]||{}).find(r=>r.id===editModal.resId);
-    onDeleteRes(editModal.carId,editModal.resId);
-    onAddRes(editModal.carId,{id:Date.now(),fy,fm:fm-1,fd,ty,tm:tm-1,td,user:editForm.user,color:prev?.color||RES_COLORS[0]});
+    onReplaceRes(editModal.carId,editModal.resId,{fy,fm:fm-1,fd,ty,tm:tm-1,td,user:editForm.user,color:prev?.color||RES_COLORS[0]});
     setEditModal(null);
   };
 
@@ -6894,7 +6948,8 @@ function AppInner() {
   const memoData     = vsId==='honten'?memoDataH    :memoDataS;
   const setMemoData  = vsId==='honten'?setMemoDataH :setMemoDataS;
   const loanerRes    = vsId==='honten'?loanerResH   :loanerResS;
-  const setLoanerRes = vsId==='honten'?setLoanerResH:setLoanerResS;
+  // ★lres への GAS 書き込みは persistLres（サーバー最新値ベース＋読み返し検証）だけを使う。
+  //   useShared の setter（＝ローカル全文の書き戻し）は代車予約の無言消失の元凶なので使わない。
   const closedDays   = vsId==='honten'?closedDaysH  :closedDaysS;
   const setClosedDays= vsId==='honten'?setClosedDaysH:setClosedDaysS;
   const closedDates  = vsId==='honten'?closedDatesH :closedDatesS;
@@ -6920,9 +6975,43 @@ function AppInner() {
   // 表示中の代車リスト（店舗別）
   const currentLoaners = vsId==='honten' ? dynLoanerListH : dynLoanerListS;
   const [locks,      setLocks,      updateLocalLocks]=useShared(STOR+'locks',{},15000);
-  const addRentalRes    = useCallback((carId,rec) => setRentalResData(p=>{const days={...(p[carId]||{})};days[String(rec.id)]={...rec};return{...p,[carId]:days};}),[setRentalResData]);
-  const deleteRentalRes = useCallback((carId,resId) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)delete days[d];});return{...p,[carId]:days};}),[setRentalResData]);
-  const replaceRentalRes = useCallback((carId,resId,newRec) => setRentalResData(p=>{const days={...(p[carId]||{})};Object.keys(days).forEach(d=>{if(days[d]?.id===resId)days[d]={...days[d],...newRec};});return{...p,[carId]:days};}),[setRentalResData]);
+  // ── 代車(lres)/レンタカー(rres)を「サーバー最新値ベース」で確実に変更する共通ヘルパ ──
+  //   insp の persistInsp と同じ仕組み（第2層の代車版）。これまで lres/rres は useShared の setter
+  //   だけで書いていた＝「ローカル全文を書き戻す」うえ no-cors で失敗も検知できないため、GAS混雑時に
+  //   代車予約だけが無言で落ち、「車検側に代車ラベルはあるのに代車予約が無い」不整合が起きていた
+  //   （実データ「株式会社ナイスデイ 7/10」で確認。2026-07-29 対策）。
+  //   画面は updateLocal で即時反映（GAS書き込みなし）。GAS保存は writeVerified が担い、毎回サーバー
+  //   最新値を読んで mutate し直して書く → 他端末が入れた代車予約を巻き添えにしない。
+  //   mutate が undefined を返したときは「変更不要」＝書き込みもローカル更新もしない。
+  const persistRes = useCallback((key, updateLocal, mutate, confirmFn, opts)=>{
+    const o=opts||{};
+    updateLocal(prev=>{ try{ const v=mutate(prev); return v===undefined?prev:v; }catch(e){ return prev; } });
+    (async()=>{
+      const ok=await writeVerified(key,
+        base=>{ const v=mutate(base); if(v!==undefined)updateLocal(v); return v; },
+        back=>{ try{return !!confirmFn(back);}catch(e){return false;} }
+      );
+      if(ok){
+        try{ const fresh=await sGet(key); if(fresh&&typeof fresh==='object'&&!Array.isArray(fresh)) updateLocal(fresh); }catch(e){}
+      }else if(o.alert!==false){
+        const lbl=o.label||'代車予約';
+        alert(`⚠️ ${lbl}の${o.verb||'変更'}がサーバーに反映されていません。\nもう一度お試しください。`);
+        // ★真の失敗（3回書いても着地せず）は運用者にメール通知（席を外していても気づける）。
+        notifyFailMail(`${lbl}の${o.verb||'変更'}${o.name?`（${o.name}）`:''}がサーバーに保存できていない可能性があります（PC・${currentUser?.name||'不明'}）。代車管理を開いて確認し、反映されていなければもう一度操作してください。`, currentUser?.name);
+      }
+      if(typeof o.onDone==='function')o.onDone(ok);
+    })();
+  },[currentUser]);
+  const updateLocalLres = vsId==='honten'?updateLocalLresH:updateLocalLresS;
+  const persistLres = useCallback((mutate,confirmFn,opts)=>
+    persistRes(storKey('lres',vsId),updateLocalLres,mutate,confirmFn,{label:'代車予約',...(opts||{})}),
+    [persistRes,updateLocalLres,vsId]);
+  const persistRres = useCallback((mutate,confirmFn,opts)=>
+    persistRes(STOR+'rres',updateLocalRres,mutate,confirmFn,{label:'レンタカー予約',...(opts||{})}),
+    [persistRes,updateLocalRres]);
+  const addRentalRes    = useCallback((carId,rec) => persistRres(base=>putResRec(base,carId,String(rec.id),rec),back=>resHasRec(back,carId,rec.id),{verb:'登録',name:rec?.user}),[persistRres]);
+  const deleteRentalRes = useCallback((carId,resId) => persistRres(base=>resHasRec(base,carId,resId)?removeResById(base,carId,resId):undefined,back=>!resHasRec(back,carId,resId),{verb:'削除'}),[persistRres]);
+  const replaceRentalRes = useCallback((carId,resId,newRec) => persistRres(base=>resHasRec(base,carId,resId)?patchResRec(base,carId,resId,newRec):undefined,back=>{const r=Object.values(_resObj(back)[carId]||{}).find(x=>x&&x.id===resId);return !!r&&Object.keys(newRec||{}).every(k=>JSON.stringify(r[k])===JSON.stringify(newRec[k]));},{verb:'期間の変更',name:newRec?.user}),[persistRres]);
   const [loanerUndo, setLoanerUndo]=useState([]);
   // LoanerGridのpinnedRes/hoverResを親で管理（グリッドの再レンダリング防止→scrollLeft保持）
   const [loanerPinnedRes, setLoanerPinnedRes]=useState(null);
@@ -7804,25 +7893,21 @@ function AppInner() {
       const _finalBk=modalType==='insp'
         ?`insp-${_loanerTdk}-${_dcPlaceIdx}`
         :`sched-${_loanerTdk}-${modalSlot||''}`;
-      // pendingLoanerDataのloanerRes保存（setTimeoutで非同期化してフリーズ防止）
+      // pendingLoanerDataのloanerRes保存（サーバー最新値ベース＋読み返し検証＝persistLres。
+      //   従来はローカル全文の書き戻しを投げっぱなしにしていたため、車検側には代車ラベルが残るのに
+      //   代車予約だけが無言で消えることがあった。setTimeoutで非同期化してフリーズ防止するのは従来通り）
       const _lu = {carId,startDay,endDay,startYear,startMonth,finalUser,color:color||RES_COLORS[0],
         bk:_finalBk||_pldBk, carName, carNum};
-      setTimeout(()=>setLoanerRes(prev=>{
-        const cleaned={};
-        for(const cid of Object.keys(prev)){
-          const days={...(prev[cid]||{})};
-          Object.keys(days).forEach(d=>{
-            if(days[d]?.bookingKey===_lu.bk||days[d]?.bookingKey===_pldBk)delete days[d];
-          });
-          cleaned[cid]=days;
-        }
-        return{...cleaned,[_lu.carId]:{...(cleaned[_lu.carId]||{}),
-          [String(_lu.startDay)]:{id:Date.now(),fy:_lu.startYear,fm:_lu.startMonth,
-          fd:_lu.startDay,ty:_lu.startYear,tm:_lu.startMonth,td:_lu.endDay,
-          user:_lu.finalUser,color:_lu.color,bookingKey:_lu.bk,
-          carName:_lu.carName,carNum:_lu.carNum}
-        }};
-      }), 0);
+      // idは再送しても同じ値を使う（＝着地確認が id で行えるよう mutate の外で確定させる）
+      const _luRec={id:Date.now(),fy:_lu.startYear,fm:_lu.startMonth,
+        fd:_lu.startDay,ty:_lu.startYear,tm:_lu.startMonth,td:_lu.endDay,
+        user:_lu.finalUser,color:_lu.color,bookingKey:_lu.bk,
+        carName:_lu.carName,carNum:_lu.carNum};
+      setTimeout(()=>persistLres(
+        base=>putResRec(removeResByBk(base,[_lu.bk,_pldBk]),_lu.carId,String(_lu.startDay),_luRec),
+        back=>resHasRec(back,_lu.carId,_luRec.id),
+        {verb:'登録',name:_lu.finalUser}
+      ), 0);
       cleanData.rentalLabel='';
       cleanData.rentalCarId=null;
       setPendingLoanerData(null);
@@ -7981,19 +8066,11 @@ function AppInner() {
         const _delBk=pendingLoanerDeleteBk||(_origDkForDel&&_origDkForDel!==formData._targetDk?`insp-${_origDkForDel}-${modalIdx}`:'');
         if(_delBk){
           const oldBk=_delBk;
-          setLoanerRes(prev=>{
-            const next={...prev};
-            Object.keys(next).forEach(carId=>{
-              if(next[carId]){
-                const days={...next[carId]};
-                Object.keys(days).forEach(day=>{
-                  if(days[day]&&days[day].bookingKey===oldBk)delete days[day];
-                });
-                next[carId]=days;
-              }
-            });
-            return next;
-          });
+          persistLres(
+            base=>resHasBk(base,oldBk)?removeResByBk(base,[oldBk]):undefined,
+            back=>!resHasBk(back,oldBk),
+            {verb:'旧予約分の解除'}
+          );
           setPendingLoanerDeleteBk('');
         }
         // 本予約確定 → custBookingsの仮予約エントリを削除
@@ -8069,20 +8146,18 @@ function AppInner() {
       const _scOldBk=`sched-${_scOrigDk}-${modalSlot}`;
       const _scNewBk=`sched-${_scTgtDk}-${_scFinalSlot}`;
       if(_scOldBk!==_scNewBk){
-        setLoanerRes(prev=>{
-          const next={};
-          for(const cid of Object.keys(prev)){
-            const daysU={...(prev[cid]||{})};Object.keys(daysU).forEach(d=>{if(daysU[d]?.bookingKey===_scOldBk)daysU[d]={...daysU[d],bookingKey:_scNewBk};});next[cid]=daysU;
-          }
-          return next;
-        });
+        persistLres(
+          base=>resHasBk(base,_scOldBk)?retagResBk(base,_scOldBk,_scNewBk):undefined,
+          back=>!resHasBk(back,_scOldBk),
+          {verb:'紐付けの更新'}
+        );
       }
     }
     const keyToRelease=curLockKey;
     setCurLockKey(null);
     setTimeout(()=>releaseLock(keyToRelease),200);
     setFromCustList(false);setCustModalMeta(null);
-  },[modalType,modalDk,modalIdx,modalSlot,vsId,curLockKey,releaseLock,setInspData,updateLocalInspData,setSchedData,schedData,setLoanerRes,selDate,schedRestrictions,setModalOpen,inspLimits,pendingRentalId,pendingRentalRec,pendingLoanerId,pendingLoanerData,dynRentalCars,fromCustList,custModalMeta,setCustBookings,setCustFiles,inspData]);
+  },[modalType,modalDk,modalIdx,modalSlot,vsId,curLockKey,releaseLock,setInspData,updateLocalInspData,setSchedData,schedData,persistLres,selDate,schedRestrictions,setModalOpen,inspLimits,pendingRentalId,pendingRentalRec,pendingLoanerId,pendingLoanerData,dynRentalCars,fromCustList,custModalMeta,setCustBookings,setCustFiles,inspData]);
 
   const handleDeleteModal=useCallback(()=>{
     // bookingKeyを特定してloanerRes・rentalResも連動削除
@@ -8132,23 +8207,19 @@ function AppInner() {
       setSchedData(prev=>{const d={...(prev[modalDk]||{})};delete d[modalSlot];return{...prev,[modalDk]:d};});
     }
 
-    // ★連動削除: bookingKeyに紐づく代車予約を削除
-    setLoanerRes(prev=>{
-      const next={};
-      for(const cid of Object.keys(prev)){
-        const daysN={...(prev[cid]||{})};Object.keys(daysN).forEach(d=>{if(daysN[d]?.bookingKey===bk)delete daysN[d];});next[cid]=daysN;
-      }
-      return next;
-    });
+    // ★連動削除: bookingKeyに紐づく代車予約を削除（サーバー最新値ベース＋読み返し検証）
+    persistLres(
+      base=>resHasBk(base,bk)?removeResByBk(base,[bk]):undefined,
+      back=>!resHasBk(back,bk),
+      {verb:'削除'}
+    );
 
-    // ★連動削除: bookingKeyに紐づくレンタカー予約を削除
-    setRentalResData(prev=>{
-      const next={};
-      for(const cid of Object.keys(prev)){
-        const daysN={...(prev[cid]||{})};Object.keys(daysN).forEach(d=>{if(daysN[d]?.bookingKey===bk)delete daysN[d];});next[cid]=daysN;
-      }
-      return next;
-    });
+    // ★連動削除: bookingKeyに紐づくレンタカー予約を削除（同上）
+    persistRres(
+      base=>resHasBk(base,bk)?removeResByBk(base,[bk]):undefined,
+      back=>!resHasBk(back,bk),
+      {verb:'削除'}
+    );
 
     // insp削除の着地確認は上の persistInsp が担う（サーバー最新値から対象行だけを消して書き、
     // 読み返しで消えたか確認、未反映なら最新値からやり直し、最終的にダメならアラート）。
@@ -8173,7 +8244,7 @@ function AppInner() {
     }
 
     releaseLock(curLockKey);setCurLockKey(null);setModalOpen(false);
-  },[modalType,modalDk,modalIdx,modalSlot,curLockKey,releaseLock,persistInsp,setSchedData,setLoanerRes,setRentalResData,inspData,syncCustStatus,inspLimits]);
+  },[modalType,modalDk,modalIdx,modalSlot,curLockKey,releaseLock,persistInsp,setSchedData,persistLres,persistRres,inspData,syncCustStatus,inspLimits]);
 
   // 承認ハンドラー（承認もサーバー最新値ベース。対象を本人性で特定し approved を立てる）
   const handleApprove=useCallback((dk,idx)=>{
@@ -8293,30 +8364,53 @@ function AppInner() {
     }
     // 代車の場合：bookingKeyで該当する代車予約を削除
     const bk=modalType==='insp'?`insp-${modalDk}-${modalIdx}`:`sched-${modalDk}-${modalSlot}`;
-    setLoanerRes(prev=>{
-      const updated={...prev};
-      if(updated[loanerId]){
-        const days={...updated[loanerId]};
-        // まずbookingKeyで完全一致を試みる
-        // 一致しない場合（customers.html経由などでidxがズレた場合）はuserNameで照合
-        const hasExact=Object.values(days).some(r=>r?.bookingKey===bk);
-        Object.keys(days).forEach(d=>{
-          if(hasExact?days[d]?.bookingKey===bk:userName&&days[d]?.user===userName)
-            delete days[d];
-        });
-        updated[loanerId]=days;
-      }
-      return updated;
-    });
+    // まずbookingKeyで完全一致を試み、一致しない場合（customers.html経由などでidxがズレた場合）は
+    // userNameで照合する。※消す対象は「今画面に見えている予約」から id で確定させる。
+    //   再送のたびに userName で探し直すと、その間に入った同名の別予約まで巻き込むため。
+    const _cur=_resObj(loanerRes)[loanerId]||{};
+    const _hasExact=Object.values(_cur).some(r=>r?.bookingKey===bk);
+    const _rmIds=Object.values(_cur)
+      .filter(r=>r&&(_hasExact?r.bookingKey===bk:(userName&&r.user===userName)))
+      .map(r=>r.id).filter(v=>v!=null);
+    persistLres(
+      base=>{
+        if(!_rmIds.length&&!_hasExact)return undefined;
+        let out=_resObj(base);
+        _rmIds.forEach(id=>{ out=removeResById(out,loanerId,id); });
+        if(_hasExact)out=removeResByBk(out,[bk]); // id を持たない古いレコードの保険
+        return out;
+      },
+      back=>!_rmIds.some(id=>resHasRec(back,loanerId,id))&&!(_hasExact&&resHasBk(back,bk)),
+      {verb:'解除',name:userName}
+    );
     setPendingLoanerId(null);
-  },[modalType,modalDk,modalIdx,modalSlot,setLoanerRes,deleteRentalRes]);
+  },[modalType,modalDk,modalIdx,modalSlot,persistLres,deleteRentalRes,loanerRes]);
 
-  const addLoanerRes=useCallback((cid,res)=>setLoanerRes(prev=>(()=>{const daysA={...(prev[cid]||{})};daysA[String(res.fd)]={...res};return{...prev,[cid]:daysA};})()),[setLoanerRes]);
+  const addLoanerRes=useCallback((cid,res)=>persistLres(
+    base=>putResRec(base,cid,String(res.fd),res),
+    back=>resHasRec(back,cid,res.id),
+    {verb:'追加',name:res?.user}
+  ),[persistLres]);
+  // 代車予約の期間編集は1回のatomic更新で差し替える（delete+addの競合を防ぐ）。
+  //   bookingKey / carName / carNum / locked などの既存フィールドはそのまま残るので紐付けが切れない。
+  const replaceLoanerRes=useCallback((cid,rid,patch)=>{
+    setLoanerUndo(u=>[...u,{prevState:loanerRes}]);
+    persistLres(
+      base=>resHasRec(base,cid,rid)?patchResRec(base,cid,rid,patch):undefined,
+      back=>{const r=Object.values(_resObj(back)[cid]||{}).find(x=>x&&x.id===rid);
+             return !!r&&Object.keys(patch||{}).every(k=>JSON.stringify(r[k])===JSON.stringify(patch[k]));},
+      {verb:'期間の変更',name:patch?.user}
+    );
+  },[persistLres,loanerRes]);
   const deleteLoanerRes=useCallback((cid,rid)=>{
     setLoanerUndo(u=>[...u,{prevState:loanerRes}]);
     // loanerResから削除
     const deletedRes=Object.values(loanerRes[cid]||{}).find(r=>r.id===rid);
-    setLoanerRes(prev=>{const daysD={...(prev[cid]||{})};Object.keys(daysD).forEach(d=>{if(daysD[d]?.id===rid)delete daysD[d];});return{...prev,[cid]:daysD};});
+    persistLres(
+      base=>resHasRec(base,cid,rid)?removeResById(base,cid,rid):undefined,
+      back=>!resHasRec(back,cid,rid),
+      {verb:'削除',name:deletedRes?.user}
+    );
     // inspDataの該当行のloaner/loanerId/rentalLabel/rentalCarIdもクリア
     if(deletedRes?.bookingKey){
       const bk=deletedRes.bookingKey;
@@ -8341,23 +8435,35 @@ function AppInner() {
         );
       }
     }
-  },[setLoanerRes,persistInsp]);
-  const undoLoanerRes=useCallback(()=>{if(!loanerUndo.length){return;}setLoanerRes(loanerUndo[loanerUndo.length-1].prevState);setLoanerUndo(u=>u.slice(0,-1));},[loanerUndo,setLoanerRes]);
+  },[persistLres,persistInsp,loanerRes]);
+  // 「↶ 戻す」と「最適化の適用」は代車予約を丸ごと差し替える操作なので、mutate はサーバー最新値を
+  // 見ずにスナップショットをそのまま返す（＝意図した通りの一括差し替え）。ただし書きっぱなしにはせず
+  // 読み返し検証は通す（着地しなければアラート＋メール通知）。
+  const undoLoanerRes=useCallback(()=>{
+    if(!loanerUndo.length)return;
+    const snap=loanerUndo[loanerUndo.length-1].prevState;
+    persistLres(()=>snap,back=>JSON.stringify(back)===JSON.stringify(snap),{verb:'「戻す」'});
+    setLoanerUndo(u=>u.slice(0,-1));
+  },[loanerUndo,persistLres]);
   // ⑤ 限定：この予約の代車を固定（最適化で動かさない）。locked を反転する。
   const toggleLoanerLock=useCallback((cid,resId)=>{
-    setLoanerRes(prev=>{
-      const day={...(prev[cid]||{})};
-      Object.keys(day).forEach(k=>{ if(day[k]&&day[k].id===resId) day[k]={...day[k],locked:!day[k].locked}; });
-      return{...prev,[cid]:day};
-    });
-  },[setLoanerRes]);
+    // 反転後の値を先に確定させる（再送のたびに反転すると値が定まらないため）
+    const cur=Object.values(_resObj(loanerRes)[cid]||{}).find(r=>r&&r.id===resId);
+    if(!cur)return;
+    const next=!cur.locked;
+    persistLres(
+      base=>resHasRec(base,cid,resId)?patchResRec(base,cid,resId,{locked:next}):undefined,
+      back=>{const r=Object.values(_resObj(back)[cid]||{}).find(x=>x&&x.id===resId);return !r||!!r.locked===next;},
+      {verb:'固定の切り替え',name:cur.user}
+    );
+  },[persistLres,loanerRes]);
   // ⑤ 最適化の適用：現在店舗の代車予約を丸ごと差し替えるだけ（実行前に戻す用スナップショットを積む）。
   //   スケジュール行の表示は bookingKey 一致の getLoanerLabel が予約側の carName から再計算するため
   //   自動で新しい車に追従する（insp側は触らないので「↶ 戻す」で完全に元へ戻せる）。
   const applyLoanerOptimize=useCallback((newLoanerRes)=>{
     setLoanerUndo(u=>[...u,{prevState:loanerRes}]);
-    setLoanerRes(newLoanerRes);
-  },[loanerRes,setLoanerRes]);
+    persistLres(()=>newLoanerRes,back=>JSON.stringify(back)===JSON.stringify(newLoanerRes),{verb:'最適化の適用'});
+  },[loanerRes,persistLres]);
   const handleLockCar  =useCallback(cid=>acquireLock(`lock-loaner-${cid}`,currentUser.name),[acquireLock,currentUser]);
   const handleUnlockCar=useCallback(cid=>releaseLock(`lock-loaner-${cid}`),[releaseLock]);
 
@@ -9588,7 +9694,7 @@ function AppInner() {
           <div style={{background:'white',borderRadius:13,padding:'4px 4px',boxShadow:'0 10px 40px rgba(0,0,0,.18)',borderTop:`4px solid ${vsStore.color}`,position:'fixed',top:'var(--header-h,90px)',left:'8px',right:'8px',bottom:'8px',overflowY:'auto',zIndex:10,borderRadius:13,display:'flex',flexDirection:'column'}}>
             <LoanerGrid
               loanerRes={loanerRes} loanerMonth={loanerMonth} setLoanerMonth={setLoanerMonth}
-              onAddRes={addLoanerRes} onDeleteRes={deleteLoanerRes} onUndo={undoLoanerRes}
+              onAddRes={addLoanerRes} onDeleteRes={deleteLoanerRes} onReplaceRes={replaceLoanerRes} onUndo={undoLoanerRes}
               selDate={selDate} onBack={handleLoanerBack} onPickLoaner={handlePickLoaner}
               pickMode={pickMode} locks={locks} currentUser={currentUser}
               onLockCar={handleLockCar} onUnlockCar={handleUnlockCar}
