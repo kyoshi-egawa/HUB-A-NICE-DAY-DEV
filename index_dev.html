@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.71';
+const APP_VERSION = '1.72';
 
 
 
@@ -283,6 +283,20 @@ const COURSES = [
   {id:2,name:'クイック車検',color:'#1d4ed8',bg:'#bfdbfe',initial:'ク'},
   {id:3,name:'レギュラー車検',color:'#d97706',bg:'#fde68a',initial:'レ'}
 ];
+// ── 休業日の見た目（全画面共通）──
+//   定休日・第2火曜・手動の休業日は「色分けせず同じ見た目」にする（2026-07-30 ユーザー決定・A案）。
+//   従来は極薄の斜線（#f9fafb/#f3f4f6）で、しかも空の6コマが営業日と同じに描かれるため
+//   「まだ予約を入れられる日」に見えていた。ベタ塗りで沈め、コマを消し、中央に「休業日」と出す。
+const CLOSED_BG    = '#e2e5ea'; // 休業日セルの背景（ベタ塗り）
+const CLOSED_FG    = '#8b93a1'; // 休業日セルの日付・文字色
+const CLOSED_BAR   = 'inset 4px 0 0 #9aa1ac'; // 左端の縦バー＝隣の営業日との区切り
+const CLOSED_LABEL = '休業日';
+// 休業日セルの中央に置くラベル（topOffset=日付表示の下から始める）
+const ClosedMark = ({small,topOffset=26})=>(
+  <div style={{position:'absolute',left:6,right:6,top:topOffset,bottom:6,display:'flex',alignItems:'center',
+    justifyContent:'center',fontSize:small?11:13,fontWeight:800,color:'#6b7280',letterSpacing:small?1:2,
+    pointerEvents:'none'}}>{CLOSED_LABEL}</div>
+);
 const TOKUENS = [{id:'①',name:'1ヶ月前予約'},{id:'②',name:'2ヶ月前予約'},{id:'-',name:'なし'}];
 const WORKS = [
   {id:'Q',name:'クイック整備・修理'},{id:'⑫',name:'12ヶ月点検'},{id:'M12',name:'メンパ12ヶ月点検'},
@@ -2867,15 +2881,18 @@ const HolidayModal=memo(({isOpen,onClose,closedDays,setClosedDays,closedDates,se
                     const isClosed=isManualClosed||isSecTue||isWeeklyClosed;
                     const isToday=day===today.getDate()&&cm===today.getMonth()&&cy===today.getFullYear();
 
-                    let bg='white';
-                    if(inDrag) bg='#bfdbfe';
-                    else if(isManualClosed) bg='#fee2e2';
-                    else if(isSecTue) bg='#fef3c7';
-                    else if(isWeeklyClosed) bg='#f3f4f6';
+                    // 休業日の背景は車検カレンダーと同じベタ塗りに統一（薄すぎて見えない問題の解消）。
+                    // 種類（手動／第2火／毎週定休）は左端の縦バーの色と文字ラベルで見分ける。
+                    //   赤いバー＝クリックで解除できる手動休業日、オレンジ＝第2火曜（営業に戻せる）、グレー＝毎週定休（固定）
+                    let bg='white', bar='none';
+                    if(inDrag){ bg='#bfdbfe'; }
+                    else if(isManualClosed){ bg=CLOSED_BG; bar='inset 4px 0 0 #ef4444'; }
+                    else if(isSecTue){ bg=CLOSED_BG; bar='inset 4px 0 0 #f59e0b'; }
+                    else if(isWeeklyClosed){ bg=CLOSED_BG; bar=CLOSED_BAR; }
 
                     return (
                       <div key={di}
-                        style={{minHeight:36,borderTop:wi>0?'1px solid #f3f4f6':'none',borderLeft:di>0?'1px solid #f3f4f6':'none',background:bg,cursor:'pointer',position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'2px 1px'}}
+                        style={{minHeight:36,borderTop:wi>0?'1px solid #f3f4f6':'none',borderLeft:di>0?'1px solid #f3f4f6':'none',background:bg,boxShadow:bar,cursor:'pointer',position:'relative',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'2px 1px'}}
                         onMouseDown={e=>{
                           e.preventDefault();
                           if(isWeeklyClosed) return;
@@ -2887,13 +2904,14 @@ const HolidayModal=memo(({isOpen,onClose,closedDays,setClosedDays,closedDates,se
                         }}
                         onMouseEnter={()=>{if(isDragging)setDragEnd(ds);}}
                       >
-                        <span style={{fontSize:12,fontWeight:isToday?900:600,color:isToday?'white':dow===0||isHol?'#dc2626':dow===6?'#1d4ed8':'#374151',
+                        <span style={{fontSize:12,fontWeight:isToday?900:600,color:isToday?'white':isClosed&&!inDrag?CLOSED_FG:dow===0||isHol?'#dc2626':dow===6?'#1d4ed8':'#374151',
                           ...(isToday?{background:'#c2410c',borderRadius:'50%',width:20,height:20,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:11}:{})}}>
                           {day}
                         </span>
-                        {isManualClosed&&!isWeeklyClosed&&<span style={{fontSize:7,color:'#dc2626',fontWeight:700,lineHeight:1}}>休</span>}
-                        {isSecTue&&<span style={{fontSize:7,color:'#d97706',fontWeight:700,lineHeight:1}}>第2火</span>}
-                        {isOverrideOpen&&<span style={{fontSize:7,color:'#059669',fontWeight:700,lineHeight:1}}>営業</span>}
+                        {isManualClosed&&!isWeeklyClosed&&<span style={{fontSize:8,color:'#dc2626',fontWeight:800,lineHeight:1.1}}>休</span>}
+                        {isSecTue&&<span style={{fontSize:8,color:'#b45309',fontWeight:800,lineHeight:1.1}}>第2火</span>}
+                        {isWeeklyClosed&&!isManualClosed&&!isSecTue&&<span style={{fontSize:8,color:'#6b7280',fontWeight:800,lineHeight:1.1}}>定休</span>}
+                        {isOverrideOpen&&<span style={{fontSize:8,color:'#059669',fontWeight:800,lineHeight:1.1}}>営業</span>}
                         {isHol&&<span style={{fontSize:7,color:'#dc2626',lineHeight:1}}>祝</span>}
                       </div>
                     );
@@ -2904,9 +2922,9 @@ const HolidayModal=memo(({isOpen,onClose,closedDays,setClosedDays,closedDates,se
 
             {/* 凡例 */}
             <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:8,fontSize:10,color:'#6b7280'}}>
-              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:'#fee2e2',border:'1px solid #fca5a5',borderRadius:2,display:'inline-block'}}/>手動休業日（クリックで解除）</span>
-              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:'#fef3c7',border:'1px solid #fde047',borderRadius:2,display:'inline-block'}}/>第2火曜（自動）</span>
-              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:'#f3f4f6',border:'1px solid #e5e7eb',borderRadius:2,display:'inline-block'}}/>毎週定休</span>
+              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #ef4444',border:'1px solid #cbd0d8',borderRadius:2,display:'inline-block'}}/>手動休業日（クリックで解除）</span>
+              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #f59e0b',border:'1px solid #cbd0d8',borderRadius:2,display:'inline-block'}}/>第2火曜（自動）</span>
+              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #9aa1ac',border:'1px solid #cbd0d8',borderRadius:2,display:'inline-block'}}/>毎週定休</span>
             </div>
             <div style={{fontSize:10,color:'#6b7280',marginTop:4}}>💡 第2火曜日をクリック→「通営」表示に変更（通常営業に戻す）。再クリックで定休に戻します。</div>
           </div>
@@ -3457,7 +3475,8 @@ const StaffCalendarModal=memo(({isOpen,onClose,initMonth,currentUser,
                   // 店舗休業日は名前非表示
                   const selDayoff=!isCl&&selStaff&&(dayOffData[dkk]||[]).includes(selStaff);
                   const selLeave =!isCl&&selStaff&&(pleaveData[dkk]||[]).includes(selStaff);
-                  const cellBg=isCl?'repeating-linear-gradient(45deg,#f9fafb,#f9fafb 4px,#f3f4f6 4px,#f3f4f6 8px)':selDayoff?'#fff7ed':selLeave?'#f0fdf4':'white';
+                  // 休業日の見た目は車検カレンダーと共通（A案＋左の区切りバー）
+                  const cellBg=isCl?CLOSED_BG:selDayoff?'#fff7ed':selLeave?'#f0fdf4':'white';
                   const cellBorder=isCl?'1px solid #e5e7eb':selDayoff?'2px solid #f97316':selLeave?'2px solid #10b981':'1px solid #e5e7eb';
 
                   // 他スタッフのアイコン（店休日は非表示）
@@ -3469,7 +3488,7 @@ const StaffCalendarModal=memo(({isOpen,onClose,initMonth,currentUser,
                       onClick={()=>handleDayClick(dkk,cy,cm,day)}
                       style={{minHeight:82,padding:'5px 4px',borderTop:'1px solid #e5e7eb',
                         borderLeft:di>0?'1px solid #e5e7eb':'none',
-                        background:cellBg,outline:cellBorder,
+                        background:cellBg,outline:cellBorder,boxShadow:isCl?CLOSED_BAR:'none',position:'relative',
                         cursor:isCl?'not-allowed':selStaff?'pointer':'default',
                         transition:'opacity 0.1s'}}
                       onMouseEnter={e=>{if(selStaff&&!isCl)e.currentTarget.style.opacity='0.75';}}
@@ -3480,7 +3499,7 @@ const StaffCalendarModal=memo(({isOpen,onClose,initMonth,currentUser,
                         </span>
                         <span style={{display:'flex',gap:2,alignItems:'center'}}>
                           {isHol&&!isCl&&<span style={{fontSize:8,color:'#dc2626'}}>祝</span>}
-                          {isCl&&<span style={{fontSize:9,color:'#9ca3af',fontWeight:700}}>店休</span>}
+                          {isCl&&<span style={{fontSize:10,color:'#6b7280',fontWeight:800,letterSpacing:1}}>{CLOSED_LABEL}</span>}
                           {selDayoff&&<span style={{fontSize:11}}>🏖</span>}
                           {selLeave&&<span style={{fontSize:11}}>📋</span>}
                         </span>
@@ -3867,18 +3886,18 @@ const InspCalendarPicker=memo(({form,setForm,bmInspData,bmClosedDays,bmClosedDat
             const numColor=di===0?'#dc2626':di===6?'#2563eb':'#111';
             let bg='white';
             if(isSel)bg='#dbeafe';
-            else if(closed)bg='repeating-linear-gradient(45deg,#f9fafb,#f9fafb 3px,#f3f4f6 3px,#f3f4f6 6px)';
+            else if(closed)bg=CLOSED_BG; // 車検カレンダーと同じ見た目
             else if(isFull)bg='#fef2f2';
             return(
               <div key={di}
                 onClick={()=>{if(!closed)setForm({...form,_bookingDate:dateStr});}}
                 style={{minHeight:52,padding:'4px 3px',cursor:closed?'not-allowed':'pointer',
                   borderTop:'1px solid #f3f4f6',borderLeft:di>0?'1px solid #f3f4f6':'none',
-                  background:bg,
+                  background:bg,boxShadow:closed?CLOSED_BAR:'none',
                   outline:isSel?'2px solid #2563eb':isToday?'2px solid #93c5fd':'none',
                   position:'relative'}}>
                 <div style={{textAlign:'center',fontWeight:isToday?900:700,fontSize:12,
-                  color:isSel?'#1d4ed8':closed?'#9ca3af':numColor}}>{d}</div>
+                  color:isSel?'#1d4ed8':closed?CLOSED_FG:numColor}}>{d}</div>
                 {!closed&&(
                   <div style={{textAlign:'center',marginTop:2}}>
                     <span style={{fontSize:10,fontWeight:700,
@@ -3887,7 +3906,7 @@ const InspCalendarPicker=memo(({form,setForm,bmInspData,bmClosedDays,bmClosedDat
                     </span>
                   </div>
                 )}
-                {closed&&<div style={{textAlign:'center',fontSize:9,color:'#9ca3af'}}>休</div>}
+                {closed&&<div style={{textAlign:'center',fontSize:9,color:'#6b7280',fontWeight:800}}>休</div>}
                 {isSel&&<div style={{position:'absolute',top:2,right:2,width:6,height:6,borderRadius:'50%',background:'#2563eb'}}/>}
               </div>
             );
@@ -5693,28 +5712,31 @@ const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onDeleteRes,onRepla
     scrollLock.current=false;
   },[selDate]);
 
-  // 選択日列を中央にスクロール（初回のみ）
+  // 開いた時のスクロール位置（初回のみ）。
+  //   代車表・レンタカー表とも、基準日（予約から開いたときはその日／通常は本日）が
+  //   左から4列目に来るようにする＝直前3日分も一緒に見える（2026-07-30 ユーザー要望）。
+  //   ※日付セルは44px幅。先頭の車名列(100px/120px)は position:sticky なので、
+  //     scrollLeft=idx*44 でその日付が車名列のすぐ右＝1列目に来る。3列ぶん戻せば4列目。
   useEffect(()=>{
-    if(!selDate||scrollLock.current)return;
+    if(scrollLock.current)return;
+    const base=selDate||new Date();
     // DOMレンダリング後に確実に実行（setTimeout）
     const timer=setTimeout(()=>{
       if(!gridRef.current)return;
-      const thWidth=100,cellWidth=28;
+      const cellWidth=44,leadCols=3;
       const targetIndex=dateRange.findIndex(d=>
-        d.year===selDate.getFullYear()&&
-        d.month===selDate.getMonth()&&
-        d.day===selDate.getDate()
+        d.year===base.getFullYear()&&
+        d.month===base.getMonth()&&
+        d.day===base.getDate()
       );
       if(targetIndex===-1)return;
-      // 本日が左端から3列目に来るよう設定
-      gridRef.current.scrollLeft=targetIndex*cellWidth-cellWidth*2;
-      if(rentalScrollRef.current){
-        rentalScrollRef.current.scrollLeft=targetIndex*cellWidth-cellWidth*2;
-      }
+      const left=Math.max(0,(targetIndex-leadCols)*cellWidth);
+      gridRef.current.scrollLeft=left;
+      if(rentalScrollRef.current)rentalScrollRef.current.scrollLeft=left;
       scrollLock.current=true;
     },100);
     return()=>clearTimeout(timer);
-  },[selDate]); // dateRangeを削除（selDateから計算されるため不要）
+  },[selDate,dateRange]);
 
   const getRes=(cid,y,m,d)=>{const num=toNum(y,m,d);return Object.values(loanerRes[cid]||{}).find(r=>num>=toNum(r.fy,r.fm,r.fd)&&num<=toNum(r.ty,r.tm,r.td));};
   const hasConflict=(cid,sy,sm,sd,ey,em,ed)=>{
@@ -8807,7 +8829,7 @@ function AppInner() {
                       </span>
                     ))}
                     <span style={{fontWeight:800,fontSize:13,color:'#059669'}}>合計 {total}台</span>
-                    {(cDays.length>0||cDates.length>0)&&<span style={{display:'flex',alignItems:'center',gap:3,color:'#6b7280',marginLeft:4}}><span style={{width:12,height:12,background:'repeating-linear-gradient(45deg,#f3f4f6,#f3f4f6 3px,#e5e7eb 3px,#e5e7eb 6px)',display:'inline-block',borderRadius:2,border:'1px solid #d1d5db'}}/>定休日</span>}
+                    {(cDays.length>0||cDates.length>0)&&<span style={{display:'flex',alignItems:'center',gap:3,color:'#6b7280',marginLeft:4}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #9aa1ac',display:'inline-block',borderRadius:2,border:'1px solid #cbd0d8'}}/>{CLOSED_LABEL}</span>}
                     <span style={{display:'flex',alignItems:'center',gap:4,marginLeft:4}}>
                       <span style={{width:12,height:12,borderRadius:2,background:'#2563eb',color:'white',fontSize:7,fontWeight:800,display:'inline-flex',alignItems:'center',justifyContent:'center'}}>本</span>
                       <span style={{fontSize:10,color:'#6b7280'}}>本店</span>
@@ -8915,7 +8937,8 @@ function AppInner() {
                       const isSecTue=isSecondTuesdayHoliday(cy,cm,day,ovOpen);
                       const isCl=calIsClosed(new Date(cy,cm,day));
                       const numCol=(isHol||dow===0)?'#dc2626':dow===6?'#1d4ed8':'#111';
-                      const cellBg=isCl?(isSecTue?'repeating-linear-gradient(45deg,#fffbeb,#fffbeb 5px,#fef3c7 5px,#fef3c7 10px)':'repeating-linear-gradient(45deg,#f9fafb,#f9fafb 5px,#f3f4f6 5px,#f3f4f6 10px)'):'white';
+                      // 休業日は定休日・第2火曜・手動休業日を区別せず同じ見た目（A案）
+                      const cellBg=isCl?CLOSED_BG:'white';
                       const isToday=day===nowDate.getDate()&&cm===nowDate.getMonth()&&cy===nowDate.getFullYear();
                       const icons=[0,1,2,3,4,5].map(si=>{
                         const r=irows[si];
@@ -8927,15 +8950,16 @@ function AppInner() {
                       return (
                         <div key={di}
                           onClick={()=>{if(!isCl){setSelDate(new Date(cy,cm,day));setView('schedule');setTimeout(()=>window.scrollTo({top:0,behavior:'instant'}),50);}}}
-                          style={{minHeight:105,padding:'5px',cursor:isCl?'not-allowed':'pointer',borderTop:'1px solid #e5e7eb',borderLeft:di>0?'1px solid #e5e7eb':'none',background:cellBg,position:'relative'}}
+                          style={{minHeight:105,padding:'5px',cursor:isCl?'not-allowed':'pointer',borderTop:'1px solid #e5e7eb',borderLeft:di>0?'1px solid #e5e7eb':'none',background:cellBg,boxShadow:isCl?CLOSED_BAR:'none',position:'relative'}}
                           onMouseEnter={e=>{if(!isCl)e.currentTarget.style.background='#f0f0ff';}}
                           onMouseLeave={e=>{e.currentTarget.style.background=cellBg;}}>
-                          {isCl&&<div style={{position:'absolute',top:2,right:3,fontSize:8,color:isSecTue?'#d97706':'#9ca3af',fontWeight:700}}>{isSecTue?'第2火':'定休'}</div>}
-                          <div style={{fontWeight:800,fontSize:15,marginBottom:3,color:numCol,display:'flex',alignItems:'center',gap:3}}>
+                          {isCl&&<ClosedMark/>}
+                          <div style={{fontWeight:800,fontSize:15,marginBottom:3,color:isCl?CLOSED_FG:numCol,display:'flex',alignItems:'center',gap:3}}>
                             <span style={isToday?{background:'#c2410c',color:'white',borderRadius:'50%',width:22,height:22,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:12,flexShrink:0}:{flexShrink:0}}>{day}</span>
-                            {isHol&&<span style={{fontSize:8,color:'#dc2626',flexShrink:0}}>祝</span>}
+                            {isHol&&<span style={{fontSize:8,color:isCl?CLOSED_FG:'#dc2626',flexShrink:0}}>祝</span>}
                           </div>
-                          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:2,position:'relative'}}>
+                          {/* 休業日は6コマを描かない（営業日と見分けがつくように） */}
+                          {!isCl&&<div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:2,position:'relative'}}>
                             {icons.map(({c,si,store})=>{
                               const isLimitedSlot=si>=cellLimit;
                               return (
@@ -8956,7 +8980,7 @@ function AppInner() {
                                 最大{inspLimits[dkk]}台
                               </div>
                             )}
-                          </div>
+                          </div>}
                         </div>
                       );
                     })}
@@ -9024,15 +9048,16 @@ function AppInner() {
                             // 個人フィルター時：セル背景ハイライト
                             const cellIsOff=calStaffFilter&&filteredOffs.length>0;
                             const cellIsLeave=calStaffFilter&&filteredLeaves.length>0;
-                            const baseBg=isCl?'repeating-linear-gradient(45deg,#f9fafb,#f9fafb 4px,#f3f4f6 4px,#f3f4f6 8px)':'white';
+                            // 休業日の見た目は車検カレンダーと共通（A案＋左の区切りバー）
+                            const baseBg=isCl?CLOSED_BG:'white';
                             const highlightBg=cellIsOff?'#fff7ed':cellIsLeave?'#f0fdf4':baseBg;
                             const highlightOutline=cellIsOff?'2px solid #f97316':cellIsLeave?'2px solid #10b981':'none';
                             return(
-                              <div key={di} style={{minHeight:120,padding:'5px 4px',borderTop:'1px solid #e5e7eb',borderLeft:di>0?'1px solid #e5e7eb':'none',background:highlightBg,outline:highlightOutline,position:'relative',opacity:dimmed?0.28:1,transition:'opacity 0.15s,background 0.15s'}}>
-                                {isCl&&<div style={{position:'absolute',top:2,right:3,fontSize:8,color:isSecTue2?'#d97706':'#9ca3af',fontWeight:700}}>{isSecTue2?'第2火':'定休'}</div>}
-                                <div style={{fontWeight:800,fontSize:14,marginBottom:4,color:numCol,display:'flex',alignItems:'center',gap:3}}>
+                              <div key={di} style={{minHeight:120,padding:'5px 4px',borderTop:'1px solid #e5e7eb',borderLeft:di>0?'1px solid #e5e7eb':'none',background:highlightBg,boxShadow:isCl?CLOSED_BAR:'none',outline:highlightOutline,position:'relative',opacity:dimmed?0.28:1,transition:'opacity 0.15s,background 0.15s'}}>
+                                {isCl&&<ClosedMark/>}
+                                <div style={{fontWeight:800,fontSize:14,marginBottom:4,color:isCl?CLOSED_FG:numCol,display:'flex',alignItems:'center',gap:3}}>
                                   <span style={isToday?{background:'#c2410c',color:'white',borderRadius:'50%',width:21,height:21,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:800,flexShrink:0}:{flexShrink:0}}>{day}</span>
-                                  {isHol&&<span style={{fontSize:8,color:'#dc2626'}}>祝</span>}
+                                  {isHol&&<span style={{fontSize:8,color:isCl?CLOSED_FG:'#dc2626'}}>祝</span>}
                                   {cellIsOff&&<span style={{marginLeft:'auto',fontSize:13}}>🏖</span>}
                                   {cellIsLeave&&<span style={{marginLeft:'auto',fontSize:13}}>📋</span>}
                                 </div>

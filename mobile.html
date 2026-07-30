@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.71';
+const MOBILE_VERSION='1.72';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -168,6 +168,8 @@ const getDefaultCapabilities=(badge)=>{
   if(badge==='inspector')return {insp_front:true,sched_front:true,insp_work:true,sched_work:true,insp_check:true};
   return {insp_front:true,sched_front:true,insp_work:true,sched_work:true,insp_check:false};
 };
+// 休業日の見た目（PC版 index と共通・A案）。定休日・第2火曜・手動休業日は色分けせず同じ表示にする。
+const CLOSED_BG='#e2e5ea', CLOSED_FG='#8b93a1', CLOSED_BAR='inset 4px 0 0 #9aa1ac', CLOSED_LABEL='休業日';
 // 休業日判定（PC版 AppInner の isClosed と同一）: 店舗別の定休曜日(cdow) → 店舗別の個別休業日(cdate)
 // → 第2火曜（両店共通・override-openで通常営業に戻せる）。日付文字列はゼロ詰め（PC版の保存形式）。
 const calIsClosed=(date,cDays=[],cDates=[],ovOpen=[])=>{
@@ -435,8 +437,8 @@ const CalendarView=({inspData,closedDays,closedDates,overrideOpen,vsId,onSelectD
               const info=dayCnt[d];
               return(
                 <div key={di} onClick={()=>!closed&&onSelectDate(`${cy}-${cm+1}-${d}`,cy,cm,d)}
-                  style={{borderRadius:10,background:closed?'#f8fafc':isToday?'#dbeafe':'white',border:isToday?'2px solid #3b82f6':'2px solid #f1f5f9',minHeight:58,padding:'5px 3px',cursor:closed?'default':'pointer',opacity:closed?0.4:1,boxShadow:info&&!closed?'0 2px 6px rgba(0,0,0,.08)':'none'}}>
-                  <div style={{textAlign:'center',fontWeight:800,fontSize:14,color:isToday?'#1e40af':closed?'#94a3b8':isSun||isHol?'#ef4444':isSat?'#3b82f6':'#1e293b'}}>{d}</div>
+                  style={{borderRadius:10,background:closed?CLOSED_BG:isToday?'#dbeafe':'white',border:isToday?'2px solid #3b82f6':'2px solid #f1f5f9',boxShadow:closed?CLOSED_BAR:info?'0 2px 6px rgba(0,0,0,.08)':'none',minHeight:58,padding:'5px 3px',cursor:closed?'default':'pointer'}}>
+                  <div style={{textAlign:'center',fontWeight:800,fontSize:14,color:isToday?'#1e40af':closed?CLOSED_FG:isSun||isHol?'#ef4444':isSat?'#3b82f6':'#1e293b'}}>{d}</div>
                   {info&&!closed&&(
                     <div style={{marginTop:2}}>
                       <div style={{textAlign:'center',fontSize:9,fontWeight:800,color:isToday?'#1e40af':'#374151',marginBottom:1}}>{info.total}台</div>
@@ -445,7 +447,7 @@ const CalendarView=({inspData,closedDays,closedDates,overrideOpen,vsId,onSelectD
                       </div>
                     </div>
                   )}
-                  {closed&&<div style={{textAlign:'center',fontSize:8,color:'#94a3b8',marginTop:2}}>休</div>}
+                  {closed&&<div style={{textAlign:'center',fontSize:9,color:'#6b7280',fontWeight:800,marginTop:6,letterSpacing:1}}>{CLOSED_LABEL}</div>}
                 </div>
               );
             })}
@@ -1184,21 +1186,32 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
 const LOANER_SECTION_COLORS={honten:'#1d4ed8',sanda:'#dc2626',rental:'#7c3aed'};
 const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,loanerCarsS,vsId})=>{
   const today=new Date();
-  const [lm,setLm]=useState(new Date(today.getFullYear(),today.getMonth(),1));
+  // ★表示は「月ごと」ではなく起点日からの連続49日（2026-07-30 ユーザー要望）。
+  //   既定の起点＝本日の3日前 → 本日が左から4列目に出て、左スワイプ（横スクロール）で
+  //   本日から45日先まで一気に確認できる。‹ › で起点を30日ずつ動かせば過去も見られる。
+  const LOANER_LEAD_DAYS=3, LOANER_SPAN=49; // 3日前＋本日＋45日先
+  const dayStart=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  const [rangeStart,setRangeStart]=useState(()=>{
+    const s=dayStart(new Date()); s.setDate(s.getDate()-LOANER_LEAD_DAYS); return s;
+  });
   const [selRes,setSelRes]=useState(null); // タップした予約の詳細ポップアップ {r,car,isRental}
   const swipeX=useRef(null);
-  const ly=lm.getFullYear(),lmo=lm.getMonth();
-  const dim=new Date(ly,lmo+1,0).getDate();
+  const shiftRange=n=>setRangeStart(p=>{const s=new Date(p);s.setDate(s.getDate()+n);return s;});
+  const resetRange=()=>{const s=dayStart(new Date());s.setDate(s.getDate()-LOANER_LEAD_DAYS);setRangeStart(s);};
+  const dim=LOANER_SPAN;
   const sc=vsId==='honten'?'#1d4ed8':'#dc2626';
   const myLoaners=vsId==='honten'?loanerCarsH:loanerCarsS;
   const myLoanerRes=vsId==='honten'?loanerResH:loanerResS;
   const rentals=Array.isArray(rentalCars)&&rentalCars.length>0?rentalCars:DEFAULT_RENTAL_CARS;
   const rentalRes=rentalResData||{};
   const toNumL=(y,m,d)=>y*10000+m*100+d;
-  const dates=useMemo(()=>Array.from({length:dim},(_,i)=>{
-    const dt=new Date(ly,lmo,i+1);
-    return{d:i+1,dow:dt.getDay(),num:toNumL(ly,lmo,i+1)};
-  }),[ly,lmo,dim]);
+  // 起点日から連続 LOANER_SPAN 日ぶん（月をまたぐ）
+  const dates=useMemo(()=>Array.from({length:LOANER_SPAN},(_,i)=>{
+    const dt=new Date(rangeStart.getFullYear(),rangeStart.getMonth(),rangeStart.getDate()+i);
+    const y=dt.getFullYear(),m=dt.getMonth(),d=dt.getDate();
+    return{y,m,d,dow:dt.getDay(),num:toNumL(y,m,d),isMonthStart:d===1||i===0};
+  }),[rangeStart]);
+  const firstD=dates[0],lastD=dates[dates.length-1];
   // lres/rres は {carId: {key: 予約}} のオブジェクト構造（配列ではない）
   const getRes=(res,cid,num)=>Object.values(res[cid]||{}).find(r=>{
     const s=toNumL(r.fy,r.fm,r.fd);
@@ -1219,16 +1232,18 @@ const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,lo
             <div style={{fontWeight:700,fontSize:10,color:'#1e293b',lineHeight:1.3}}>{car.name}</div>
             <div style={{fontSize:9,color:'#94a3b8'}}>{car.num}</div>
           </div>
-          {dates.map(({d,num})=>{
+          {dates.map(({y,m,d,num},di)=>{
             const r=getRes(res,car.id,num);
             const colors=label.includes('レンタカー')?RCAR_COLORS:LCAR_COLORS;
             const color=r?colors[ci%colors.length]:'white';
-            const isTd=ly===today.getFullYear()&&lmo===today.getMonth()&&d===today.getDate();
-            const isStart=r&&r.fd===d&&r.fm===lmo;
-            // 貸出日数分のセルを1枠として名前を横に広げる（当月内の帯の長さ。入りきらなければ尻切れ）。
-            const nameSpan=isStart&&r?Math.max(1,(toNumL(r.ty,r.tm,r.td)<=toNumL(ly,lmo,dim)?r.td:dim)-r.fd+1):1;
+            const isTd=y===today.getFullYear()&&m===today.getMonth()&&d===today.getDate();
+            // 帯の先頭＝貸出日そのもの、または表示範囲の左端で貸出中のとき
+            const isStart=!!r&&((r.fy===y&&r.fm===m&&r.fd===d)||di===0);
+            // 貸出日数分のセルを1枠として名前を横に広げる（表示範囲内の長さ。入りきらなければ尻切れ）。
+            const endIdx=r?dates.findIndex(x=>x.num>toNumL(r.ty,r.tm,r.td)):-1;
+            const nameSpan=isStart&&r?Math.max(1,(endIdx<0?dates.length:endIdx)-di):1;
             return(
-              <div key={d} onClick={()=>r&&setSelRes({r,car,isRental:label.includes('レンタカー')})} style={{width:32,minWidth:32,height:36,background:color,borderRight:'1px solid #f1f5f9',borderLeft:isTd?`2px solid ${sc}`:'none',position:'relative',overflow:isStart&&r?'visible':'hidden',cursor:r?'pointer':'default'}}>
+              <div key={di} onClick={()=>r&&setSelRes({r,car,isRental:label.includes('レンタカー')})} style={{width:32,minWidth:32,height:36,background:color,borderRight:'1px solid #f1f5f9',borderLeft:isTd?`2px solid ${sc}`:'none',position:'relative',overflow:isStart&&r?'visible':'hidden',cursor:r?'pointer':'default'}}>
                 {isStart&&r&&(
                   // 帯の日数分に広げ、2行まで使う。法人格を落として固有名だけ出す。入りきらなければ尻切れ。
                   <div style={{position:'absolute',left:1,top:'50%',transform:'translateY(-50%)',width:nameSpan*32-2,fontSize:8,fontWeight:800,color:'white',textShadow:'0 1px 2px rgba(0,0,0,.85)',lineHeight:1.1,display:'-webkit-box',WebkitBoxOrient:'vertical',WebkitLineClamp:2,overflow:'hidden',wordBreak:'break-all',zIndex:3,pointerEvents:'none'}}>
@@ -1246,23 +1261,25 @@ const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,lo
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style={{flexShrink:0,background:'white',borderBottom:'1px solid #f1f5f9',borderTop:'3px solid #7c3aed',padding:'10px 14px'}}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <button onClick={()=>setLm(new Date(ly,lmo-1,1))} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button>
+          <button onClick={()=>shiftRange(-30)} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8249;</button>
           <div style={{flex:1,textAlign:'center'}}>
-            <div style={{fontWeight:900,fontSize:17}}>{ly}年 {lmo+1}月</div>
-            <div style={{fontSize:9,color:'#94a3b8'}}>← スワイプで月移動 / 横スクロール可</div>
+            <div style={{fontWeight:900,fontSize:15}}>{firstD.m+1}/{firstD.d} 〜 {lastD.m+1}/{lastD.d}</div>
+            <div style={{fontSize:9,color:'#94a3b8'}}>← 左スワイプで45日先まで / ‹ › は30日移動</div>
           </div>
-          <button onClick={()=>setLm(new Date(ly,lmo+1,1))} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button>
+          <button onClick={()=>shiftRange(30)} style={{width:34,height:34,borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:18,display:'flex',alignItems:'center',justifyContent:'center'}}>&#8250;</button>
+          <button onClick={resetRange} style={{height:34,padding:'0 10px',borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontSize:11,fontWeight:800,color:'#374151'}}>今日</button>
         </div>
       </div>
       <div style={{flex:1,overflow:'auto',WebkitOverflowScrolling:'touch'}}>
         <div style={{minWidth:`${82+dim*32}px`}}>
           <div style={{display:'flex',position:'sticky',top:0,zIndex:10,background:'white',borderBottom:'2px solid #e5e7eb'}}>
             <div style={{width:80,minWidth:80,padding:'6px 7px',fontWeight:700,fontSize:9,color:'#64748b',background:'#f8fafc',borderRight:'2px solid #e5e7eb',position:'sticky',left:0,zIndex:3}}>代車 / レンタ</div>
-            {dates.map(({d,dow})=>{
-              const isTd=ly===today.getFullYear()&&lmo===today.getMonth()&&d===today.getDate();
-              const isHol=isHoliday(ly,lmo,d);
+            {dates.map(({y,m,d,dow,isMonthStart},di)=>{
+              const isTd=y===today.getFullYear()&&m===today.getMonth()&&d===today.getDate();
+              const isHol=isHoliday(y,m,d);
               return(
-                <div key={d} style={{width:32,minWidth:32,textAlign:'center',padding:'3px 1px',background:isTd?'#dbeafe':'white',borderRight:'1px solid #f1f5f9'}}>
+                <div key={di} style={{width:32,minWidth:32,textAlign:'center',padding:'3px 1px',background:isTd?'#dbeafe':'white',borderRight:'1px solid #f1f5f9',borderLeft:isMonthStart&&di>0?'2px solid #c7d2fe':'none'}}>
+                  {isMonthStart&&<div style={{fontSize:7,fontWeight:800,color:'#7c3aed',lineHeight:1}}>{m+1}月</div>}
                   <div style={{fontSize:8,color:isTd?'#1e40af':dow===0||isHol?'#ef4444':dow===6?'#3b82f6':'#94a3b8',fontWeight:600}}>{DOW[dow]}</div>
                   <div style={{fontSize:11,fontWeight:isTd?800:500,color:isTd?'#1e40af':dow===0||isHol?'#ef4444':dow===6?'#3b82f6':'#1e293b'}}>{d}</div>
                 </div>
@@ -1287,7 +1304,7 @@ const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,lo
           <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:250,display:'flex',flexDirection:'column',justifyContent:'flex-end'}} onClick={()=>setSelRes(null)}>
             <div onClick={e=>e.stopPropagation()}
               onTouchStart={e=>{swipeX.current=e.touches[0].clientX;}}
-              onTouchEnd={e=>{if(swipeX.current==null)return;const dx=e.changedTouches[0].clientX-swipeX.current;swipeX.current=null;if(dx>40)setLm(new Date(ly,lmo-1,1));else if(dx<-40)setLm(new Date(ly,lmo+1,1));}}
+              onTouchEnd={e=>{if(swipeX.current==null)return;const dx=e.changedTouches[0].clientX-swipeX.current;swipeX.current=null;if(dx>40)shiftRange(-30);else if(dx<-40)shiftRange(30);}}
               style={{background:'white',borderRadius:'20px 20px 0 0',padding:'16px 18px calc(18px + env(safe-area-inset-bottom,0px))',boxShadow:'0 -8px 40px rgba(0,0,0,.25)',animation:'sheetUp .2s ease'}}>
               <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
                 <span style={{fontSize:10,fontWeight:800,color:'white',background:isRental?'#7c3aed':sc,borderRadius:20,padding:'2px 10px',whiteSpace:'nowrap'}}>{isRental?'レンタカー':'代車'}</span>
@@ -1301,11 +1318,11 @@ const LoanerView=({loanerResH,loanerResS,rentalResData,rentalCars,loanerCarsH,lo
                 <div style={{display:'flex',gap:8}}><span style={{color:'#94a3b8',width:52,flexShrink:0}}>期間</span><span style={{fontWeight:700}}>{days}日間{(r.fm!==r.tm||r.fy!==r.ty)&&<span style={{marginLeft:6,fontSize:11,color:'#c2410c',fontWeight:800}}>月をまたぐ貸出</span>}</span></div>
               </div>
               <div style={{display:'flex',alignItems:'center',gap:8,marginTop:16}}>
-                <button onClick={()=>setLm(new Date(ly,lmo-1,1))} style={{flex:1,padding:'10px 0',borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontWeight:800,fontSize:12,color:'#374151'}}>‹ 前の月</button>
-                <span style={{fontWeight:900,fontSize:13,minWidth:78,textAlign:'center'}}>{ly}年{lmo+1}月</span>
-                <button onClick={()=>setLm(new Date(ly,lmo+1,1))} style={{flex:1,padding:'10px 0',borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontWeight:800,fontSize:12,color:'#374151'}}>次の月 ›</button>
+                <button onClick={()=>shiftRange(-30)} style={{flex:1,padding:'10px 0',borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontWeight:800,fontSize:12,color:'#374151'}}>‹ 30日前へ</button>
+                <span style={{fontWeight:900,fontSize:12,minWidth:86,textAlign:'center'}}>{firstD.m+1}/{firstD.d}〜{lastD.m+1}/{lastD.d}</span>
+                <button onClick={()=>shiftRange(30)} style={{flex:1,padding:'10px 0',borderRadius:10,border:'2px solid #e5e7eb',background:'white',fontWeight:800,fontSize:12,color:'#374151'}}>30日先へ ›</button>
               </div>
-              <div style={{textAlign:'center',fontSize:10,color:'#94a3b8',marginTop:6}}>← 横スワイプでも月移動（前月の帯が確認できます）</div>
+              <div style={{textAlign:'center',fontSize:10,color:'#94a3b8',marginTop:6}}>← 横スワイプでも期間移動（過去の帯が確認できます）</div>
             </div>
           </div>
         );
