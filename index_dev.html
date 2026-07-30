@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.70';
+const APP_VERSION = '1.71';
 
 
 
@@ -1717,10 +1717,20 @@ const resHasRec=(base,carId,resId)=>Object.values(_resObj(base)[carId]||{}).some
 //   未反映なら最新値を読み直して mutate からやり直す（最大 tries 回）。sSet は no-cors で
 //   lock_timeout 等を検知できないため、この読み返しループが唯一の成否判定手段。
 //   ※sGet/sSet を呼ぶだけで BLOCK-B（データ層）自体は改変しない。
-const writeVerified=async(key,mutate,check,tries=3)=>{
+const writeVerified=async(key,mutate,check,tries=3,opts)=>{
+  const _o=opts||{};
   for(let i=0;i<tries;i++){
     let base=null;
     try{base=await sGet(key);}catch(e){}
+    // ★サーバー値を読めなかった時（GASの一時的な失敗・混雑。sGetはエラーもnullで返す）に
+    //   「空っぽ」とみなして書くと、その1回で全予約を消してしまう。requireBase 指定時は
+    //   書かずに次の試行へ回し、3回とも読めなければ失敗として呼び出し側に返す。
+    //   （2026-07-30 DEV実機の検証中に実際に読み取り失敗を踏んで判明）
+    if(_o.requireBase&&!(base&&typeof base==='object')){
+      console.warn('[WRITE] サーバー値を読めないため書き込みを見送り',key,'attempt',i+1);
+      await new Promise(r=>setTimeout(r,1500+1500*i));
+      continue;
+    }
     let val;
     try{val=mutate(base);}catch(e){return false;}
     if(val===undefined)return true; // 変更不要
@@ -5574,7 +5584,7 @@ const LoanerSettingsModal = memo(({isOpen, onClose, listH, listS, onSaveH, onSav
 // ============================================
 //  代車管理グリッド（閲覧専用 + モーダル編集）
 // ============================================
-const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onAddRes,onDeleteRes,onReplaceRes,onUndo,selDate,onBack,onPickLoaner,pickMode,locks,currentUser,onLockCar,onUnlockCar,savedModalData,inspData,schedData,onOpenBooking,pinnedRes,setPinnedRes,hoverRes,setHoverRes,storeLoaners,storeInfo,rentalCars,rentalRes,onAddRentalRes,onDeleteRentalRes,onReplaceRentalRes,onPickRental,onOpenSettings,tireData,locationData,onOpenTireEdit,onOpenLocationEdit,onApplyOptimize,pendingDeleteBk=''})=>{
+const LoanerGrid=memo(({loanerRes,loanerMonth,setLoanerMonth,onDeleteRes,onReplaceRes,onUndo,selDate,onBack,onPickLoaner,pickMode,locks,currentUser,onLockCar,onUnlockCar,savedModalData,inspData,schedData,onOpenBooking,pinnedRes,setPinnedRes,hoverRes,setHoverRes,storeLoaners,storeInfo,rentalCars,rentalRes,onAddRentalRes,onDeleteRentalRes,onReplaceRentalRes,onPickRental,onOpenSettings,tireData,locationData,onOpenTireEdit,onOpenLocationEdit,onApplyOptimize,pendingDeleteBk=''})=>{
   const LOANERS_LOCAL=storeLoaners||LOANERS;
   const RENTAL_LOCAL=rentalCars||DEFAULT_RENTAL_CARS;
   const rentalResLocal=rentalRes||{};
@@ -6892,7 +6902,8 @@ function AppInner() {
     (async()=>{
       const ok=await writeVerified(STOR+'insp',
         base=>{ const v=mutate(base); updateLocalInspData(v); return v; },
-        back=>{ try{return !!confirmFn(back);}catch(e){return false;} }
+        back=>{ try{return !!confirmFn(back);}catch(e){return false;} },
+        3,{requireBase:true} // 読めなかったサーバー値を「空」とみなして書かない
       );
       if(ok){
         if(o.pid)inspPendDrop(o.pid);
@@ -6989,7 +7000,8 @@ function AppInner() {
     (async()=>{
       const ok=await writeVerified(key,
         base=>{ const v=mutate(base); if(v!==undefined)updateLocal(v); return v; },
-        back=>{ try{return !!confirmFn(back);}catch(e){return false;} }
+        back=>{ try{return !!confirmFn(back);}catch(e){return false;} },
+        3,{requireBase:true} // 読めなかったサーバー値を「空」とみなして書かない
       );
       if(ok){
         try{ const fresh=await sGet(key); if(fresh&&typeof fresh==='object'&&!Array.isArray(fresh)) updateLocal(fresh); }catch(e){}
@@ -8386,11 +8398,6 @@ function AppInner() {
     setPendingLoanerId(null);
   },[modalType,modalDk,modalIdx,modalSlot,persistLres,deleteRentalRes,loanerRes]);
 
-  const addLoanerRes=useCallback((cid,res)=>persistLres(
-    base=>putResRec(base,cid,String(res.fd),res),
-    back=>resHasRec(back,cid,res.id),
-    {verb:'追加',name:res?.user}
-  ),[persistLres]);
   // 代車予約の期間編集は1回のatomic更新で差し替える（delete+addの競合を防ぐ）。
   //   bookingKey / carName / carNum / locked などの既存フィールドはそのまま残るので紐付けが切れない。
   const replaceLoanerRes=useCallback((cid,rid,patch)=>{
@@ -9694,7 +9701,7 @@ function AppInner() {
           <div style={{background:'white',borderRadius:13,padding:'4px 4px',boxShadow:'0 10px 40px rgba(0,0,0,.18)',borderTop:`4px solid ${vsStore.color}`,position:'fixed',top:'var(--header-h,90px)',left:'8px',right:'8px',bottom:'8px',overflowY:'auto',zIndex:10,borderRadius:13,display:'flex',flexDirection:'column'}}>
             <LoanerGrid
               loanerRes={loanerRes} loanerMonth={loanerMonth} setLoanerMonth={setLoanerMonth}
-              onAddRes={addLoanerRes} onDeleteRes={deleteLoanerRes} onReplaceRes={replaceLoanerRes} onUndo={undoLoanerRes}
+              onDeleteRes={deleteLoanerRes} onReplaceRes={replaceLoanerRes} onUndo={undoLoanerRes}
               selDate={selDate} onBack={handleLoanerBack} onPickLoaner={handlePickLoaner}
               pickMode={pickMode} locks={locks} currentUser={currentUser}
               onLockCar={handleLockCar} onUnlockCar={handleUnlockCar}

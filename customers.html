@@ -85,7 +85,7 @@ const STOR='hub-v8-dev-';
 // index側の全画面オーバーレイ（iframe）内で開かれているか。埋め込み時は
 // 「スケジュールに戻る」がページ遷移ではなく親へのpostMessage（オーバーレイ閉鎖）になる。
 const IS_EMBED=(()=>{try{return window.self!==window.top;}catch(e){return true;}})();
-const APP_VERSION='1.70'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
+const APP_VERSION='1.71'; // 表示用バージョン。更新ごとに上げる（軽微+0.01／大型は整数を上げる）。index_dev.htmlと揃える
 const storKey=(base,sid)=>`${STOR}${sid}-${base}`;
 const CHUNK_SIZE=100;
 // ファイル名をGASキーに使える形に変換
@@ -287,10 +287,19 @@ const sSet=async(k,v,retries=3)=>{
 // ★sSetはno-cors。GASが 'error: lock_timeout' を返しても成功として返るため、書けたことにならない。
 //   重要なキーは必ずこれで書く: 書く→読み返す→期待どおりでなければサーバー最新値から作り直して再送。
 //   mutate(server最新値)→保存する値 を返す関数。check(読み返した値)→true で成功。
-const writeVerified=async(key,mutate,check,tries=3)=>{
+const writeVerified=async(key,mutate,check,tries=3,opts)=>{
+  const _o=opts||{};
   for(let i=0;i<tries;i++){
     let base=null;
     try{base=await sGet(key);}catch(e){}
+    // ★サーバー値を読めなかった時（GASの一時的な失敗・混雑。sGetはエラーもnullで返す）に
+    //   「空っぽ」とみなして書くと、その1回でそのキーの全予約を消してしまう。requireBase 指定時は
+    //   書かずに次の試行へ回し、3回とも読めなければ失敗として呼び出し側に返す（2026-07-30）。
+    if(_o.requireBase&&!(base&&typeof base==='object')){
+      console.warn('[WRITE] サーバー値を読めないため書き込みを見送り',key,'attempt',i+1);
+      await new Promise(r=>setTimeout(r,1500+1500*i));
+      continue;
+    }
     let val;
     try{val=mutate(base);}catch(e){return false;}
     if(val===undefined)return true; // 変更不要
@@ -1909,7 +1918,8 @@ const App=()=>{
             bKey=r.bKey;localInsp=r.data;
             return r.data;
           },
-          back=>inspHasCust(back,dkFormatted,customer.custId,customer.name)
+          back=>inspHasCust(back,dkFormatted,customer.custId,customer.name),
+          3,{requireBase:true} // 読めなかったサーバー値を「空」とみなして書かない
         );
         if(localInsp){setInspData(localInsp);inspWriteRef.current=Date.now();}
         _done.insp=inspOk;_maybeDrop();
@@ -1948,7 +1958,8 @@ const App=()=>{
         // lock_timeout時に無言で消えていた）
         writeVerified(STOR+'custbk',
           base=>({...((base&&typeof base==='object')?base:{}),[bkKey]:custbkEntry}),
-          back=>!!(back&&back[bkKey])
+          back=>!!(back&&back[bkKey]),
+          3,{requireBase:true} // 読めなかったサーバー値を「空」とみなして書かない
         );
 
         // 3. 代車予約追加（bookingKey付き）
@@ -2014,7 +2025,8 @@ const App=()=>{
                 b[selCarId]={...b[selCarId],[_resDay]:{...newRes,color:RES_COLORS[_ci]}};
                 return b;
               },
-              back=>!!(back&&back[selCarId]&&back[selCarId][_resDay]&&back[selCarId][_resDay].custId===customer.custId)
+              back=>!!(back&&back[selCarId]&&back[selCarId][_resDay]&&back[selCarId][_resDay].custId===customer.custId),
+              3,{requireBase:true} // 読めなかったサーバー値を「空」とみなして書かない
             );
           })();
         }

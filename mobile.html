@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.70';
+const MOBILE_VERSION='1.71';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -1671,11 +1671,20 @@ const App=()=>{
     writeGuardRef.current++;
     setTimeout(()=>{writeGuardRef.current=Math.max(0,writeGuardRef.current-1);},70000);
   };
-  const writeShared=async(key,fallbackLocal,mutator,applyLocal,verify)=>{
+  //   ★requireBase=true のキー（insp/lres/rres など予約そのもの）は、サーバー値を読めなかった時に
+  //     ローカル全文へフォールバックしない。読めない＝GASの一時失敗なので、そこでローカルを書き戻すと
+  //     他端末が入れた予約を巻き添えにする（最悪、空とみなして全消し）。書かずに次の試行へ回す。
+  //     （2026-07-30 追加。PC側 writeVerified の requireBase と同じ考え方）
+  const writeShared=async(key,fallbackLocal,mutator,applyLocal,verify,requireBase)=>{
     guardWrite();
     let next=null;
     for(let attempt=0;attempt<3;attempt++){
       let base=await sGet(key);
+      if(!isPlainObj(base)&&requireBase){
+        console.warn('[WRITE] サーバー値を読めないため書き込みを見送り',key,'attempt',attempt+1);
+        await new Promise(r=>setTimeout(r,1500+1500*attempt));
+        continue;
+      }
       if(!isPlainObj(base))base=isPlainObj(fallbackLocal)?fallbackLocal:{};
       next=mutator(base);
       applyLocal(next);
@@ -1768,8 +1777,8 @@ const App=()=>{
     if(action.kind==='none'){
       // 別キーへの独立した書き込みは並列化（GASロック側で直列化されるが、読み・検証待ちが重なる分速い）
       await Promise.all([
-        writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal)),
-        writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal)),
+        writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal),true),
+        writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal),true),
       ]);
       return {...entry,loaner:'',loanerId:null,rentalLabel:'',rentalCarId:null};
     }
@@ -1792,8 +1801,8 @@ const App=()=>{
           if(days[k])k=`${action.from.d}_${rec.id}`;
           days[k]=rec;
           return{...cleaned,[action.carId]:days};
-        },setMyLres,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal)),
-        writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal)),
+        },setMyLres,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal),true),
+        writeShared(STOR+'rres',rentalResData,base=>cleanOwn(base),setRentalResData,echo=>!hasBk(echo,bkFinal),true),
       ]);
       return {...entry,loaner:car?`${car.name} (${car.num})`:'',loanerId:action.carId,rentalLabel:'',rentalCarId:null};
     }
@@ -1811,8 +1820,8 @@ const App=()=>{
           const days={...(cleaned[action.carId]||{})};
           days[String(rec.id)]=rec; // PC版addRentalResと同じくidをキーにする
           return{...cleaned,[action.carId]:days};
-        },setRentalResData,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal)),
-        writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal)),
+        },setRentalResData,echo=>Object.values(echo[action.carId]||{}).some(r=>r&&r.id===rec.id&&r.bookingKey===bkFinal),true),
+        writeShared(lresKey,myLres,base=>cleanOwn(base),setMyLres,echo=>!hasBk(echo,bkFinal),true),
       ]);
       return {...entry,loaner:'',loanerId:null,rentalLabel:`🔑 ${rcar?rcar.name:'レンタカー'}${rcar?.num?` (${rcar.num})`:''}`,rentalCarId:action.carId};
     }
@@ -1868,7 +1877,7 @@ const App=()=>{
       },setInspData,echo=>{
         const r=(echo[req.dk]||[])[req.idx];
         return !!r&&r.name===entry.name&&r.seq===placedSeq;
-      });
+      },true);
       if(placedPending)alert('⚠️ 1日の上限を超えたため、本店承認が必要です（通常6台／レギュラー車検3台）。この予約は承認待ちになります。');
     }else{
       const sdKey=storKey('sched',vsId);
@@ -1902,7 +1911,7 @@ const App=()=>{
       },setSd,echo=>{
         const r=(echo[req.dk]||{})[slotFinal];
         return !!r&&r.id===placedId;
-      });
+      },true);
     }
   };
 
@@ -2027,7 +2036,7 @@ const App=()=>{
       },setInspData,echo=>{
         const r=(echo[req.dk]||[])[req.idx];
         return !r||!r.name||(deletedSeq!=null?r.seq!==deletedSeq:r.name!==deletedName);
-      });
+      },true);
     }else{
       const sdKey=storKey('sched',vsId);
       const sd=vsId==='honten'?schedDataH:schedDataS;
@@ -2040,7 +2049,7 @@ const App=()=>{
       },setSd,echo=>{
         const r=(echo[req.dk]||{})[req.slot];
         return !r||!r.name||(deletedId!=null?r.id!==deletedId:r.name!==deletedName);
-      });
+      },true);
     }
     // bookingKeyに紐づく代車・レンタカー予約を連動削除（PC版handleDeleteModalと同じ）
     const lresKey=storKey('lres',vsId);
@@ -2056,8 +2065,8 @@ const App=()=>{
       return out;
     };
     await Promise.all([
-      writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres,echo=>!hasBk(echo,bk)),
-      writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData,echo=>!hasBk(echo,bk)),
+      writeShared(lresKey,myLres,base=>cleanBk(base),setMyLres,echo=>!hasBk(echo,bk),true),
+      writeShared(STOR+'rres',rentalResData,base=>cleanBk(base),setRentalResData,echo=>!hasBk(echo,bk),true),
     ]);
   };
 
