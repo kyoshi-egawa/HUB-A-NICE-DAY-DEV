@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.72';
+const APP_VERSION = '1.73';
 
 
 
@@ -297,6 +297,55 @@ const ClosedMark = ({small,topOffset=26})=>(
     justifyContent:'center',fontSize:small?11:13,fontWeight:800,color:'#6b7280',letterSpacing:small?1:2,
     pointerEvents:'none'}}>{CLOSED_LABEL}</div>
 );
+// ── 月間休日数バッジ（スタッフ休日カレンダーの上部）──
+//   会社が月ごとに決める休日数を出すだけの表示。スタッフが自分で数えなくて済むようにするもので、
+//   休業日データや集計には影響しない。鉛筆が出るのは編集権限のある4人だけ。
+const MonthlyHolidayBadge = ({y,m,value,canEdit,onSave})=>{
+  const [editing,setEditing]=useState(false);
+  const [val,setVal]=useState('');
+  const [busy,setBusy]=useState(false);
+  useEffect(()=>{setEditing(false);},[y,m]);
+  const commit=async()=>{
+    const s=String(val).trim();
+    const n=s===''?null:Math.max(0,Math.min(31,Math.round(Number(s))));
+    if(s!==''&&!Number.isFinite(n)){setEditing(false);return;}
+    setBusy(true);
+    await onSave(y,m,n);
+    setBusy(false);setEditing(false);
+  };
+  const box={display:'flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:7,
+    background:'#eef2ff',border:'2px solid #c7d2fe',fontSize:11,color:'#3730a3',whiteSpace:'nowrap'};
+  if(editing){
+    return (
+      <span style={{...box,background:'white',borderColor:'#6366f1'}}>
+        <span style={{fontWeight:700}}>{m+1}月の休日</span>
+        <input autoFocus type="number" min="0" max="31" value={val} disabled={busy}
+          onChange={e=>setVal(e.target.value)}
+          onKeyDown={e=>{if(e.key==='Enter')commit();if(e.key==='Escape')setEditing(false);}}
+          style={{width:52,padding:'2px 6px',border:'2px solid #c7d2fe',borderRadius:5,fontSize:12,fontWeight:800,textAlign:'center'}}/>
+        <span style={{fontWeight:700}}>日</span>
+        <button onClick={commit} disabled={busy}
+          style={{padding:'2px 9px',borderRadius:5,border:'none',background:'#4f46e5',color:'white',fontWeight:800,fontSize:11,cursor:busy?'wait':'pointer'}}>
+          {busy?'保存中…':'保存'}
+        </button>
+        <button onClick={()=>setEditing(false)} disabled={busy}
+          style={{padding:'2px 7px',borderRadius:5,border:'1px solid #d1d5db',background:'white',color:'#6b7280',fontSize:11,cursor:'pointer'}}>やめる</button>
+      </span>
+    );
+  }
+  return (
+    <span style={box} title={canEdit?'クリックで今月の休日数を入力（管理者のみ）':'会社が決めた今月の休日数'}>
+      <span style={{fontWeight:700}}>{m+1}月の休日</span>
+      <span style={{fontWeight:900,fontSize:14}}>{value!=null?`${value}日`:'未設定'}</span>
+      {canEdit&&(
+        <button onClick={()=>{setVal(value!=null?String(value):'');setEditing(true);}}
+          style={{padding:'1px 7px',borderRadius:5,border:'1px solid #c7d2fe',background:'white',color:'#4f46e5',fontSize:10,fontWeight:800,cursor:'pointer'}}>
+          {value!=null?'変更':'入力'}
+        </button>
+      )}
+    </span>
+  );
+};
 const TOKUENS = [{id:'①',name:'1ヶ月前予約'},{id:'②',name:'2ヶ月前予約'},{id:'-',name:'なし'}];
 const WORKS = [
   {id:'Q',name:'クイック整備・修理'},{id:'⑫',name:'12ヶ月点検'},{id:'M12',name:'メンパ12ヶ月点検'},
@@ -3284,7 +3333,8 @@ const StaffCalendarModal=memo(({isOpen,onClose,initMonth,currentUser,
   dynStaffH,dynStaffS,
   dayOffDataH,setDayOffDataH,dayOffDataS,setDayOffDataS,
   paidLeaveDataH,setPaidLeaveDataH,paidLeaveDataS,setPaidLeaveDataS,
-  closedDaysH,closedDaysS,closedDatesH,closedDatesS,overrideOpenDates})=>{
+  closedDaysH,closedDaysS,closedDatesH,closedDatesS,overrideOpenDates,
+  monthlyHolidays,onSaveMonthlyHoliday})=>{
   const [calStore,setCalStore]=useState('honten');
   const [selStaff,setSelStaff]=useState(null);
   const [selType,setSelType]=useState('dayoff');
@@ -3402,6 +3452,13 @@ const StaffCalendarModal=memo(({isOpen,onClose,initMonth,currentUser,
 
         {/* スタッフ選択 + 種類 */}
         <div style={{padding:'11px 20px',background:'#f8fafc',borderBottom:'1px solid #e5e7eb',flexShrink:0}}>
+          {/* 会社が決めた今月の休日数（表示のみ・入力は管理者4人） */}
+          <div style={{display:'flex',alignItems:'center',marginBottom:8}}>
+            <MonthlyHolidayBadge y={cy} m={cm}
+              value={(monthlyHolidays||{})[`${cy}-${cm+1}`]}
+              canEdit={canRestore(currentUser)}
+              onSave={onSaveMonthlyHoliday||(()=>{})}/>
+          </div>
           <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap',marginBottom:selStaff?8:0}}>
             <span style={{fontSize:11,fontWeight:700,color:'#374151',flexShrink:0}}>スタッフ：</span>
             <button onClick={()=>setSelStaff(null)}
@@ -7107,6 +7164,22 @@ function AppInner() {
   const [restrictionModal, setRestrictionModal] = useState(false); // 入庫制限モーダル
   const [restrTip, setRestrTip] = useState('');                    // 入庫制限バッジのホバー説明（表示中のdk）
   const [inspLimits, setInspLimits] = useShared(STOR+'inspLimits', {}); // 車検台数制限 {dk: number}
+  // 月間休日数（会社が月ごとに決める「完全休業日＋α」の日数）。{"2026-6":10} の形。
+  //   スタッフが自分で数えなくても今月の休日数が分かるようにするための表示専用の数字で、
+  //   休業日データや集計には一切影響しない。入力できるのは復旧と同じ4人だけ（canRestore）。
+  const [monthlyHolidays,,updateLocalMHol] = useShared(STOR+'mholidays', {}, 60000);
+  const saveMonthlyHoliday = useCallback(async(y,m,n)=>{
+    const mk=`${y}-${m+1}`;
+    updateLocalMHol(prev=>{ const o={...(prev||{})}; if(n==null)delete o[mk]; else o[mk]=n; return o; });
+    // 初回はキー自体が無いので requireBase は付けない（サーバー最新値ベース＋読み返し検証は行う）
+    const ok=await writeVerified(STOR+'mholidays',
+      base=>{ const o=(base&&typeof base==='object'&&!Array.isArray(base))?{...base}:{}; if(n==null)delete o[mk]; else o[mk]=n; return o; },
+      back=>{ const v=back&&back[mk]; return n==null?(v==null):(Number(v)===Number(n)); }
+    );
+    if(!ok)alert('⚠️ 月間休日数の保存がサーバーに反映されていません。\nもう一度お試しください。');
+    else{ try{ const fresh=await sGet(STOR+'mholidays'); if(fresh&&typeof fresh==='object'&&!Array.isArray(fresh))updateLocalMHol(fresh); }catch(e){} }
+    return ok;
+  },[updateLocalMHol]);
   const [showInspLimitModal, setShowInspLimitModal] = useState(false); // 台数制限モーダル
   const [showCalSettings,    setShowCalSettings]    = useState(false);
   const [showStaffCal,       setShowStaffCal]       = useState(false);
@@ -8855,6 +8928,11 @@ function AppInner() {
                       <span style={{width:11,height:11,borderRadius:2,background:'#f97316',display:'inline-block'}}/>休日
                       <span style={{width:11,height:11,borderRadius:2,background:'#10b981',display:'inline-block',marginLeft:4}}/>有給
                     </span>
+                    {/* 会社が決めた今月の休日数（表示のみ・入力は管理者4人） */}
+                    <MonthlyHolidayBadge y={cy} m={cm}
+                      value={(monthlyHolidays||{})[`${cy}-${cm+1}`]}
+                      canEdit={canRestore(currentUser)}
+                      onSave={saveMonthlyHoliday}/>
                   </>
                 )}
 
@@ -9870,6 +9948,7 @@ function AppInner() {
         closedDaysH={closedDaysH} closedDaysS={closedDaysS}
         closedDatesH={closedDatesH} closedDatesS={closedDatesS}
         overrideOpenDates={Array.isArray(overrideOpenDates)?overrideOpenDates:[]}
+        monthlyHolidays={monthlyHolidays} onSaveMonthlyHoliday={saveMonthlyHoliday}
       />
 
       {/* -- 予約モーダル（左スライドパネル） -- */}
