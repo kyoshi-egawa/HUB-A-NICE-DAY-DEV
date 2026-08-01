@@ -63,7 +63,7 @@ input,select,textarea{font-family:inherit;font-size:16px;}
 <script type="text/babel" data-presets="react">
 const {useState,useEffect,useCallback,useMemo,useRef,memo}=React;
 // ★ バージョン管理：システム全体で1つ。変更のたびにindex_dev.htmlのAPP_VERSIONと同値で0.01上げる
-const MOBILE_VERSION='1.73';
+const MOBILE_VERSION='1.74';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxyWvIxIyC1EwJUfm4Fy8g6dpBytp7J9wTuT6Dujz-X7V-WzkGkN-bHw2l6rY_B1ST3/exec';
 const GAS_API_KEY='hub2026SandaHonten!9xKy';
 const STOR='hub-v8-dev-';
@@ -169,7 +169,8 @@ const getDefaultCapabilities=(badge)=>{
   return {insp_front:true,sched_front:true,insp_work:true,sched_work:true,insp_check:false};
 };
 // 休業日の見た目（PC版 index と共通・A案）。定休日・第2火曜・手動休業日は色分けせず同じ表示にする。
-const CLOSED_BG='#e2e5ea', CLOSED_FG='#8b93a1', CLOSED_BAR='inset 4px 0 0 #9aa1ac', CLOSED_LABEL='休業日';
+// 配色はスタッフ休日（オレンジ #f97316 系）に揃える（2026-08-01 ユーザー決定・PC版と同値）。
+const CLOSED_BG='#ffedd5', CLOSED_FG='#b45309', CLOSED_BAR='inset 4px 0 0 #f97316', CLOSED_LABEL='休業日';
 // 休業日判定（PC版 AppInner の isClosed と同一）: 店舗別の定休曜日(cdow) → 店舗別の個別休業日(cdate)
 // → 第2火曜（両店共通・override-openで通常営業に戻せる）。日付文字列はゼロ詰め（PC版の保存形式）。
 const calIsClosed=(date,cDays=[],cDates=[],ovOpen=[])=>{
@@ -447,7 +448,7 @@ const CalendarView=({inspData,closedDays,closedDates,overrideOpen,vsId,onSelectD
                       </div>
                     </div>
                   )}
-                  {closed&&<div style={{textAlign:'center',fontSize:9,color:'#6b7280',fontWeight:800,marginTop:6,letterSpacing:1}}>{CLOSED_LABEL}</div>}
+                  {closed&&<div style={{textAlign:'center',fontSize:12,color:CLOSED_FG,fontWeight:900,marginTop:5,letterSpacing:0.5}}>{CLOSED_LABEL}</div>}
                 </div>
               );
             })}
@@ -925,11 +926,11 @@ const ScheduleView=({inspData,schedDataH,schedDataS,memoDataH,memoDataS,loanerRe
       </div>
       <div style={{flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch'}}>
         {isHoliday&&(
-          <div style={{margin:'10px 12px 0',display:'flex',alignItems:'center',gap:8,padding:'9px 11px',background:'#f1f5f9',border:'2px solid #cbd5e1',borderRadius:10}}>
+          <div style={{margin:'10px 12px 0',display:'flex',alignItems:'center',gap:8,padding:'9px 11px',background:CLOSED_BG,border:'2px solid #fdba74',borderRadius:10}}>
             <span style={{fontSize:16}}>🏖</span>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontWeight:900,fontSize:12,color:'#475569'}}>休業日（{vsId==='honten'?'本店':'三田店'}）</div>
-              <div style={{fontSize:10,color:'#64748b',marginTop:1}}>新規の車検・整備予約、この日への入庫・納車は登録できません</div>
+              <div style={{fontWeight:900,fontSize:12,color:CLOSED_FG}}>休業日（{vsId==='honten'?'本店':'三田店'}）</div>
+              <div style={{fontSize:10,color:CLOSED_FG,marginTop:1}}>新規の車検・整備予約、この日への入庫・納車は登録できません</div>
             </div>
           </div>
         )}

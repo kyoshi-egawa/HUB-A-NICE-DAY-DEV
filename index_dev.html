@@ -94,7 +94,7 @@
 const { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } = React;
 
 // ★ バージョン管理：アップデートのたびにここだけ変更する
-const APP_VERSION = '1.73';
+const APP_VERSION = '1.74';
 
 
 
@@ -287,14 +287,16 @@ const COURSES = [
 //   定休日・第2火曜・手動の休業日は「色分けせず同じ見た目」にする（2026-07-30 ユーザー決定・A案）。
 //   従来は極薄の斜線（#f9fafb/#f3f4f6）で、しかも空の6コマが営業日と同じに描かれるため
 //   「まだ予約を入れられる日」に見えていた。ベタ塗りで沈め、コマを消し、中央に「休業日」と出す。
-const CLOSED_BG    = '#e2e5ea'; // 休業日セルの背景（ベタ塗り）
-const CLOSED_FG    = '#8b93a1'; // 休業日セルの日付・文字色
-const CLOSED_BAR   = 'inset 4px 0 0 #9aa1ac'; // 左端の縦バー＝隣の営業日との区切り
+//   配色はスタッフ休日（オレンジ #f97316 系）に揃える（2026-08-01 ユーザー決定）。
+//   スタッフ休日セル（背景 #fff7ed＋オレンジ枠）より一段濃い背景にして、休業日と休日を見分けられるようにしている。
+const CLOSED_BG    = '#ffedd5'; // 休業日セルの背景（ライトオレンジのベタ塗り）
+const CLOSED_FG    = '#b45309'; // 休業日セルの日付・文字色
+const CLOSED_BAR   = 'inset 4px 0 0 #f97316'; // 左端の縦バー＝隣の営業日との区切り（オレンジ）
 const CLOSED_LABEL = '休業日';
 // 休業日セルの中央に置くラベル（topOffset=日付表示の下から始める）
 const ClosedMark = ({small,topOffset=26})=>(
   <div style={{position:'absolute',left:6,right:6,top:topOffset,bottom:6,display:'flex',alignItems:'center',
-    justifyContent:'center',fontSize:small?11:13,fontWeight:800,color:'#6b7280',letterSpacing:small?1:2,
+    justifyContent:'center',fontSize:small?14:18,fontWeight:900,color:CLOSED_FG,letterSpacing:small?1:2,
     pointerEvents:'none'}}>{CLOSED_LABEL}</div>
 );
 // ── 月間休日数バッジ（スタッフ休日カレンダーの上部）──
@@ -2971,26 +2973,15 @@ const HolidayModal=memo(({isOpen,onClose,closedDays,setClosedDays,closedDates,se
 
             {/* 凡例 */}
             <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:8,fontSize:10,color:'#6b7280'}}>
-              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #ef4444',border:'1px solid #cbd0d8',borderRadius:2,display:'inline-block'}}/>手動休業日（クリックで解除）</span>
-              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #f59e0b',border:'1px solid #cbd0d8',borderRadius:2,display:'inline-block'}}/>第2火曜（自動）</span>
-              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #9aa1ac',border:'1px solid #cbd0d8',borderRadius:2,display:'inline-block'}}/>毎週定休</span>
+              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #ef4444',border:'1px solid #fdba74',borderRadius:2,display:'inline-block'}}/>手動休業日（クリックで解除）</span>
+              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #f59e0b',border:'1px solid #fdba74',borderRadius:2,display:'inline-block'}}/>第2火曜（自動）</span>
+              <span style={{display:'flex',alignItems:'center',gap:3}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #f97316',border:'1px solid #fdba74',borderRadius:2,display:'inline-block'}}/>毎週定休</span>
             </div>
             <div style={{fontSize:10,color:'#6b7280',marginTop:4}}>💡 第2火曜日をクリック→「通営」表示に変更（通常営業に戻す）。再クリックで定休に戻します。</div>
           </div>
 
-          {/* 手動設定済み日付一覧 */}
-          {closedDates.length>0&&(
-            <div style={{marginBottom:8}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#374151',marginBottom:6}}>手動設定の休業日</div>
-              <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
-                {closedDates.map(d=>(
-                  <span key={d} style={{display:'flex',alignItems:'center',gap:3,padding:'3px 9px',background:'#fee2e2',border:'1px solid #fca5a5',borderRadius:20,fontSize:11,color:'#dc2626',fontWeight:600}}>
-                    {d}<button onClick={()=>removeDate(d)} style={{background:'none',border:'none',cursor:'pointer',color:'#dc2626',padding:0,lineHeight:1,marginLeft:2,fontSize:13}}>×</button>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
+          {/* 手動設定済み日付の一覧は廃止（2026-08-01 ユーザー指示）。
+              カレンダー上で「休」表示＋クリックで解除できるので、下に日付を並べる必要がない。 */}
         </div>
         <div style={{padding:'12px 18px',borderTop:'1px solid #e5e7eb',flexShrink:0}}>
           <button onClick={onClose} style={{width:'100%',padding:'13px 0',background:vsStore?`linear-gradient(135deg,${vsStore.color},${vsStore.accent})`:'linear-gradient(135deg,#dc2626,#b91c1c)',color:'white',border:'none',borderRadius:10,fontWeight:900,cursor:'pointer',fontSize:15,boxShadow:`0 4px 12px ${vsStore?vsStore.color+'4d':'rgba(220,38,38,0.3)'}`,letterSpacing:'0.5px'}}>✅ 確定して閉じる</button>
@@ -3556,7 +3547,7 @@ const StaffCalendarModal=memo(({isOpen,onClose,initMonth,currentUser,
                         </span>
                         <span style={{display:'flex',gap:2,alignItems:'center'}}>
                           {isHol&&!isCl&&<span style={{fontSize:8,color:'#dc2626'}}>祝</span>}
-                          {isCl&&<span style={{fontSize:10,color:'#6b7280',fontWeight:800,letterSpacing:1}}>{CLOSED_LABEL}</span>}
+                          {isCl&&<span style={{fontSize:13,color:CLOSED_FG,fontWeight:900,letterSpacing:1}}>{CLOSED_LABEL}</span>}
                           {selDayoff&&<span style={{fontSize:11}}>🏖</span>}
                           {selLeave&&<span style={{fontSize:11}}>📋</span>}
                         </span>
@@ -8902,7 +8893,7 @@ function AppInner() {
                       </span>
                     ))}
                     <span style={{fontWeight:800,fontSize:13,color:'#059669'}}>合計 {total}台</span>
-                    {(cDays.length>0||cDates.length>0)&&<span style={{display:'flex',alignItems:'center',gap:3,color:'#6b7280',marginLeft:4}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #9aa1ac',display:'inline-block',borderRadius:2,border:'1px solid #cbd0d8'}}/>{CLOSED_LABEL}</span>}
+                    {(cDays.length>0||cDates.length>0)&&<span style={{display:'flex',alignItems:'center',gap:3,color:'#6b7280',marginLeft:4}}><span style={{width:12,height:12,background:CLOSED_BG,boxShadow:'inset 3px 0 0 #f97316',display:'inline-block',borderRadius:2,border:'1px solid #fdba74'}}/>{CLOSED_LABEL}</span>}
                     <span style={{display:'flex',alignItems:'center',gap:4,marginLeft:4}}>
                       <span style={{width:12,height:12,borderRadius:2,background:'#2563eb',color:'white',fontSize:7,fontWeight:800,display:'inline-flex',alignItems:'center',justifyContent:'center'}}>本</span>
                       <span style={{fontSize:10,color:'#6b7280'}}>本店</span>
