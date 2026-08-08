@@ -19,7 +19,7 @@
 4. 右上「デプロイ」→「デプロイを管理」→ 鉛筆(編集) → バージョン「**新バージョン**」→「デプロイ」。
    - **デプロイID・URLは変わらない**（`AKfycbxy…B1ST3`）。トリガー再登録は不要。
 5. 動作確認（任意）: GASエディタで関数を実行しなくてもOK。ブラウザで
-   `<GAS_URL>?action=caps&apiKey=hub2026SandaHonten!9xKy` を開き、
+   `<GAS_URL>?action=caps&apiKey=hub2026co-f466kt5vs3vnDQDPuwWeS6XM` を開き、
    `{"patchInsp":true,"notifyFail":true,"snapshots":true,"ver":"v11"}` が返れば成功。
    （現状は未デプロイなので `null` が返る。）
 

@@ -33,7 +33,7 @@
 const SHEET_NAME = 'hubdata';
 const BACKUP_SHEET_PREFIX = 'backup_';
 const BACKUP_KEEP_DAYS = 90;
-const HUB_API_KEY = 'hub2026SandaHonten!9xKy';
+const HUB_API_KEY = 'hub2026co-f466kt5vs3vnDQDPuwWeS6XM';
 
 var BIG_THRESHOLD = 30000;            // values longer than this go to Drive
 var FILE_MARKER = '__DRIVEFILE__';    // cell marker meaning "value is in a Drive file"

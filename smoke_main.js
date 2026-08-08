@@ -126,15 +126,20 @@ const GAS_HOST = 'https://script.google.com';
   await page2.goto(`http://127.0.0.1:${PORT}/customers.html`, { waitUntil: 'domcontentloaded' });
   // 顧客ファイルのGAS読込は時に30秒超かかる（index_main巡回直後はGASスロットリングで特に遅い）。
   // 固定待機だと遅延で誤検知するためポーリング（最大44秒）。
+  // 顧客ファイルが0件のときは「Excelファイルをインポートしてください」が出るのが正常な空状態。
+  // （会社アカウント移行での初期化直後がこれ。データ有無どちらでも描画できていればOKとする）
+  const CUST_LOADED = '総件数';
+  const CUST_EMPTY = 'Excelファイルをインポートしてください';
   let custBody = '';
   for (let i = 0; i < 22; i++) {
     await page2.waitForTimeout(2000);
     custBody = await page2.locator('body').innerText().catch(() => '');
-    if (custBody.includes('総件数')) break;
+    if (custBody.includes(CUST_LOADED) || custBody.includes(CUST_EMPTY)) break;
   }
   await checkPage(page2, '顧客リスト');
-  if (!custBody.includes('総件数')) { problems.push('顧客リスト: 画面が表示されていない'); console.log('  [debug] custBody len=' + custBody.length + ' first120="' + custBody.slice(0, 120).replace(/\n/g, ' ') + '"'); }
-  else console.log('  ✔ 顧客リスト表示');
+  if (custBody.includes(CUST_LOADED)) console.log('  ✔ 顧客リスト表示');
+  else if (custBody.includes(CUST_EMPTY)) console.log('  ✔ 顧客リスト表示（顧客ファイル0件・インポート案内）');
+  else { problems.push('顧客リスト: 画面が表示されていない'); console.log('  [debug] custBody len=' + custBody.length + ' first120="' + custBody.slice(0, 120).replace(/\n/g, ' ') + '"'); }
   await page2.close();
 
   // ── mobile.html: ログイン→3タブ巡回 ──
